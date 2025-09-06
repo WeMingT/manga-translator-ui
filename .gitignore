@@ -31,3 +31,7 @@ result/
 
 # Wheel files
 *.whl
+
+# Backup files
+*.bak
+*.backup
