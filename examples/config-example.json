@@ -6,7 +6,7 @@
         "translator": "chatgpt",
         "target_lang": "CHS",
         "no_text_lang_skip": false,
-        "gpt_config": "../examples/gpt_config-example.yaml"
+        "gpt_config": "./examples/gpt_config-example.yaml"
     },
     "ocr": {
         "use_mocr_merge": false,
@@ -77,5 +77,5 @@
         "batch_size": 1,
         "batch_concurrent": false
     },
-    "last_output_path": "D:/xiazai/图片助手(ImageAssistant)_批量图片下载器/並行世界の君君僕僕 第16話(1)"
+    "last_output_path": ""
 }
