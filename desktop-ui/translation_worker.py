@@ -169,9 +169,8 @@ def main():
         
         # 处理每个文件
         for i, file_path in enumerate(resolved_files):
-            flush_print(f"
-=== [{i+1}/{len(resolved_files)}] 处理文件: {os.path.basename(file_path)} ===")
-            
+            flush_print(f"\n=== [{i+1}/{len(resolved_files)}] 处理文件: {os.path.basename(file_path)} ===")
+
             try:
                 # 加载图片
                 flush_print(f"  -> 加载图片: {os.path.basename(file_path)}")
@@ -187,17 +186,26 @@ def main():
                 ctx = loop.run_until_complete(translator.translate(image, config, image_name=image.name))
                 loop.close()
                 
-                if ctx and ctx.result:
-                    os.makedirs(output_folder, exist_ok=True)
-                    output_filename = "translated_" + os.path.basename(file_path)
-                    final_output_path = os.path.join(output_folder, output_filename)
-                    
-                    image_to_save = ctx.result
-                    if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                        image_to_save = image_to_save.convert('RGB')
-                    
-                    image_to_save.save(final_output_path)
-                    flush_print(f"  -> ✅ 翻译完成: {os.path.basename(final_output_path)}")
+                # 检查任务是否成功
+                # 在仅保存文本模式下，ctx.result为None也是一种成功状态
+                cli_params = config_dict.get('cli', {})
+                save_text_mode = cli_params.get('save_text', False)
+                task_successful = (ctx and ctx.result) or (ctx and save_text_mode and ctx.result is None)
+
+                if task_successful:
+                    if ctx.result:
+                        os.makedirs(output_folder, exist_ok=True)
+                        output_filename = "translated_" + os.path.basename(file_path)
+                        final_output_path = os.path.join(output_folder, output_filename)
+                        
+                        image_to_save = ctx.result
+                        if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
+                            image_to_save = image_to_save.convert('RGB')
+                        
+                        image_to_save.save(final_output_path)
+                        flush_print(f"  -> ✅ 翻译完成: {os.path.basename(final_output_path)}")
+                    else:
+                        flush_print(f"  -> ✅ 文本导出成功: {os.path.basename(file_path)}")
                     
                     # 显示识别的文本信息
                     if hasattr(ctx, 'text_regions') and ctx.text_regions:
@@ -214,8 +222,7 @@ def main():
                 import traceback
                 flush_print(traceback.format_exc())
         
-        flush_print("
-=== 翻译进程完成 ===")
+        flush_print("\n=== 翻译进程完成 ===")
         
     except Exception as e:
         flush_print(f"翻译工作进程出错: {e}")
