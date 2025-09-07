@@ -61,13 +61,7 @@ def get_manga_translator_classes():
         _manga_translator_module = (MangaTranslator, TranslationInterrupt)
     return _manga_translator_module
 
-def get_workflow_service():
-    """延迟导入工作流服务"""
-    global _workflow_service_module
-    if _workflow_service_module is None:
-        from services.workflow_service import generate_text_from_template, should_restore_translation_to_text, process_json_file_list, get_default_template_path
-        _workflow_service_module = (generate_text_from_template, should_restore_translation_to_text, process_json_file_list, get_default_template_path)
-    return _workflow_service_module
+
 
 # 配置类已经直接导入，不需要延迟加载函数
 
@@ -121,6 +115,34 @@ class AppController:
         self.root_dir = os.path.dirname(os.path.abspath(__file__))
         self.user_config_path = resource_path(os.path.join("examples", "config-example.json"))
         self.env_path = os.path.join(self.root_dir, "..", ".env")
+
+        # Define a schema for parameters, especially for those that can be null but should be booleans
+        self.param_schema = {
+            "cli.verbose": bool,
+            "cli.use_gpu": bool,
+            "cli.skip_no_text": bool,
+            "cli.save_text": bool,
+            "cli.load_text": bool,
+            "cli.template": bool,
+            "cli.use_mtpe": bool,
+            "cli.use_gpu_limited": bool,
+            "cli.overwrite": bool,
+            "cli.prep_manual": bool,
+            "cli.batch_concurrent": bool,
+            "cli.ignore_errors": bool,
+            "render.disable_font_border": bool,
+            "render.uppercase": bool,
+            "render.lowercase": bool,
+            "render.no_hyphenation": bool,
+            "render.rtl": bool,
+            "upscale.revert_upscaling": bool,
+            "translator.no_text_lang_skip": bool,
+            "detector.det_rotate": bool,
+            "detector.det_auto_rotate": bool,
+            "detector.det_invert": bool,
+            "detector.det_gamma_correct": bool,
+            "ocr.use_mocr_merge": bool,
+        }
         
         # 初始化容器和状态
         self.main_view_widgets = {}
@@ -652,13 +674,17 @@ class AppController:
                 widget_frame.grid(row=row, column=1, padx=5, pady=2, sticky="ew")
                 continue
 
+            is_bool_by_schema = self.param_schema.get(full_key) is bool
+
             if key == 'format':
                 formats = ["不指定"] + list(OUTPUT_FORMATS.keys())
                 widget = ctk.CTkOptionMenu(parent_frame, values=formats, command=lambda v, k=full_key: self._save_widget_change(k, value=v))
                 widget.set(str(value) if value else "不指定")
-            elif isinstance(value, bool):
-                widget = ctk.CTkSwitch(parent_frame, text="", onvalue=True, offvalue=False, command=lambda k=full_key: self._save_widget_change(k))
-                if value: widget.select()
+            elif is_bool_by_schema or isinstance(value, bool):
+                current_value = value if isinstance(value, bool) else False
+                widget = ctk.CTkSwitch(parent_frame, text="", onvalue=True, offvalue=False)
+                widget.configure(command=lambda w=widget, k=full_key: self._save_widget_change(k, w))
+                if current_value: widget.select()
                 else: widget.deselect()
             elif isinstance(value, (int, float)):
                 entry_var = ctk.StringVar(value=str(value))
@@ -847,8 +873,12 @@ class AppController:
                 config_data = json.load(f)
 
             # If value is not provided directly, get it from the widget
-            if value is None and widget is not None:
-                value = self._get_widget_value(widget)
+            if value is None:
+                if widget is None:
+                    widget = self.parameter_widgets.get(full_key)
+                
+                if widget is not None:
+                    value = self._get_widget_value(widget)
             
             self.update_log(f"[DEBUG] Value to save: {value} (Type: {type(value)})\n")
 
@@ -1086,69 +1116,7 @@ class AppController:
         initial_renderer = config.get("render", {}).get("renderer", "default")
         self._on_renderer_changed(initial_renderer)
 
-    async def _process_txt_import_async(self):
-        """异步处理TXT文件导入到JSON，避免UI卡死"""
-        try:
-            from services.workflow_service import import_with_custom_template, get_template_path_from_config
-
-            template_path = get_template_path_from_config()
-            successful_imports = 0
-            total_to_import = 0
-            files_to_process = self._resolve_input_files()
-
-            # 先统计需要处理的文件
-            files_to_import = []
-            for file_path in files_to_process:
-                json_path = os.path.splitext(file_path)[0] + "_translations.json"
-                txt_path = os.path.splitext(file_path)[0] + "_translations.txt"
-                
-                if os.path.exists(txt_path) and os.path.exists(json_path):
-                    files_to_import.append((txt_path, json_path))
-                elif not os.path.exists(json_path):
-                    self.update_log(f"跳过导入，因为 {os.path.basename(json_path)} 不存在。\n")
-                else:
-                    self.update_log(f"跳过导入，因为 {os.path.basename(txt_path)} 不存在。\n")
-
-            total_to_import = len(files_to_import)
-            
-            if total_to_import == 0:
-                self.update_log("未找到对应的TXT/JSON文件对进行导入预处理。\n")
-                return False
-
-            self.update_log(f"找到 {total_to_import} 个文件对需要导入处理...\n")
-            
-            # 异步处理每个文件
-            for i, (txt_path, json_path) in enumerate(files_to_import):
-                if self.stop_requested.is_set():
-                    self.update_log("TXT导入过程被用户停止。\n")
-                    break
-
-                self.update_log(f"[{i+1}/{total_to_import}] 正在从 {os.path.basename(txt_path)} 导入到 {os.path.basename(json_path)}...\n")
-                
-                # 使用 run_in_executor 异步执行IO操作
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None, 
-                    import_with_custom_template,
-                    txt_path, json_path, template_path
-                )
-                
-                self.update_log(f"导入结果: {result}\n")
-                if "成功" in result:
-                    successful_imports += 1
-                
-                # 短暂暂停让UI有机会更新
-                await asyncio.sleep(0.1)
-
-            self.update_log(f"导入预处理完成: {successful_imports}/{total_to_import} 个文件被成功更新。\n")
-            return successful_imports > 0
-
-        except Exception as e:
-            self.update_log(f"TXT导入过程中发生错误: {e}\n")
-            import traceback
-            self.update_log(f"详细错误信息: {traceback.format_exc()}\n")
-            return False
-
+    
     def add_files(self):
         files = filedialog.askopenfilenames(parent=self.app)
         for f in files:
@@ -1268,31 +1236,33 @@ class AppController:
         )
 
     def _run_full_pipeline_thread(self):
-        # Check if import is needed
-        config_dict_for_check = self.get_config_from_widgets(as_dict=True)
-        cli_params_for_check = config_dict_for_check.get('cli', {})
-        load_text_enabled = cli_params_for_check.get('load_text', False)
-        template_enabled = cli_params_for_check.get('template', False)
+        config_dict = self.get_config_from_widgets(as_dict=True)
+        cli_params = config_dict.get('cli', {})
+        template_mode = cli_params.get('template', False)
+        save_text = cli_params.get('save_text', False)
+        load_text = cli_params.get('load_text', False)
 
-        if load_text_enabled and template_enabled:
-            self.update_log("检测到加载文本和模板模式同时开启，正在执行从TXT文件导入翻译...\n")
-            
-            try:
-                # Run the import process SYNCHRONOUSLY within this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(self._process_txt_import_async())
-                loop.close()
-                if result is False:
-                    self.update_log("TXT导入预处理失败，任务中止。\n")
+        if template_mode:
+            if save_text:
+                self.update_log("模板模式 + 保存文本：正在执行导出...\n")
+                # 使用线程安全的方式运行异步导出
+                def run_export():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self._process_txt_export_async())
+                    loop.close()
                     self.app.after(0, self._reset_start_button)
-                    return
-            except Exception as e:
-                self.update_log(f"启动TXT导入时出错: {e}\n")
-                self.app.after(0, self._reset_start_button)
-                return
-        
-        # Now that import is done (or was not needed), run the main translation process
+                
+                threading.Thread(target=run_export, daemon=True).start()
+                return # 导出后停止
+            
+            elif load_text:
+                self.update_log("模板模式 + 加载文本：TXT导入已在主流程中完成。\n")
+                # TXT导入现在在manga_translator.py主流程中直接处理，不需要UI预处理
+                # 继续正常的翻译处理
+
+        # 如果不是模板模式下的特殊操作，则执行完整翻译流程
+        self.update_log("正在执行完整翻译流程...\n")
         self.run_translation_thread()
 
     def start_translation(self):
@@ -1315,8 +1285,7 @@ class AppController:
             font_filename = render_config.get('font_path')
             if font_filename:
                 # 构建完整的字体路径
-                font_full_path = os.path.join(os.path.dirname(__file__), '..', 'fonts', font_filename)
-                font_full_path = os.path.abspath(font_full_path)
+                font_full_path = resource_path(os.path.join('fonts', font_filename))
                 if os.path.exists(font_full_path):
                     translator_params['font_path'] = font_full_path
                     self.update_log(f"设置翻译器字体路径: {font_full_path}\n")
@@ -1344,7 +1313,7 @@ class AppController:
             messagebox.showerror("初始化错误", f"初始化翻译引擎时出错: {e}")
             return
 
-        if self.translation_process and self.translation_process.is_alive():
+        if self.translation_process and self.translation_process.poll() is None:
             self.update_log("\n翻译已在运行。请使用停止按钮终止当前翻译。")
             return
 
@@ -1356,6 +1325,41 @@ class AppController:
             hover_color=("#C53929", "#B03021")
         )
 
+        # --- Pre-translation Hooks (e.g., text import) ---
+        config_dict_for_check = self.get_config_from_widgets(as_dict=True)
+        cli_params_for_check = config_dict_for_check.get('cli', {})
+        load_text_enabled = cli_params_for_check.get('load_text', False)
+        template_enabled = cli_params_for_check.get('template', False)
+
+        if load_text_enabled and template_enabled:
+            self.update_log("检测到加载文本和模板模式同时开启，正在执行从TXT文件导入翻译...\n")
+            
+            # Define a wrapper to run the async import in a thread
+            def run_import_in_thread():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    result = loop.run_until_complete(self._process_txt_import_async())
+                    loop.close()
+                    if result is False:
+                        self.update_log("TXT导入预处理失败，任务中止。\n")
+                        self.app.after(0, self._reset_start_button)
+                        return
+                    # If import is successful, proceed to translation
+                    self.app.after(0, self._proceed_with_translation)
+                except Exception as e:
+                    self.update_log(f"启动TXT导入时出错: {e}\n")
+                    self.app.after(0, self._reset_start_button)
+            
+            # Start the import process in a separate thread to avoid blocking UI
+            import_thread = threading.Thread(target=run_import_in_thread, daemon=True)
+            import_thread.start()
+        else:
+            # If no import is needed, proceed directly to translation
+            self._proceed_with_translation()
+
+    def _proceed_with_translation(self):
+        """Continues with the translation process after pre-hooks."""
         # 创建翻译配置文件
         temp_config_path = self._create_temp_config()
         
@@ -1377,8 +1381,8 @@ class AppController:
                 universal_newlines=True,
                 encoding='utf-8',  # 强制使用UTF-8编码
                 errors='ignore',   # 忽略编码错误
-                env=dict(os.environ, 
-                        PYTHONUNBUFFERED='1', 
+                env=dict(os.environ,
+                        PYTHONUNBUFFERED='1',
                         PYTHONIOENCODING='utf-8',
                         PYTHONUTF8='1'),  # 强制Python使用UTF-8
                 cwd=os.path.dirname(__file__)
@@ -1397,6 +1401,25 @@ class AppController:
             self.update_log(f"详细错误: {traceback.format_exc()}\n")
             self._reset_start_button()
 
+    def _create_temp_config(self):
+        """创建临时配置文件供子进程使用"""
+        temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        temp_config_path = os.path.join(temp_dir, 'translation_config.json')
+        
+        config_data = {
+            'config_dict': self.get_config_from_widgets(as_dict=True),
+            'input_files': self.input_files,
+            'output_folder': self.main_view_widgets['output_folder_entry'].get(),
+            'root_dir': self.root_dir
+        }
+        
+        with open(temp_config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+        
+        return temp_config_path
+    
     def _create_temp_config(self):
         """创建临时配置文件供子进程使用"""
         temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
@@ -1477,6 +1500,15 @@ def setup_logging():
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    return os.path.join(base_path, relative_path)
+
 def main():
     try:
         if len(sys.argv) != 2:
@@ -1527,8 +1559,7 @@ def main():
         font_filename = render_config.get('font_path')
         if font_filename:
             # 构建完整的字体路径
-            font_full_path = os.path.join(os.path.dirname(__file__), '..', 'fonts', font_filename)
-            font_full_path = os.path.abspath(font_full_path)
+            font_full_path = resource_path(os.path.join('fonts', font_filename))
             if os.path.exists(font_full_path):
                 translator_params['font_path'] = font_full_path
                 flush_print(f"设置翻译器字体路径: {font_full_path}")
@@ -1591,8 +1622,8 @@ def main():
         
         # 处理每个文件
         for i, file_path in enumerate(resolved_files):
-            flush_print(f"\n=== [{i+1}/{len(resolved_files)}] 处理文件: {os.path.basename(file_path)} ===")
-            
+            flush_print(f"\\n=== [{i+1}/{len(resolved_files)}] 处理文件: {os.path.basename(file_path)} ===")
+
             try:
                 # 加载图片
                 flush_print(f"  -> 加载图片: {os.path.basename(file_path)}")
@@ -1608,17 +1639,26 @@ def main():
                 ctx = loop.run_until_complete(translator.translate(image, config, image_name=image.name))
                 loop.close()
                 
-                if ctx and ctx.result:
-                    os.makedirs(output_folder, exist_ok=True)
-                    output_filename = "translated_" + os.path.basename(file_path)
-                    final_output_path = os.path.join(output_folder, output_filename)
-                    
-                    image_to_save = ctx.result
-                    if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                        image_to_save = image_to_save.convert('RGB')
-                    
-                    image_to_save.save(final_output_path)
-                    flush_print(f"  -> ✅ 翻译完成: {os.path.basename(final_output_path)}")
+                # 检查任务是否成功
+                # 在仅保存文本模式下，ctx.result为None也是一种成功状态
+                cli_params = config_dict.get('cli', {})
+                save_text_mode = cli_params.get('save_text', False)
+                task_successful = (ctx and ctx.result) or (ctx and save_text_mode and ctx.result is None)
+
+                if task_successful:
+                    if ctx.result:
+                        os.makedirs(output_folder, exist_ok=True)
+                        output_filename = "translated_" + os.path.basename(file_path)
+                        final_output_path = os.path.join(output_folder, output_filename)
+                        
+                        image_to_save = ctx.result
+                        if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
+                            image_to_save = image_to_save.convert('RGB')
+                        
+                        image_to_save.save(final_output_path)
+                        flush_print(f"  -> ✅ 翻译完成: {os.path.basename(final_output_path)}")
+                    else:
+                        flush_print(f"  -> ✅ 文本导出成功: {os.path.basename(file_path)}")
                     
                     # 显示识别的文本信息
                     if hasattr(ctx, 'text_regions') and ctx.text_regions:
@@ -1635,7 +1675,7 @@ def main():
                 import traceback
                 flush_print(traceback.format_exc())
         
-        flush_print("\n=== 翻译进程完成 ===")
+        flush_print("\\n=== 翻译进程完成 ===")
         
     except Exception as e:
         flush_print(f"翻译工作进程出错: {e}")
@@ -1659,6 +1699,136 @@ if __name__ == '__main__':
             f.write(script_content)
         
         return script_path
+    
+    def _monitor_translation_simple(self):
+        """简化的翻译进程监控"""
+        try:
+            self.update_log("开始监控翻译进程输出...\n")
+            
+            while self.translation_process and self.translation_process.poll() is None:
+                try:
+                    line = self.translation_process.stdout.readline()
+                    if line:
+                        line_text = line.strip()
+                        if line_text:
+                            # 使用partial来避免闭包问题
+                            from functools import partial
+                            update_func = partial(self._update_log_safe, line_text + '\n')
+                            self.app.after(0, update_func)
+                except UnicodeDecodeError as decode_error:
+                    from functools import partial
+                    error_func = partial(self._update_log_safe, f"编码错误，跳过一行: {decode_error}\n")
+                    self.app.after(0, error_func)
+                    continue
+                except Exception as read_error:
+                    from functools import partial
+                    error_func = partial(self._update_log_safe, f"读取输出时出错: {read_error}\n")
+                    self.app.after(0, error_func)
+                    break
+            
+            # 读取剩余输出
+            try:
+                remaining_output, _ = self.translation_process.communicate(timeout=5)
+                if remaining_output:
+                    lines = remaining_output.strip().split('\n')
+                    for output_line in lines:
+                        if output_line.strip():
+                            from functools import partial
+                            final_func = partial(self._update_log_safe, output_line.strip() + '\n')
+                            self.app.after(0, final_func)
+            except subprocess.TimeoutExpired:
+                from functools import partial
+                timeout_func = partial(self._update_log_safe, "等待进程结束超时\n")
+                self.app.after(0, timeout_func)
+            except UnicodeDecodeError as decode_error:
+                from functools import partial
+                decode_func = partial(self._update_log_safe, f"最终输出编码错误: {decode_error}\n")
+                self.app.after(0, decode_func)
+            except Exception as comm_error:
+                from functools import partial
+                comm_func = partial(self._update_log_safe, f"读取最终输出时出错: {comm_error}\n")
+                self.app.after(0, comm_func)
+            
+            # 结束处理
+            return_code = self.translation_process.returncode if self.translation_process else None
+            from functools import partial
+            end_func = partial(self._update_log_safe, f"翻译进程结束，返回码: {return_code}\n")
+            self.app.after(0, end_func)
+            
+            # --- Post-translation Hooks (e.g., text export) ---
+            self.app.after(100, self._run_post_translation_hooks)
+            
+        except Exception as monitor_error:
+            from functools import partial
+            monitor_func = partial(self._update_log_safe, f"监控进程时出错: {monitor_error}\n")
+            self.app.after(0, monitor_func)
+            self.app.after(0, self._reset_start_button)
+
+    def _run_post_translation_hooks(self):
+        """Runs tasks after the translation subprocess is confirmed to be finished."""
+        config_dict_for_check = self.get_config_from_widgets(as_dict=True)
+        cli_params_for_check = config_dict_for_check.get('cli', {})
+        save_text_enabled = cli_params_for_check.get('save_text', False)
+        template_enabled = cli_params_for_check.get('template', False)
+
+        if save_text_enabled and template_enabled:
+            self.update_log("保存文本+模板模式：TXT导出已在主流程中完成。\n")
+            # TXT导出现在在manga_translator.py主流程中直接处理，不需要后处理
+            self._reset_start_button()
+            self.check_and_prompt_editor_entry()
+        else:
+            # If no export is needed, just reset the button and do final checks
+            self._reset_start_button()
+            self.check_and_prompt_editor_entry()
+    
+    def _update_log_safe(self, text):
+        """安全的日志更新方法"""
+        self.update_log(text)
+    
+    def _monitor_translation_process_simple(self):
+        """简化的进程监控 - 使用队列确保日志不丢失"""
+        try:
+            while self.translation_process and self.translation_process.poll() is None:
+                # 读取stdout
+                if self.translation_process.stdout:
+                    try:
+                        line = self.translation_process.stdout.readline()
+                        if line and line.strip():
+                            self.log_queue.put(('stdout', line.strip()))
+                    except:
+                        pass
+                
+                # 读取stderr  
+                if self.translation_process.stderr:
+                    try:
+                        line = self.translation_process.stderr.readline()
+                        if line and line.strip():
+                            self.log_queue.put(('stderr', line.strip()))
+                    except:
+                        pass
+                        
+            # 进程结束，读取剩余输出
+            if self.translation_process:
+                try:
+                    stdout, stderr = self.translation_process.communicate(timeout=3)
+                    
+                    if stdout:
+                        for line in stdout.strip().split('\n'):
+                            if line.strip():
+                                self.log_queue.put(('stdout', line.strip()))
+                                
+                    if stderr:
+                        for line in stderr.strip().split('\n'):
+                            if line.strip():
+                                self.log_queue.put(('stderr', line.strip()))
+                except:
+                    pass
+            
+            # 结束标记
+            self.log_queue.put(('end', None))
+            
+        except Exception as e:
+            self.log_queue.put(('error', f"监控进程出错: {e}"))
     
     def _monitor_translation_simple(self):
         """简化的翻译进程监控"""
@@ -1926,26 +2096,7 @@ if __name__ == '__main__':
                     
                     ctx = await self.service.translate(image, config, image_name=image.name)
 
-                    # --- Begin custom export logic for save_text + template mode ---
-                    try:
-                        cli_config = config_dict.get('cli', {})
-                        if cli_config.get('save_text') and cli_config.get('template'):
-                            json_path = os.path.splitext(file_path)[0] + "_translations.json"
-                            if os.path.exists(json_path):
-                                self.update_log(f"执行模板导出: {os.path.basename(json_path)}...\n")
-                                
-                                # Lazily import the required functions
-                                generate_text_from_template, _, _, get_default_template_path = get_workflow_service()
-                                template_path = get_default_template_path()
-                                
-                                # Run the export function
-                                export_result = generate_text_from_template(json_path, template_path)
-                                self.update_log(f"模板导出结果: {export_result}\n")
-                            else:
-                                self.update_log(f"跳过模板导出，因为未找到 {os.path.basename(json_path)}。\n")
-                    except Exception as e:
-                        self.update_log(f"执行模板导出时出错: {e}\n")
-                    # --- End custom export logic ---
+                    
 
                     if ctx and ctx.result:
                         final_output_dir = base_output_dir

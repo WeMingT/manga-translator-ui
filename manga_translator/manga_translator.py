@@ -398,6 +398,24 @@ class MangaTranslator:
         ctx.debug_folder = self._get_image_subfolder()
 
         if self.load_text:
+            # 加载文本+模板模式：先执行TXT导入JSON预处理
+            if self.template:
+                logger.info("Load text + Template mode: Importing TXT to JSON first...")
+                try:
+                    from services.workflow_service import smart_update_translations_from_images, get_template_path_from_config
+                    template_path = get_template_path_from_config()
+                    if template_path and os.path.exists(template_path):
+                        # 使用当前图片文件路径进行TXT导入JSON处理
+                        report = smart_update_translations_from_images([ctx.input], template_path)
+                        logger.info(f"TXT import result: {report}")
+                        if "错误" in report or "失败" in report:
+                            logger.warning("TXT import failed, but continuing with normal load text processing")
+                    else:
+                        logger.warning(f"Template file not found for import: {template_path}")
+                except Exception as e:
+                    logger.error(f"Failed to import TXT: {e}")
+                    logger.info("Continuing with normal load text processing despite import failure")
+            
             logger.info("Attempting to load translation from file...")
             loaded_regions, loaded_mask, mask_is_refined = self._load_text_and_regions_from_file(ctx.image_name, config)
             if loaded_regions:
@@ -453,7 +471,11 @@ class MangaTranslator:
                 ctx.result = dump_image(ctx.input, ctx.img_rendered, ctx.img_alpha)
                 return await self._revert_upscale(config, ctx)
             else:
-                logger.warning("--load-text specified, but no translation file found or failed to parse. Proceeding with normal translation.")
+                # 加载文本模式下JSON文件不存在或解析失败，应该报错而不是回退到翻译
+                json_path = os.path.splitext(ctx.image_name)[0] + '_translations.json'
+                error_msg = f"Load text mode failed: Translation file not found or invalid: {json_path}"
+                logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
 
         # 保存原始输入图片用于调试
         if self.verbose:
@@ -806,15 +828,31 @@ class MangaTranslator:
                 if not hasattr(region, 'target_lang') or not region.target_lang:
                     region.target_lang = config.translator.target_lang
 
-            # 保存文件
+            # 保存JSON文件
             if hasattr(ctx, 'image_name') and ctx.image_name:
                 self._save_text_to_file(ctx.image_name, ctx)
                 logger.info(f"JSON template saved for {os.path.basename(ctx.image_name)}.")
+                
+                # 直接导出TXT文件
+                try:
+                    json_path = os.path.splitext(ctx.image_name)[0] + '_translations.json'
+                    if os.path.exists(json_path):
+                        from services.workflow_service import generate_text_from_template, get_template_path_from_config
+                        template_path = get_template_path_from_config()
+                        if template_path and os.path.exists(template_path):
+                            result = generate_text_from_template(json_path, template_path)
+                            logger.info(f"TXT export result: {result}")
+                        else:
+                            logger.warning(f"Template file not found: {template_path}")
+                    else:
+                        logger.warning(f"JSON file not found for TXT export: {json_path}")
+                except Exception as e:
+                    logger.error(f"Failed to export TXT: {e}")
             else:
                 logger.warning("Could not save translation file, image_name not in context.")
 
             # 设置占位符结果并为当前文件提前返回，以便主循环可以处理下一个文件
-            ctx.result = ctx.upscaled 
+            ctx.result = None
             return ctx
         # 2. 模板配置+加载文本：TXT文件内容就是翻译，不进行翻译处理
         elif self.template and self.load_text:
@@ -844,8 +882,8 @@ class MangaTranslator:
         if self.save_text and not self.template:
             logger.info("Save Text only mode: Skipping rendering and inpainting.")
             # We need to set a result for the context, otherwise it might fail later
-            # Using the upscaled (or original) image as a placeholder result
-            ctx.result = ctx.upscaled 
+            # Using None as a placeholder result to prevent image export
+            ctx.result = None 
             # We can also skip the upscale reversion by returning early
             return ctx
 
