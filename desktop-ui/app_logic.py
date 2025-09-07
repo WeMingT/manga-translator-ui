@@ -161,6 +161,9 @@ class AppLogic:
                 self.state_manager.add_error_message("请先添加文件再开始任务")
                 return False
 
+            # TXT导入JSON预处理现在在manga_translator.py主流程中处理
+            # 不再需要UI预处理
+
             # 1. 获取最新的JSON配置 (用于翻译器本身)
             translator_json_config = self.config_service.get_config()
             if not translator_json_config:
@@ -264,6 +267,9 @@ class AppLogic:
                 'success_count': success_count,
                 'failure_count': failure_count
             })
+
+            # TXT导出工作流现在在manga_translator.py主流程中处理
+            # 不再需要UI后处理
             
         except Exception as e:
             self.logger.error(f"处理任务结果异常: {e}")
