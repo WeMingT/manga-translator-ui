@@ -393,12 +393,12 @@ class MouseEventHandler:
             
             # 优化：避免重复计算中心点
             if not center:
-                if hasattr(self.action_info, '_cached_center'):
-                    center = self.action_info._cached_center
+                if '_cached_center' in self.action_info:
+                    center = self.action_info['_cached_center']
                 else:
                     all_points = [tuple(p) for poly in lines for p in poly]
                     center = editing_logic.get_polygon_center(all_points)
-                    self.action_info._cached_center = center
+                    self.action_info['_cached_center'] = center
 
             # 优化：减少旋转计算
             if angle != 0:
