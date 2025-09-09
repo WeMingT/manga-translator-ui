@@ -284,17 +284,20 @@ class EditorFrame(ctk.CTkFrame):
     def _on_region_moved(self, index, old_data, new_data):
         self.regions_data[index] = new_data
         self.history_manager.save_state(ActionType.MOVE, index, old_data, new_data)
+        self._update_canvas_regions()  # 确保画布更新
         self._update_history_buttons()
 
     def _on_region_resized(self, index, old_data, new_data):
         self.regions_data[index] = new_data
         self.history_manager.save_state(ActionType.RESIZE, index, old_data, new_data)
+        self._update_canvas_regions()  # 确保画布更新
         self._update_history_buttons()
 
     def _on_region_rotated(self, index, old_data, new_data):
         print(f"_on_region_rotated called for index {index}")
         self.regions_data[index] = new_data
         self.history_manager.save_state(ActionType.ROTATE, index, old_data, new_data) # Using ROTATE for history
+        self._update_canvas_regions()  # 添加缺失的画布更新调用
         self._update_history_buttons()
 
     def _on_region_created(self, new_region):
@@ -1511,29 +1514,50 @@ class EditorFrame(ctk.CTkFrame):
             from tkinter import messagebox
 
             export_service = get_export_service()
-            output_dir = export_service.get_output_directory()
-
-            if not output_dir:
-                show_toast(self, "请先在主界面设置输出目录", level="error")
-                messagebox.showerror("错误", "未设置输出目录。请返回主界面设置输出目录。")
-                return
-
             config = self.config_service.get_config()
             output_format = export_service.get_output_format_from_config(config)
 
-            # Generate default filename
-            if hasattr(self, 'current_image_path') and self.current_image_path:
-                default_filename = export_service.generate_output_filename(self.current_image_path, output_format)
-            else:
-                default_filename = f"translated_image.{output_format or 'png'}"
-
-            output_path = os.path.join(output_dir, default_filename)
-
-            # Check if file exists and ask for overwrite confirmation
-            if os.path.exists(output_path):
-                if not messagebox.askyesno("确认覆盖", f"文件 '{default_filename}' 已存在于输出目录中。是否要覆盖它？"):
+            # 智能判断导出目标
+            current_file = getattr(self.file_manager, 'current_file_path', None) or self.current_image_path
+            
+            if current_file and current_file in self.translated_files:
+                # 情况1: 当前加载的是翻译图，直接覆盖翻译图文件
+                output_path = current_file
+                file_name = os.path.basename(output_path)
+                
+                print(f"[EXPORT] 检测到翻译图: {file_name}，将直接覆盖该文件")
+                
+                # 确认覆盖翻译图
+                if not messagebox.askyesno("确认覆盖", f"是否要覆盖当前的翻译图片 '{file_name}'？\n\n这将直接替换原有的翻译图片文件。"):
                     show_toast(self, "导出已取消", level="info")
                     return
+                    
+                show_toast(self, f"正在覆盖翻译图片: {file_name}", level="info")
+                
+            else:
+                # 情况2: 当前加载的是源图或其他情况，导出到输出目录
+                print(f"[EXPORT] 当前文件不是翻译图，将导出到输出目录")
+                output_dir = export_service.get_output_directory()
+
+                if not output_dir:
+                    show_toast(self, "请先在主界面设置输出目录", level="error")
+                    messagebox.showerror("错误", "未设置输出目录。请返回主界面设置输出目录。")
+                    return
+
+                # Generate default filename
+                if hasattr(self, 'current_image_path') and self.current_image_path:
+                    # 编辑器导出使用原始文件名，不添加前缀
+                    default_filename = export_service.generate_output_filename(self.current_image_path, output_format, add_prefix=False)
+                else:
+                    default_filename = f"image.{output_format or 'png'}"
+
+                output_path = os.path.join(output_dir, default_filename)
+
+                # Check if file exists and ask for overwrite confirmation
+                if os.path.exists(output_path):
+                    if not messagebox.askyesno("确认覆盖", f"文件 '{default_filename}' 已存在于输出目录中。是否要覆盖它？"):
+                        show_toast(self, "导出已取消", level="info")
+                        return
 
             # Submit the actual export process to the async service
             self.async_service.submit_task(self._async_export_with_mask(output_path))

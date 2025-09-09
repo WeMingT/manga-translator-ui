@@ -11,6 +11,9 @@ venv/
 .env
 .env.*
 
+# User data and configuration files
+desktop-ui/user_data/
+
 # Claude settings
 .claude/
 

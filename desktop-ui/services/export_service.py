@@ -17,6 +17,18 @@ import numpy as np
 
 from utils.json_encoder import CustomJSONEncoder
 
+# 全局输出目录存储
+_global_output_directory = None
+
+def set_global_output_directory(output_dir: str):
+    """设置全局输出目录"""
+    global _global_output_directory
+    _global_output_directory = output_dir
+
+def get_global_output_directory() -> Optional[str]:
+    """获取全局输出目录"""
+    return _global_output_directory
+
 
 class ExportService:
     """导出服务类"""
@@ -26,8 +38,14 @@ class ExportService:
     
     def get_output_directory(self) -> Optional[str]:
         """获取设置的输出目录"""
+        # 首先检查全局存储的输出目录
+        global_dir = get_global_output_directory()
+        if global_dir and os.path.exists(global_dir):
+            self.logger.info(f"使用全局输出目录: {global_dir}")
+            return global_dir
+        
         try:
-            # 尝试通过全局变量获取应用实例
+            # 作为备选方案，尝试通过UI控件获取
             import tkinter as tk
             
             # 获取根窗口
@@ -45,6 +63,8 @@ class ExportService:
                             output_dir = output_entry.get().strip()
                             if output_dir and os.path.exists(output_dir):
                                 self.logger.info(f"找到输出目录: {output_dir}")
+                                # 更新全局存储
+                                set_global_output_directory(output_dir)
                                 return output_dir
                             elif output_dir:
                                 self.logger.warning(f"输出目录不存在: {output_dir}")
@@ -67,12 +87,16 @@ class ExportService:
         
         return output_format.lower()
     
-    def generate_output_filename(self, original_image_path: str, output_format: str = "") -> str:
-        """生成输出文件名，参考正常翻译流程的命名规则"""
+    def generate_output_filename(self, original_image_path: str, output_format: str = "", add_prefix: bool = False) -> str:
+        """生成输出文件名，可选择是否添加前缀"""
         base_name = os.path.splitext(os.path.basename(original_image_path))[0]
         
-        # 使用与正常翻译流程相同的前缀
-        output_name = f"translated_{base_name}"
+        # 根据参数决定是否添加前缀
+        if add_prefix:
+            output_name = f"translated_{base_name}"
+        else:
+            # 使用原始文件名（编辑器导出时的默认行为）
+            output_name = base_name
         
         # 确定文件扩展名
         if output_format:

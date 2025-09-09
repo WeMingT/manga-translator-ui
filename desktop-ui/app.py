@@ -118,7 +118,16 @@ class AppController:
         
         # 快速初始化基本属性
         self.root_dir = os.path.dirname(os.path.abspath(__file__))
-        self.user_config_path = resource_path(os.path.join("examples", "config-example.json"))
+        
+        # 使用用户数据目录而不是示例配置文件
+        user_data_dir = os.path.join(self.root_dir, "user_data")
+        os.makedirs(user_data_dir, exist_ok=True)
+        self.user_config_path = os.path.join(user_data_dir, "user_config.json")
+        
+        # 如果用户配置文件不存在，从示例配置文件创建
+        if not os.path.exists(self.user_config_path):
+            self._create_user_config_file()
+        
         self.env_path = os.path.join(self.root_dir, "..", ".env")
         self.app_variant = self._get_app_variant()
 
@@ -191,6 +200,49 @@ class AppController:
         
         # 延迟初始化重量级组件 (等UI完全启动后)
         self.app.after(500, self._async_init_heavy_components)
+
+    def _create_user_config_file(self):
+        """创建用户配置文件，基于示例配置文件"""
+        try:
+            example_config_path = resource_path(os.path.join("examples", "config-example.json"))
+            
+            if os.path.exists(example_config_path):
+                # 从示例配置文件复制
+                import shutil
+                shutil.copy2(example_config_path, self.user_config_path)
+            else:
+                # 创建基本的配置文件结构
+                basic_config = {
+                    "last_output_path": "",
+                    "filter_text": None,
+                    "kernel_size": 3,
+                    "mask_dilation_offset": 200,
+                    "translator": {
+                        "translator": "chatgpt",
+                        "target_lang": "CHS",
+                        "no_text_lang_skip": False
+                    },
+                    "ocr": {
+                        "use_mocr_merge": False,
+                        "ocr": "48px",
+                        "min_text_length": 0,
+                        "ignore_bubble": 0,
+                        "prob": 0.001,
+                        "kernel_size": 3
+                    }
+                }
+                
+                with open(self.user_config_path, 'w', encoding='utf-8') as f:
+                    json.dump(basic_config, f, indent=4, ensure_ascii=False)
+                    
+            print(f"用户配置文件已创建: {self.user_config_path}")
+            
+        except Exception as e:
+            print(f"创建用户配置文件时出错: {e}")
+            # 创建最小配置文件
+            minimal_config = {"last_output_path": ""}
+            with open(self.user_config_path, 'w', encoding='utf-8') as f:
+                json.dump(minimal_config, f, indent=4, ensure_ascii=False)
 
     def _get_app_variant(self):
         """Reads the build_info.json to determine the app variant (cpu or gpu)."""
@@ -1256,6 +1308,13 @@ class AppController:
             entry.delete(0, "end")
             entry.insert(0, folder)
             self.save_output_path(folder)
+            
+            # 更新全局输出目录，供编辑器使用
+            try:
+                from services.export_service import set_global_output_directory
+                set_global_output_directory(folder)
+            except ImportError:
+                pass
 
     def open_output_folder(self):
         import subprocess
@@ -1279,28 +1338,72 @@ class AppController:
             messagebox.showerror("打开失败", f"无法打开文件夹: {e}")
 
     def save_output_path(self, path):
+        """保存输出目录路径到用户配置文件"""
         try:
-            with open(self.user_config_path, 'r', encoding='utf-8') as f:
-                config_data = json.load(f)
+            # 确保用户配置文件存在
+            if not os.path.exists(self.user_config_path):
+                self._create_user_config_file()
+            
+            # 读取现有配置
+            config_data = {}
+            if os.path.exists(self.user_config_path):
+                try:
+                    with open(self.user_config_path, 'r', encoding='utf-8') as f:
+                        config_data = json.load(f)
+                except json.JSONDecodeError:
+                    print(f"用户配置文件损坏，将重新创建: {self.user_config_path}")
+                    config_data = {}
+            
+            # 更新输出路径
             config_data['last_output_path'] = path
+            
+            # 保存配置
             with open(self.user_config_path, 'w', encoding='utf-8') as f:
                 json.dump(config_data, f, indent=4, ensure_ascii=False)
+                
+            print(f"输出目录已保存到配置文件: {path}")
+            
         except Exception as e:
-            self.update_log(f"Error saving output path: {e}\n")
+            self.update_log(f"保存输出路径失败: {e}\n")
+            print(f"保存输出路径失败: {e}")
+            import traceback
+            traceback.print_exc()
 
     def load_and_apply_output_path(self):
+        """从用户配置文件加载并应用输出目录路径"""
         try:
-            if os.path.exists(self.user_config_path):
-                with open(self.user_config_path, 'r', encoding='utf-8') as f:
-                    config_data = json.load(f)
-                last_path = config_data.get("last_output_path")
-                if last_path:
-                    output_entry = self.main_view_widgets.get('output_folder_entry')
-                    if output_entry:
-                        output_entry.delete(0, "end")
-                        output_entry.insert(0, last_path)
+            # 确保用户配置文件存在
+            if not os.path.exists(self.user_config_path):
+                self._create_user_config_file()
+                return
+            
+            with open(self.user_config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+                
+            last_path = config_data.get("last_output_path")
+            if last_path and os.path.exists(last_path):
+                output_entry = self.main_view_widgets.get('output_folder_entry')
+                if output_entry:
+                    output_entry.delete(0, "end")
+                    output_entry.insert(0, last_path)
+                
+                # 初始化全局输出目录，供编辑器使用
+                try:
+                    from services.export_service import set_global_output_directory
+                    set_global_output_directory(last_path)
+                    print(f"已加载输出目录: {last_path}")
+                except ImportError:
+                    pass
+            elif last_path:
+                print(f"上次保存的输出目录不存在，已忽略: {last_path}")
+                
+        except json.JSONDecodeError as e:
+            print(f"用户配置文件格式错误: {e}")
+            self.update_log(f"配置文件格式错误，将重新创建: {e}\n")
+            self._create_user_config_file()
         except Exception as e:
-            self.update_log(f"Error loading output path: {e}\n")
+            print(f"加载输出路径失败: {e}")
+            self.update_log(f"加载输出路径失败: {e}\n")
 
     def stop_translation(self):
         if self.translation_process and self.translation_process.poll() is None:  # 进程还在运行

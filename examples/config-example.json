@@ -6,7 +6,7 @@
     "translator": "chatgpt",
     "target_lang": "CHS",
     "no_text_lang_skip": false,
-    "gpt_config": "./examples/gpt_config-example.yaml"
+    "gpt_config": "../examples/gpt_config-example.yaml"
   },
   "ocr": {
     "use_mocr_merge": false,
