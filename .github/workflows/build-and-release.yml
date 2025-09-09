@@ -22,7 +22,7 @@ jobs:
         pip install -r requirements_cpu.txt
         pip install pyinstaller
     - name: Build CPU version
-      run: python build_packages.py ${{ github.ref_name }} --build cpu --skip-updates
+      run: python build_packages.py ${{ github.ref_name }} --build cpu
     - name: Upload CPU artifacts
       uses: actions/upload-artifact@v4
       with:
