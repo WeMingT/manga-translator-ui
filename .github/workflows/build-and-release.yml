@@ -157,7 +157,10 @@ jobs:
         draft: false
         prerelease: false
     
-    - name: Upload update files
-      run: |
-        # 这里可以添加将更新文件上传到GitHub Pages或其他CDN的逻辑
-        echo "Update files are ready in updates/ directory"
+    - name: Commit and push update files
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "chore: Publish updates for ${{ github.ref_name }}"
+        file_pattern: "pyu-data/deploy/**"
+        commit_user_name: "github-actions[bot]"
+        commit_user_email: "github-actions[bot]@users.noreply.github.com"
