@@ -16,10 +16,11 @@ customtkinter
 einops
 fastapi
 freetype-py
-googletrans==4.0.0-rc1
+
 httpcore
-httpx==0.28.1
+
 huggingface-hub
+httpx==0.28.1
 ijson
 kornia
 langcodes

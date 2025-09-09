@@ -16,7 +16,7 @@ customtkinter
 einops
 fastapi
 freetype-py
-googletrans==4.0.0-rc1
+
 httpcore
 httpx
 huggingface-hub
