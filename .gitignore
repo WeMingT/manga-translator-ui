@@ -51,3 +51,6 @@ desktop-ui/temp/
 19_translations.json
 desktop-ui/user_data/
 manga-image-translator-main/
+
+# Ignore temporary clone check directory
+temp_clone_check/

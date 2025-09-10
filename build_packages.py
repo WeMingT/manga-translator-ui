@@ -38,28 +38,28 @@ def run_command_realtime(cmd, cwd=None):
             cwd=cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=False, # Read as bytes
+            text=True,
+            encoding='utf-8',
+            errors='replace',
             shell=use_shell,
             env=env
         )
         
-        while True:
-            output_bytes = process.stdout.readline()
-            if not output_bytes and process.poll() is not None:
-                break
-            if output_bytes:
-                output_str = output_bytes.decode('utf-8', errors='replace').strip()
-                print(output_str)
+        # Real-time output
+        for line in process.stdout:
+            print(line.strip())
         
-        returncode = process.poll()
+        returncode = process.wait()
         print(f"Exit code: {returncode}")
         return returncode == 0
     except Exception as e:
+        # Try to print the exception, but be prepared for encoding errors
         try:
             print(f"Error executing command: {e}")
         except UnicodeEncodeError:
             print(f"Error executing command (ascii representation): {repr(e)}")
         return False
+
 
 
 
@@ -69,8 +69,13 @@ class Builder:
     def __init__(self, app_version=None):
         self.app_version = app_version
         self.version_file = Path("VERSION")
+        
+        # Ensure the repository directory and its 'targets' subdirectory exist
+        repo_path = Path(REPO_DIR)
+        (repo_path / 'targets').mkdir(parents=True, exist_ok=True)
+        
         self.repo = Repository(
-            repo_dir=Path(REPO_DIR),
+            repo_dir=repo_path,
             keys_dir=Path(KEYS_DIR),
             app_name=APP_NAME,
             app_version_attr=APP_VERSION_ATTR
