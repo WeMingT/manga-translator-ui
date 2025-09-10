@@ -170,7 +170,8 @@ class Builder:
             new_bundle_dir=dist_dir,
             new_version=self.app_version,
             custom_metadata={'variant': version_type},
-            required=False
+            required=False,
+            skip_patch=True
         )
         return True
 
