@@ -138,7 +138,7 @@ jobs:
         user_name: 'github-actions[bot]'
         user_email: 'github-actions[bot]@users.noreply.github.com'
         commit_message: 'Deploy TUF repository for ${{ github.ref_name }}'
-        exclude_assets: '*.tar.gz'
+        exclude_assets: '**/*.tar.gz'
 
     - name: Bundle extra directories into _internal
       run: |
