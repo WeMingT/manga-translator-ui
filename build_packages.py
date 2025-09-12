@@ -165,14 +165,12 @@ class Builder:
 
     def package_updates(self, version_type):
         """
-        Adds an update package to the TUF repository using the add_bundle method.
-        This method handles the creation of archives and patches automatically.
+        Adds an update package to the TUF repository.
+        This is a custom implementation to handle per-variant update chains.
         """
         print("=" * 60)
         print(f"Adding update package for {version_type.upper()}")
         print("=" * 60)
-
-        
 
         self.version_file.write_text(self.app_version, encoding='utf-8')
         dist_dir = Path("dist") / f"manga-translator-{version_type}"
@@ -181,17 +179,66 @@ class Builder:
             print(f"\nError: Bundle directory not found at '{dist_dir}'")
             return False
 
+        # --- Custom Logic to Handle Variants ---
+        
+        # 1. Temporarily modify app_name to be variant-specific
+        original_app_name = self.repo.app_name
+        variant_app_name = f"{original_app_name}-{version_type}"
+        self.repo.app_name = variant_app_name
+        
+        # 2. Create the new archive with the variant-specific name
         print(f"Creating bundle and patches from: {dist_dir}")
-        # This single method handles archive creation and, if an older version
-        # is found, patch creation. Both are registered in the metadata.
-        self.repo.add_bundle(
-            new_bundle_dir=dist_dir,
-            new_version=f"{self.app_version}-{version_type}",
-            custom_metadata={'variant': version_type},
-            skip_patch=False,  # Ensure patches are created if possible
-            required=False
+        new_archive = make_gztar_archive(
+            src_dir=dist_dir,
+            dst_dir=self.repo.targets_dir,
+            app_name=variant_app_name,
+            version=self.app_version,
         )
+        print(f"Archive ready: {new_archive}")
 
+        # 3. Find the latest archive FOR THIS VARIANT ONLY
+        latest_variant_archive = None
+        all_targets = self.repo.roles.targets.signed.targets
+        
+        # Filter archives for the current variant by checking the filename prefix
+        variant_archives = sorted([
+            TargetMeta(key) for key in all_targets.keys()
+            if TargetMeta(key).is_archive and key.startswith(f"{variant_app_name}-")
+        ])
+        
+        if variant_archives:
+            latest_variant_archive = variant_archives[-1]
+
+        # 4. Compare versions and add target
+        if not latest_variant_archive or latest_variant_archive.version < new_archive.version:
+            print(f"Registering new archive for {version_type}: {new_archive.filename}")
+            self.repo.roles.add_or_update_target(
+                local_path=new_archive.path,
+                custom=dict(user={'variant': version_type}, tufup={KEY_REQUIRED: False}),
+            )
+            
+            # 5. Create patch against the correct variant-specific archive
+            if latest_variant_archive:
+                print(f"Creating patch from {latest_variant_archive.filename} to {new_archive.filename}")
+                src_path = self.repo.targets_dir / latest_variant_archive.path
+                dst_path = self.repo.targets_dir / new_archive.path
+                patch_path = dst_path.with_suffix('').with_suffix(SUFFIX_PATCH)
+                dst_size_and_hash = Patcher.diff_and_hash(
+                    src_path=src_path, dst_path=dst_path, patch_path=patch_path
+                )
+                self.repo.roles.add_or_update_target(
+                    local_path=patch_path,
+                    custom=dict(user=None, tufup=dst_size_and_hash),
+                )
+        else:
+            print(
+                f'Bundle not added: version {new_archive.version} must be greater than ' 
+                f'that of latest {version_type} archive ({latest_variant_archive.version})'
+            )
+
+        # 6. Restore original app_name
+        self.repo.app_name = original_app_name
+        
         return True
 
     def publish_updates(self):
