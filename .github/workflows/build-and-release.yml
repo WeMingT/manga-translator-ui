@@ -143,20 +143,20 @@ jobs:
     - name: Bundle extra directories into _internal
       run: |
         echo "Bundling extra directories into _internal..."
-        mkdir -p dist/manga-translator-cpu/_internal
-        mkdir -p dist/manga-translator-gpu/_internal
+        mkdir -p dist/manga-translator-cpu/_internal/update_repository
+        mkdir -p dist/manga-translator-gpu/_internal/update_repository
         
         cp -r examples dist/manga-translator-cpu/_internal/
         cp -r fonts dist/manga-translator-cpu/_internal/
         cp -r models dist/manga-translator-cpu/_internal/
-        cp -r update_repository dist/manga-translator-cpu/_internal/
+        cp -r update_repository/metadata dist/manga-translator-cpu/_internal/update_repository/
         cp -r MangaStudio_Data dist/manga-translator-cpu/_internal/
         cp VERSION dist/manga-translator-cpu/_internal/
         
         cp -r examples dist/manga-translator-gpu/_internal/
         cp -r fonts dist/manga-translator-gpu/_internal/
         cp -r models dist/manga-translator-gpu/_internal/
-        cp -r update_repository dist/manga-translator-gpu/_internal/
+        cp -r update_repository/metadata dist/manga-translator-gpu/_internal/update_repository/
         cp -r MangaStudio_Data dist/manga-translator-gpu/_internal/
         cp VERSION dist/manga-translator-gpu/_internal/
 
@@ -172,6 +172,9 @@ jobs:
         echo "Archiving GPU version..."
         cd dist/manga-translator-gpu/
         7z a -v1990m -m0=lzma2 -ms=on ../../release_assets/manga-translator-gpu-${{ github.ref_name }}.7z .
+        cd ../../
+        echo "GPU version archived. Deleting source directory to save space..."
+        rm -rf dist/manga-translator-gpu
 
     - name: Prepare TUF Assets for Release
       run: |
