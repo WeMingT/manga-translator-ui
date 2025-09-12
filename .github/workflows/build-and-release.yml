@@ -163,9 +163,13 @@ jobs:
     - name: Create Release Archives using 7-Zip with Splitting
       run: |
         mkdir -p release_assets
+        echo "Archiving CPU version..."
         cd dist/manga-translator-cpu/
         7z a -v1990m -m0=lzma2 -ms=on ../../release_assets/manga-translator-cpu-${{ github.ref_name }}.7z .
         cd ../../
+        echo "CPU version archived. Deleting source directory to save space..."
+        rm -rf dist/manga-translator-cpu
+        echo "Archiving GPU version..."
         cd dist/manga-translator-gpu/
         7z a -v1990m -m0=lzma2 -ms=on ../../release_assets/manga-translator-gpu-${{ github.ref_name }}.7z .
 
