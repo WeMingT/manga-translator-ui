@@ -1461,6 +1461,16 @@ class MangaTranslator:
         current_time = time.time()
         self._model_usage_timestamps[("translation", config.translator.translator)] = current_time
 
+        # Load custom high-quality prompt from JSON file if specified
+        ctx.custom_prompt_json = None
+        if config.translator.high_quality_prompt_path and os.path.exists(config.translator.high_quality_prompt_path):
+            try:
+                with open(config.translator.high_quality_prompt_path, 'r', encoding='utf-8') as f:
+                    ctx.custom_prompt_json = json.load(f)
+                logger.info(f"Successfully loaded custom high-quality prompt from {config.translator.high_quality_prompt_path}")
+            except Exception as e:
+                logger.error(f"Failed to load or parse custom prompt JSON from {config.translator.high_quality_prompt_path}: {e}")
+
         if config.translator.translator in [Translator.gemini_hq, Translator.openai_hq]:
             from PIL import Image
             ctx.high_quality_batch_data = [{

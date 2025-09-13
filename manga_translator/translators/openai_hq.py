@@ -88,9 +88,18 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         # 调用父类解析
         super().parse_args(config)
     
-    def _build_system_prompt(self, source_lang: str, target_lang: str) -> str:
+    def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None) -> str:
         """构建系统提示词"""
-        return f"""You are an expert manga translator. Your primary goal is to provide a high-quality, natural-sounding translation that is faithful to the original's intent, emotion, and context.
+        custom_prompts = []
+        if custom_prompt_json:
+            # The user wants to read all sections from the JSON
+            for key, value in custom_prompt_json.items():
+                if isinstance(value, str):
+                    custom_prompts.append(value)
+        
+        custom_prompt_str = "\n\n".join(custom_prompts)
+
+        base_prompt = f"""You are an expert manga translator. Your primary goal is to provide a high-quality, natural-sounding translation that is faithful to the original's intent, emotion, and context.
 
 **CONTEXT:**
 You will be given a batch of manga pages. The user prompt will first list the original text grouped by page (e.g., under `=== Image 1 ===`, `=== Image 2 ===`). Then, it will provide a flat, numbered list of all texts that need translating. You will also receive the corresponding image files. Analyze all of this information together to ensure consistency in tone, style, and character voice.
@@ -107,6 +116,11 @@ You will be given a batch of manga pages. The user prompt will first list the or
 - **Terminology:** Ensure consistent translation of names, places, and special terms.
 - **Cultural Nuances:** If you encounter humor, puns, or cultural references, find an appropriate equivalent in {{{target_lang}}}.
 - **Sound Effects:** For onomatopoeia, provide the equivalent sound in {{{target_lang}}} or a brief description of the sound (e.g., '(rumble)', '(thud)')."""
+
+        if custom_prompt_str:
+            return f"{custom_prompt_str}\n\n---\n\n{base_prompt}"
+        else:
+            return base_prompt
 
     def _build_user_prompt(self, batch_data: List[Dict], texts: List[str]) -> str:
         """构建用户提示词"""
@@ -128,7 +142,7 @@ You will be given a batch of manga pages. The user prompt will first list the or
         
         return prompt
 
-    async def _translate_batch_high_quality(self, texts: List[str], batch_data: List[Dict], source_lang: str, target_lang: str) -> List[str]:
+    async def _translate_batch_high_quality(self, texts: List[str], batch_data: List[Dict], source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None) -> List[str]:
         """高质量批量翻译方法"""
         if not texts:
             return []
@@ -156,7 +170,7 @@ You will be given a batch of manga pages. The user prompt will first list the or
             })
         
         # 构建消息
-        system_prompt = self._build_system_prompt(source_lang, target_lang)
+        system_prompt = self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json)
         user_prompt = self._build_user_prompt(batch_data, texts)
         
         user_content = [{"type": "text", "text": user_prompt}]
@@ -247,7 +261,8 @@ You will be given a batch of manga pages. The user prompt will first list the or
             batch_data = ctx.high_quality_batch_data
             if batch_data and len(batch_data) > 0:
                 self.logger.info(f"使用OpenAI高质量翻译模式处理{len(batch_data)}张图片")
-                return await self._translate_batch_high_quality(queries, batch_data, from_lang, to_lang)
+                custom_prompt_json = getattr(ctx, 'custom_prompt_json', None)
+                return await self._translate_batch_high_quality(queries, batch_data, from_lang, to_lang, custom_prompt_json=custom_prompt_json)
         
         # 普通单文本翻译（后备方案）
         if not self.client:

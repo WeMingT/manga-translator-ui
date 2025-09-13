@@ -232,6 +232,8 @@ class TranslatorConfig(BaseModel):
     """Skip translation if source image is one of the provide languages, use comma to separate multiple languages. Example: JPN,ENG"""
     gpt_config: Optional[str] = None  # todo: no more path
     """Path to GPT config file, more info in README"""
+    high_quality_prompt_path: Optional[str] = None
+    """Path to a JSON file containing custom prompts for high-quality translation."""
     translator_chain: Optional[str] = None
     """Output of one translator goes in another. Example: --translator-chain "google:JPN;sugoi:ENG"."""
     selective_translation: Optional[str] = None

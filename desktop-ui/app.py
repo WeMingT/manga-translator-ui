@@ -534,6 +534,7 @@ class AppController:
             "no_text_lang_skip": "不跳过目标语言文本",
             "skip_lang": "跳过语言",
             "gpt_config": "GPT配置文件路径",
+            "high_quality_prompt_path": "高质量翻译提示词",
             "translator_chain": "链式翻译",
             "selective_translation": "选择性翻译",
             "detector": "文本检测器",
@@ -713,6 +714,37 @@ class AppController:
                 self.font_path_widgets['frame'] = widget_frame
                 label.grid(row=row, column=0, padx=5, pady=2, sticky="w")
                 widget_frame.grid(row=row, column=1, padx=5, pady=2, sticky="ew")
+                continue
+            
+            elif full_key == "translator.high_quality_prompt_path":
+                widget_frame = ctk.CTkFrame(parent_frame, fg_color="transparent")
+                widget_frame.grid_columnconfigure(0, weight=1)
+
+                # The combobox will be populated by the scan function
+                def on_prompt_select(filename):
+                    full_path = os.path.join(resource_path('dict'), filename) if filename else None
+                    self._save_widget_change("translator.high_quality_prompt_path", value=full_path)
+
+                widget = ctk.CTkComboBox(widget_frame, values=[], command=on_prompt_select)
+                
+                # Bind the click event to refresh the list
+                widget.bind('<Button-1>', lambda event: self._scan_and_update_hq_prompt_dropdown())
+
+                # When loading, we only have the full path, so we extract the filename
+                filename = os.path.basename(value) if value and os.path.exists(value) else ""
+                widget.set(filename)
+                widget.grid(row=0, column=0, sticky="ew")
+
+                # Open directory button
+                browse_button = ctk.CTkButton(widget_frame, text="打开目录", width=80, command=self._open_dict_directory)
+                browse_button.grid(row=0, column=1, padx=(5, 0))
+                
+                self.parameter_widgets[full_key] = widget
+                label.grid(row=row, column=0, padx=5, pady=2, sticky="w")
+                widget_frame.grid(row=row, column=1, padx=5, pady=2, sticky="ew")
+                
+                # Initial scan
+                self.app.after(100, self._scan_and_update_hq_prompt_dropdown)
                 continue
 
             is_bool_by_schema = self.param_schema.get(full_key) is bool
@@ -1007,6 +1039,47 @@ class AppController:
         # 手动刷新字体列表
         if self.font_monitor:
             self.font_monitor.refresh_fonts()
+
+    def _open_dict_directory(self):
+        dict_dir = resource_path('dict')
+        try:
+            if not os.path.exists(dict_dir):
+                os.makedirs(dict_dir)
+            if sys.platform == "win32":
+                os.startfile(dict_dir)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", dict_dir])
+            else:
+                subprocess.run(["xdg-open", dict_dir])
+        except Exception as e:
+            self.update_log(f"Error opening dict directory: {e}\n")
+        # After opening, refresh the dropdown
+        self.app.after(1000, self._scan_and_update_hq_prompt_dropdown) # Add a small delay
+
+    def _scan_and_update_hq_prompt_dropdown(self):
+        try:
+            dict_dir = resource_path('dict')
+            if not os.path.isdir(dict_dir):
+                self.update_log(f"Prompt directory not found: {dict_dir}\n")
+                return []
+            
+            prompt_files = sorted([f for f in os.listdir(dict_dir) if f.lower().endswith('.json')])
+            
+            widget = self.parameter_widgets.get("translator.high_quality_prompt_path")
+            if widget and isinstance(widget, ctk.CTkComboBox):
+                current_value = widget.get()
+                widget.configure(values=prompt_files)
+                # Try to keep the current selection if it's still valid
+                if current_value in prompt_files:
+                    widget.set(current_value)
+                else:
+                    widget.set("")
+
+                self.update_log(f"Refreshed high-quality prompt list: {len(prompt_files)} files found.\n")
+            return prompt_files
+        except Exception as e:
+            self.update_log(f"Error scanning prompt directory: {e}\n")
+            return []
 
     def _select_font_path(self):
         font_path = filedialog.askopenfilename(
