@@ -154,6 +154,7 @@ jobs:
         cp -r examples dist/manga-translator-cpu/_internal/
         cp -r fonts dist/manga-translator-cpu/_internal/
         cp -r models dist/manga-translator-cpu/_internal/
+        cp -r dict dist/manga-translator-cpu/_internal/
         cp -r update_repository/metadata dist/manga-translator-cpu/_internal/update_repository/
         cp -r MangaStudio_Data dist/manga-translator-cpu/_internal/
         cp VERSION dist/manga-translator-cpu/_internal/
@@ -161,6 +162,7 @@ jobs:
         cp -r examples dist/manga-translator-gpu/_internal/
         cp -r fonts dist/manga-translator-gpu/_internal/
         cp -r models dist/manga-translator-gpu/_internal/
+        cp -r dict dist/manga-translator-gpu/_internal/
         cp -r update_repository/metadata dist/manga-translator-gpu/_internal/update_repository/
         cp -r MangaStudio_Data dist/manga-translator-gpu/_internal/
         cp VERSION dist/manga-translator-gpu/_internal/
