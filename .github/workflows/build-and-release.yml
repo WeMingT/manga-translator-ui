@@ -103,7 +103,7 @@ jobs:
       with:
         python-version: '3.12'
 
-        - name: Install 7-Zip
+    - name: Install 7-Zip
       run: |
         sudo apt-get update
         sudo apt-get install -y p7zip-full
