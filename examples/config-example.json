@@ -69,7 +69,7 @@
         "use_gpu": true,
         "use_gpu_limited": false,
         "context_size": 3,
-        "format": "",
+        "format": "webp",
         "overwrite": true,
         "skip_no_text": false,
         "use_mtpe": false,
@@ -82,5 +82,5 @@
         "batch_concurrent": false,
         "high_quality_batch_size": 3
     },
-    "last_output_path": ""
+    "last_output_path": "D:/xiazai/图片助手(ImageAssistant)_批量图片下载器/output"
 }

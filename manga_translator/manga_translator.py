@@ -3320,51 +3320,6 @@ class MangaTranslator:
                     if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
                         self._save_text_to_file(ctx.image_name, ctx)
 
-                    # 如果提供了保存信息，则在此处直接保存
-                    if save_info and ctx.result and hasattr(ctx, 'image_name') and ctx.image_name:
-                        try:
-                            file_path = ctx.image_name
-                            output_folder = save_info["output_folder"]
-                            input_folders = save_info["input_folders"]
-                            
-                            final_output_dir = output_folder
-                            parent_dir = os.path.normpath(os.path.dirname(file_path))
-                            
-                            in_input_folder = False
-                            for folder in input_folders:
-                                if parent_dir.startswith(folder):
-                                    relative_path = os.path.relpath(parent_dir, folder)
-                                    final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
-                                    in_input_folder = True
-                                    break
-                            
-                            if not in_input_folder:
-                                final_output_dir = output_folder
-
-                            os.makedirs(final_output_dir, exist_ok=True)
-                            
-                            output_format = save_info.get("format")
-                            base_filename, _ = os.path.splitext(os.path.basename(file_path))
-                            if output_format and output_format.strip():
-                                output_filename = f"{base_filename}.{output_format}"
-                            else:
-                                output_filename = os.path.basename(file_path)
-
-                            final_output_path = os.path.join(final_output_dir, output_filename)
-
-                            overwrite = save_info.get("overwrite", True)
-                            if not overwrite and os.path.exists(final_output_path):
-                                logger.info(f"  -> ⚠️ [BATCH] Skipping existing file: {os.path.basename(final_output_path)}")
-                            else:
-                                image_to_save = ctx.result
-                                if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                                    image_to_save = image_to_save.convert('RGB')
-                                
-                                image_to_save.save(final_output_path)
-                                logger.info(f"  -> ✅ [BATCH] 保存成功: {os.path.basename(final_output_path)}")
-                        except Exception as e:
-                            logger.error(f"在高质量翻译模式下保存文件时出错: {e}")
-
                     results.append(ctx)
                 except Exception as e:
                     logger.error(f"Error rendering image: {e}")

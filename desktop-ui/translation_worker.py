@@ -211,6 +211,49 @@ def main():
                 
                 # 此函数现在将在内部处理保存，并返回最终的上下文列表
                 results = loop.run_until_complete(translator.translate_batch(images_with_configs, save_info=save_info))
+
+                if results:
+                    flush_print(f"批量处理完成，正在保存 {len(results)} 个文件...")
+                    for i, ctx in enumerate(results):
+                        if ctx and ctx.result and hasattr(ctx, 'image_name') and ctx.image_name:
+                            try:
+                                file_path = ctx.image_name
+                                
+                                final_output_dir = output_folder
+                                parent_dir = os.path.normpath(os.path.dirname(file_path))
+                                for folder in input_folders:
+                                    if parent_dir.startswith(folder):
+                                        relative_path = os.path.relpath(parent_dir, folder)
+                                        final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                        break
+                                
+                                os.makedirs(final_output_dir, exist_ok=True)
+
+                                cli_params = config_dict.get('cli', {})
+                                output_format = cli_params.get('format')
+                                overwrite = cli_params.get('overwrite', True)
+
+                                base_filename, _ = os.path.splitext(os.path.basename(file_path))
+                                if output_format and output_format.strip():
+                                    output_filename = f"{base_filename}.{output_format}"
+                                else:
+                                    output_filename = os.path.basename(file_path)
+                                
+                                final_output_path = os.path.join(final_output_dir, output_filename)
+
+                                if not overwrite and os.path.exists(final_output_path):
+                                    flush_print(f"  -> ⚠️ [BATCH] 跳过已存在的文件: {os.path.basename(final_output_path)}")
+                                    continue
+
+                                image_to_save = ctx.result
+                                if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
+                                    image_to_save = image_to_save.convert('RGB')
+                                
+                                image_to_save.save(final_output_path)
+                                flush_print(f"  -> ✅ [BATCH] 保存成功: {os.path.basename(final_output_path)}")
+                            except Exception as e:
+                                flush_print(f"  -> ❌ [BATCH] 保存文件时出错 {os.path.basename(ctx.image_name)}: {e}")
+
                 flush_print(f"所有批次处理和保存完成。")
             else:
                 flush_print(f"开始单文件模式翻译 {len(resolved_files)} 个文件...")
