@@ -3348,13 +3348,17 @@ class MangaTranslator:
                                 output_filename = os.path.basename(file_path)
 
                             final_output_path = os.path.join(final_output_dir, output_filename)
-                            
-                            image_to_save = ctx.result
-                            if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                                image_to_save = image_to_save.convert('RGB')
-                            
-                            image_to_save.save(final_output_path)
-                            logger.info(f"  -> ✅ [BATCH] 保存成功: {os.path.basename(final_output_path)}")
+
+                            overwrite = save_info.get("overwrite", True)
+                            if not overwrite and os.path.exists(final_output_path):
+                                logger.info(f"  -> ⚠️ [BATCH] Skipping existing file: {os.path.basename(final_output_path)}")
+                            else:
+                                image_to_save = ctx.result
+                                if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
+                                    image_to_save = image_to_save.convert('RGB')
+                                
+                                image_to_save.save(final_output_path)
+                                logger.info(f"  -> ✅ [BATCH] 保存成功: {os.path.basename(final_output_path)}")
                         except Exception as e:
                             logger.error(f"在高质量翻译模式下保存文件时出错: {e}")
 

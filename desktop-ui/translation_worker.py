@@ -201,10 +201,12 @@ def main():
                 # 对于高质量/批量模式，传递保存信息以便在内部逐批保存
                 cli_params = config_dict.get('cli', {})
                 output_format = cli_params.get('format')
+                overwrite = cli_params.get('overwrite', True)
                 save_info = {
                     "output_folder": output_folder,
                     "input_folders": input_folders,
-                    "format": output_format
+                    "format": output_format,
+                    "overwrite": overwrite
                 }
                 
                 # 此函数现在将在内部处理保存，并返回最终的上下文列表
@@ -254,12 +256,19 @@ def main():
                                 
                                 final_output_path = os.path.join(final_output_dir, output_filename)
                                 
-                                image_to_save = ctx.result
-                                if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                                    image_to_save = image_to_save.convert('RGB')
-                                
-                                image_to_save.save(final_output_path)
-                                flush_print(f"  -> ✅ 翻译完成: {os.path.basename(final_output_path)}")
+                                # Check overwrite setting before saving
+                                cli_params = config_dict.get('cli', {})
+                                overwrite = cli_params.get('overwrite', True)
+
+                                if not overwrite and os.path.exists(final_output_path):
+                                    flush_print(f"  -> ⚠️  跳过已存在的文件: {os.path.basename(final_output_path)} (如需覆盖请勾选 '覆盖已存在文件')")
+                                else:
+                                    image_to_save = ctx.result
+                                    if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
+                                        image_to_save = image_to_save.convert('RGB')
+                                    
+                                    image_to_save.save(final_output_path)
+                                    flush_print(f"  -> ✅ 翻译完成: {os.path.basename(final_output_path)}")
                             else:
                                 flush_print(f"  -> ✅ 文本导出成功: {os.path.basename(file_path)}")
                             
