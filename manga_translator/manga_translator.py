@@ -3337,7 +3337,14 @@ class MangaTranslator:
                                 final_output_dir = output_folder
 
                             os.makedirs(final_output_dir, exist_ok=True)
-                            output_filename = os.path.basename(file_path)
+                            
+                            output_format = save_info.get("format")
+                            base_filename, _ = os.path.splitext(os.path.basename(file_path))
+                            if output_format and output_format.strip():
+                                output_filename = f"{base_filename}.{output_format}"
+                            else:
+                                output_filename = os.path.basename(file_path)
+
                             final_output_path = os.path.join(final_output_dir, output_filename)
                             
                             image_to_save = ctx.result

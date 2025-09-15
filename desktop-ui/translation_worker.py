@@ -199,9 +199,12 @@ def main():
                     images_with_configs.append((image, config))
                 
                 # 对于高质量/批量模式，传递保存信息以便在内部逐批保存
+                cli_params = config_dict.get('cli', {})
+                output_format = cli_params.get('format')
                 save_info = {
                     "output_folder": output_folder,
                     "input_folders": input_folders,
+                    "format": output_format
                 }
                 
                 # 此函数现在将在内部处理保存，并返回最终的上下文列表
@@ -238,7 +241,17 @@ def main():
                                         break
                                 
                                 os.makedirs(final_output_dir, exist_ok=True)
-                                output_filename = os.path.basename(file_path)
+
+                                # Apply output format from config
+                                cli_params = config_dict.get('cli', {})
+                                output_format = cli_params.get('format')
+                                base_filename, _ = os.path.splitext(os.path.basename(file_path))
+                                if output_format and output_format.strip():
+                                    output_filename = f"{base_filename}.{output_format}"
+                                else:
+                                    # Keep original extension if format is not specified
+                                    output_filename = os.path.basename(file_path)
+                                
                                 final_output_path = os.path.join(final_output_dir, output_filename)
                                 
                                 image_to_save = ctx.result
