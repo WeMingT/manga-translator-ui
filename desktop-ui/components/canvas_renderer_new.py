@@ -241,18 +241,20 @@ class CanvasRenderer:
             if 'font_color' in constructor_args:
                 # Convert hex color string to RGB tuple
                 hex_color = constructor_args.pop('font_color', '#FFFFFF')
-                if hex_color.startswith('#') and len(hex_color) == 7:
+                if hex_color and hex_color.startswith('#') and len(hex_color) == 7:
                     try:
                         r = int(hex_color[1:3], 16)
                         g = int(hex_color[3:5], 16) 
                         b = int(hex_color[5:7], 16)
                         constructor_args['fg_color'] = (r, g, b)
-                    except ValueError:
-                        constructor_args['fg_color'] = (255, 255, 255)  # 默认白色
+                    except (ValueError, TypeError):
+                        constructor_args['fg_color'] = (0, 0, 0)  # Default to black on error
                 else:
-                    constructor_args['fg_color'] = (255, 255, 255)  # 默认白色
-                    
-            if 'fg_colors' in constructor_args: constructor_args['fg_color'] = constructor_args.pop('fg_colors')
+                    constructor_args['fg_color'] = (0, 0, 0)  # Default to black on invalid format
+            
+            # Handle legacy fg_colors tuple if font_color is not present
+            elif 'fg_colors' in constructor_args:
+                constructor_args['fg_color'] = constructor_args.pop('fg_colors')
             if 'bg_colors' in constructor_args: constructor_args['bg_color'] = constructor_args.pop('bg_colors')
             try:
                 text_block = TextBlock(**constructor_args)

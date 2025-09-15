@@ -92,7 +92,19 @@ class TextBlock(object):
 
         self.translation = translation
 
-        self.fg_colors = fg_color
+        # Handle color from UI (hex string) or backend (RGB tuple)
+        font_color_hex = kwargs.get('font_color')
+        if isinstance(font_color_hex, str) and font_color_hex.startswith('#') and len(font_color_hex) == 7:
+            try:
+                r = int(font_color_hex[1:3], 16)
+                g = int(font_color_hex[3:5], 16)
+                b = int(font_color_hex[5:7], 16)
+                self.fg_colors = (r, g, b)
+            except (ValueError, TypeError):
+                self.fg_colors = fg_color # Fallback to the fg_color parameter
+        else:
+            self.fg_colors = fg_color # Default behavior
+
         self.bg_colors = bg_color
 
         # self.stroke_width = stroke_width

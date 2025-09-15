@@ -53,6 +53,7 @@ class BackendTextRenderer:
         key_components = [
             text_block.get_translation_for_rendering(),
             str(text_block.font_size),
+            str(text_block.get_font_colors()),
             text_block.font_family or "default",
             str(text_block.alignment),
             str(text_block.horizontal),

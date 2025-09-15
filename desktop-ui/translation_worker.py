@@ -107,7 +107,7 @@ def main():
         # 初始化翻译器
         translator_params = {}
         if 'cli' in config_dict:
-            translator_params.update(config_dict.pop('cli'))
+            translator_params.update(config_dict.get('cli', {}))
         
         # 提取字体路径并设置为翻译器参数
         render_config = config_dict.get('render', {})

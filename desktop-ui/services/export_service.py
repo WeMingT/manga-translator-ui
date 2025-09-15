@@ -173,22 +173,32 @@ class ExportService:
                 translator_params = self._prepare_translator_params(config)
                 
                 # 创建翻译器实例并执行渲染
-                result_image = self._execute_backend_render(
+                rendered_text_layer = self._execute_backend_render(
                     temp_image_path, regions_json_path, translator_params, config, progress_callback
                 )
                 
-                if result_image:
+                if rendered_text_layer:
+                    # Composite the text layer onto the original image
+                    final_image = image.copy()
+                    if final_image.mode != 'RGBA':
+                        final_image = final_image.convert('RGBA')
+                    if rendered_text_layer.mode != 'RGBA':
+                        rendered_text_layer = rendered_text_layer.convert('RGBA')
+
+                    # Ensure sizes match before pasting, resizing if necessary
+                    if final_image.size != rendered_text_layer.size:
+                        self.logger.warning(f"Size mismatch: Original {final_image.size}, Rendered {rendered_text_layer.size}. Resizing text layer.")
+                        rendered_text_layer = rendered_text_layer.resize(final_image.size, Image.LANCZOS)
+
+                    final_image.paste(rendered_text_layer, (0, 0), rendered_text_layer)
+
                     # Handle RGBA to RGB conversion for JPEG
                     if output_path.lower().endswith(('.jpg', '.jpeg')):
                         self.logger.info("Output is JPEG, converting from RGBA to RGB...")
-                        if result_image.mode == 'RGBA':
-                            # Create a white background and paste the image onto it
-                            background = Image.new('RGB', result_image.size, (255, 255, 255))
-                            background.paste(result_image, mask=result_image.split()[3])  # 3 is the alpha channel
-                            result_image = background
+                        final_image = final_image.convert('RGB')
                             
-                    # 保存结果图片
-                    result_image.save(output_path)
+                    # Save the final composited image
+                    final_image.save(output_path)
                     
                     if success_callback:
                         success_callback(f"图片已导出到: {output_path}")
@@ -262,7 +272,28 @@ class ExportService:
                 self.logger.warning(f"Lines data is not a list or numpy array: {type(lines_data)}")
                 continue
             
-            # 确保texts字段存在（TextBlock需要）
+            # --- Foreground Color --- 
+            fg_tuple = region_copy.pop('fg_colors', None)
+            if fg_tuple is None:
+                fg_tuple = region_copy.pop('fg_color', None) # Fallback for singular
+
+            if isinstance(fg_tuple, (list, tuple)) and len(fg_tuple) == 3:
+                try:
+                    r, g, b = fg_tuple
+                    region_copy['font_color'] = f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(f"Could not convert fg_color tuple to hex for saving: {e}")
+
+            # --- Background/Stroke Color ---
+            bg_tuple = region_copy.pop('bg_colors', None)
+            if bg_tuple is None:
+                bg_tuple = region_copy.pop('bg_color', None) # Fallback
+            
+            # Ensure bg_color (singular) is present in the final dict if it exists
+            if bg_tuple:
+                region_copy['bg_color'] = bg_tuple
+
+            # 确保其他必要字段存在
             if 'texts' not in region_copy:
                 region_copy['texts'] = [region_copy.get('text', '')]
             
@@ -361,6 +392,7 @@ class ExportService:
             
             # 创建配置对象
             render_config = config.get('render', {})
+            render_config['font_color'] = None # Explicitly disable global font color
             render_cfg = RenderConfig(**render_config)
             
             # 创建翻译器配置，设置为none以跳过翻译

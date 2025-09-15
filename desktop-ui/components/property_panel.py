@@ -87,8 +87,7 @@ class PropertyPanel(ctk.CTkScrollableFrame):
         # 样式设置
         self._create_style_section()
 
-        # 蒙版编辑
-        self._create_mask_edit_section()
+
         
         # 操作按钮
         self._create_action_section()
@@ -280,43 +279,7 @@ class PropertyPanel(ctk.CTkScrollableFrame):
         )
         self.widgets['direction'].grid(row=3, column=1, sticky="ew", padx=(10, 0))
 
-    def _create_mask_edit_section(self):
-        self.mask_edit_collapsible_frame = CollapsibleFrame(self, title="蒙版编辑", start_expanded=False)
-        self.mask_edit_collapsible_frame.grid(row=13, column=0, sticky="ew", padx=5, pady=5)
-        
-        content_frame = self.mask_edit_collapsible_frame.content_frame
-        content_frame.grid_columnconfigure(0, weight=1)
-        
-        self.widgets['mask_tool_menu'] = ctk.CTkOptionMenu(content_frame, values=["不选择", "画笔", "橡皮擦"], command=lambda choice: self._execute_callback('set_edit_mode', choice))
-        self.widgets['mask_tool_menu'].grid(row=0, column=0, pady=5, padx=5, sticky="ew")
-        
-        ctk.CTkLabel(content_frame, text="笔刷大小:").grid(row=1, column=0, pady=5, padx=5, sticky="w")
-        self.widgets['brush_size_slider'] = ctk.CTkSlider(content_frame, from_=1, to=100, command=lambda val: self._execute_callback('brush_size_changed', val))
-        self.widgets['brush_size_slider'].set(20)
-        self.widgets['brush_size_slider'].grid(row=2, column=0, pady=5, padx=5, sticky="ew")
-        
-        self.widgets['show_mask_checkbox'] = ctk.CTkCheckBox(content_frame, text="显示蒙版", command=lambda: self._execute_callback('toggle_mask_visibility', self.widgets['show_mask_checkbox'].get()))
-        self.widgets['show_mask_checkbox'].select()
-        self.widgets['show_mask_checkbox'].grid(row=3, column=0, pady=5, padx=5, sticky="w")
 
-        # 添加蒙版更新按钮
-        self.widgets['update_mask_button'] = ctk.CTkButton(
-            content_frame, 
-            text="更新蒙版", 
-            command=lambda: self._execute_callback('update_mask'),
-            height=28
-        )
-        self.widgets['update_mask_button'].grid(row=4, column=0, pady=5, padx=5, sticky="ew")
-        
-        # 添加显示被优化掉区域的选项
-        self.widgets['show_removed_checkbox'] = ctk.CTkCheckBox(
-            content_frame, 
-            text="显示被优化掉的区域", 
-            command=lambda: self._execute_callback('toggle_removed_mask_visibility', self.widgets['show_removed_checkbox'].get())
-        )
-        self.widgets['show_removed_checkbox'].grid(row=5, column=0, pady=5, padx=5, sticky="w")
-
-        self.mask_edit_collapsible_frame.grid_remove() # Hide by default
     
     def _create_action_section(self):
         """创建操作按钮部分"""
@@ -453,7 +416,21 @@ class PropertyPanel(ctk.CTkScrollableFrame):
         self.widgets['font_size_slider'].set(region_data.get('font_size', 12))
         
         self.widgets['font_color'].delete(0, "end")
-        self.widgets['font_color'].insert(0, region_data.get('font_color', '#FFFFFF'))
+        font_color_hex = '#000000' # Default to black
+        try:
+            # Priority 1: Check for 'fg_colors' (RGB tuple, the new unified format)
+            fg_tuple = region_data.get('fg_colors')
+            if isinstance(fg_tuple, (list, tuple)) and len(fg_tuple) == 3:
+                font_color_hex = f"#{int(fg_tuple[0]):02x}{int(fg_tuple[1]):02x}{int(fg_tuple[2]):02x}"
+            else:
+                # Priority 2: Fallback to 'font_color' (hex string, for legacy/JSON data)
+                hex_from_dict = region_data.get('font_color')
+                if hex_from_dict:
+                    font_color_hex = hex_from_dict
+        except Exception as e:
+            self.logger.error(f"Error parsing color from region_data: {e}")
+            font_color_hex = '#E51A1A' # Show a visible error color
+        self.widgets['font_color'].insert(0, font_color_hex.upper())
         
         # Update alignment
         alignment_map_rev = {"auto": "自动", "left": "左对齐", "center": "居中", "right": "右对齐"}

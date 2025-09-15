@@ -203,12 +203,7 @@ class EditorFrame(ctk.CTkFrame):
         self.property_panel.register_callback('translator_changed', self._on_translator_changed)
         self.property_panel.register_callback('target_language_changed', self._on_target_language_changed)
 
-        # Property Panel Mask Editing
-        self.property_panel.register_callback('set_edit_mode', self._on_mask_tool_changed)
-        self.property_panel.register_callback('brush_size_changed', self._on_brush_size_changed)
-        self.property_panel.register_callback('toggle_mask_visibility', self._on_toggle_mask_visibility)
-        self.property_panel.register_callback('update_mask', self._update_mask_with_config)
-        self.property_panel.register_callback('toggle_removed_mask_visibility', self._on_toggle_removed_mask_visibility)
+
 
     def _setup_shortcuts(self):
         canvas = self.canvas_frame.canvas
@@ -594,8 +589,7 @@ class EditorFrame(ctk.CTkFrame):
         # 清空属性面板
         self.property_panel.clear_panel()
 
-        # 尝试释放GPU内存
-        self._release_gpu_memory()
+
         
         print("编辑器状态已清空")
 
@@ -1396,8 +1390,20 @@ class EditorFrame(ctk.CTkFrame):
             
             # Read values from all style widgets
             font_size = int(self.property_panel.widgets['font_size'].get())
-            font_color = self.property_panel.widgets['font_color'].get()
+            hex_color = self.property_panel.widgets['font_color'].get()
             
+            # --- UNIFICATION: Convert hex to RGB tuple ---
+            try:
+                if hex_color.startswith('#') and len(hex_color) == 7:
+                    r = int(hex_color[1:3], 16)
+                    g = int(hex_color[3:5], 16)
+                    b = int(hex_color[5:7], 16)
+                    fg_color_tuple = (r, g, b)
+                else:
+                    fg_color_tuple = (0, 0, 0) # Default to black on invalid format
+            except (ValueError, TypeError):
+                fg_color_tuple = (0, 0, 0) # Default to black on error
+
             alignment_map = {"自动": "auto", "左对齐": "left", "居中": "center", "右对齐": "right"}
             alignment_display = self.property_panel.widgets['alignment'].get()
             alignment = alignment_map.get(alignment_display, "auto")
@@ -1406,9 +1412,13 @@ class EditorFrame(ctk.CTkFrame):
             direction_display = self.property_panel.widgets['direction'].get()
             direction = direction_map.get(direction_display, "auto")
 
-            # Update region data
+            # Update region data with unified format
             self.regions_data[index]['font_size'] = font_size
-            self.regions_data[index]['font_color'] = font_color
+            self.regions_data[index]['fg_colors'] = fg_color_tuple # Use the unified key and format (plural)
+            if 'font_color' in self.regions_data[index]:
+                del self.regions_data[index]['font_color'] # Remove old key
+            if 'fg_color' in self.regions_data[index]:
+                del self.regions_data[index]['fg_color'] # Remove incorrect singular key if it exists
             self.regions_data[index]['alignment'] = alignment
             self.regions_data[index]['direction'] = direction
 
@@ -1518,18 +1528,20 @@ class EditorFrame(ctk.CTkFrame):
             current_file = getattr(self.file_manager, 'current_file_path', None) or self.current_image_path
             
             if current_file and current_file in self.translated_files:
-                # 情况1: 当前加载的是翻译图，直接覆盖翻译图文件
-                output_path = current_file
-                file_name = os.path.basename(output_path)
+                # Situation 1: Overwriting a translated file, but respecting the chosen format
+                base_name, _ = os.path.splitext(current_file)
+                new_extension = f".{output_format}" if output_format else os.path.splitext(current_file)[1]
+                output_path = base_name + new_extension
+                file_name_for_prompt = os.path.basename(output_path)
+
+                self.logger.info(f"[EXPORT] Detected translated file. Target path: {output_path}")
                 
-                print(f"[EXPORT] 检测到翻译图: {file_name}，将直接覆盖该文件")
-                
-                # 确认覆盖翻译图
-                if not messagebox.askyesno("确认覆盖", f"是否要覆盖当前的翻译图片 '{file_name}'？\n\n这将直接替换原有的翻译图片文件。"):
+                # Confirm overwrite
+                if not messagebox.askyesno("确认覆盖", f"是否要覆盖/保存为 '{file_name_for_prompt}'？"):
                     show_toast(self, "导出已取消", level="info")
                     return
                     
-                show_toast(self, f"正在覆盖翻译图片: {file_name}", level="info")
+                show_toast(self, f"正在导出: {file_name_for_prompt}", level="info")
                 
             else:
                 # 情况2: 当前加载的是源图或其他情况，导出到输出目录

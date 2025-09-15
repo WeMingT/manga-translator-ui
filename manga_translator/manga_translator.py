@@ -635,17 +635,17 @@ class MangaTranslator:
                         region_data['target_lang'] = config.translator.target_lang
                         logger.debug(f"Region target_lang missing in JSON, falling back to config's target_lang: {config.translator.target_lang}")
 
-                # Convert hex font_color from editor to fg_r, fg_g, fg_b for TextBlock
+                # Convert hex font_color from editor to an 'fg_color' tuple for TextBlock
                 if 'font_color' in region_data and isinstance(region_data['font_color'], str):
-                    try:
-                        hex_color = region_data['font_color']
-                        if hex_color.startswith('#'):
-                            r, g, b = hex2rgb(hex_color)
-                            region_data['fg_r'] = r
-                            region_data['fg_g'] = g
-                            region_data['fg_b'] = b
-                    except Exception as e:
-                        logger.warning(f"Could not parse font_color '{region_data['font_color']}': {e}")
+                    hex_color = region_data.pop('font_color') # Use pop to remove the old key
+                    if hex_color.startswith('#') and len(hex_color) == 7:
+                        try:
+                            r = int(hex_color[1:3], 16)
+                            g = int(hex_color[3:5], 16)
+                            b = int(hex_color[5:7], 16)
+                            region_data['fg_color'] = (r, g, b)
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Could not parse font_color '{hex_color}': {e}")
 
                 # Recreate the TextBlock object by unpacking the dictionary
                 # This restores all saved attributes
@@ -3328,7 +3328,48 @@ class MangaTranslator:
                             self._set_image_context(config, ctx.input)
                     
                     ctx = await self._complete_translation_pipeline(ctx, config)
-                    
+
+                    # --- BEGIN SAVE LOGIC ---
+                    if save_info and ctx.result:
+                        try:
+                            output_folder = save_info.get('output_folder')
+                            input_folders = save_info.get('input_folders', set())
+                            output_format = save_info.get('format')
+                            overwrite = save_info.get('overwrite', True)
+
+                            file_path = ctx.image_name
+                            final_output_dir = output_folder
+                            parent_dir = os.path.normpath(os.path.dirname(file_path))
+                            for folder in input_folders:
+                                if parent_dir.startswith(folder):
+                                    relative_path = os.path.relpath(parent_dir, folder)
+                                    final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                    break
+                            
+                            os.makedirs(final_output_dir, exist_ok=True)
+
+                            base_filename, _ = os.path.splitext(os.path.basename(file_path))
+                            if output_format and output_format.strip() and output_format.lower() != 'none':
+                                output_filename = f"{base_filename}.{output_format}"
+                            else:
+                                output_filename = os.path.basename(file_path)
+                            
+                            final_output_path = os.path.join(final_output_dir, output_filename)
+
+                            if not overwrite and os.path.exists(final_output_path):
+                                logger.info(f"  -> ⚠️ [HQ] Skipping existing file: {os.path.basename(final_output_path)}")
+                            else:
+                                image_to_save = ctx.result
+                                if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
+                                    image_to_save = image_to_save.convert('RGB')
+                                
+                                image_to_save.save(final_output_path, quality=self.save_quality)
+                                logger.info(f"  -> ✅ [HQ] Saved successfully: {os.path.basename(final_output_path)}")
+
+                        except Exception as save_err:
+                            logger.error(f"Error saving high-quality result for {os.path.basename(ctx.image_name)}: {save_err}")
+                    # --- END SAVE LOGIC ---
+
                     if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
                         self._save_text_to_file(ctx.image_name, ctx)
 

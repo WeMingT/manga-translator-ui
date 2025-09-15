@@ -321,7 +321,43 @@ def render(
     line_spacing,
     disable_font_border
 ):
-    fg, bg = region.get_font_colors()
+    # --- START BRUTEFORCE COLOR FIX ---
+    fg = (0, 0, 0) # Default to black
+    try:
+        # Priority 1: Check for the original hex string from the UI
+        if hasattr(region, 'font_color') and isinstance(region.font_color, str) and region.font_color.startswith('#'):
+            hex_c = region.font_color
+            if len(hex_c) == 7:
+                r = int(hex_c[1:3], 16)
+                g = int(hex_c[3:5], 16)
+                b = int(hex_c[5:7], 16)
+                fg = (r, g, b)
+        # Priority 2: Check for a pre-converted tuple 
+        elif hasattr(region, 'fg_colors') and isinstance(region.fg_colors, (tuple, list)) and len(region.fg_colors) == 3:
+            fg = tuple(region.fg_colors)
+        # Last resort: Use the method
+        else:
+            fg, _ = region.get_font_colors()
+    except Exception:
+        # If anything fails, fg remains black
+        pass
+
+    # Get background color separately
+    _, bg = region.get_font_colors()
+    # --- END BRUTEFORCE COLOR FIX ---
+
+    # Convert hex color string to RGB tuple, if necessary
+    if isinstance(fg, str) and fg.startswith('#') and len(fg) == 7:
+        try:
+            r = int(fg[1:3], 16)
+            g = int(fg[3:5], 16)
+            b = int(fg[5:7], 16)
+            fg = (r, g, b)
+        except ValueError:
+            fg = (0, 0, 0)  # Default to black on error
+    elif not isinstance(fg, (tuple, list)):
+        fg = (0, 0, 0) # Default to black if format is unexpected
+
     fg, bg = fg_bg_compare(fg, bg)
 
     if disable_font_border :

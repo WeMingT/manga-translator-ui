@@ -452,7 +452,7 @@ class AppController:
                 editor_frame = editor_view_instance.editor_frame
                 if hasattr(editor_frame, 'reload_config_and_redraw'):
                     # Use app.after to ensure this runs after the view is raised and visible
-                    self.app.after(50, editor_frame.reload_config_and_redraw)
+                    self.app.after(200, editor_frame.reload_config_and_redraw)
         else:
             self.shortcut_manager.pop_context("editor")
 
@@ -2248,6 +2248,10 @@ class AppController:
                         value = code
                         break
             
+            # Special handling for high_quality_prompt_path to reconstruct relative path
+            elif full_key == 'translator.high_quality_prompt_path' and isinstance(value, str) and value:
+                value = str(Path('dict', value).as_posix())
+
             # Special handling for translator to convert display name to internal name
             elif full_key == 'translator.translator' and isinstance(value, str):
                 reverse_mapping = {
