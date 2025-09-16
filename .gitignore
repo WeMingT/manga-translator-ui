@@ -63,3 +63,8 @@ models/ocr/ocr-ctc.ckpt
 高质量翻译实现文档.md
 dict/high_quality_translation_prompt.txt
 dict/wyxxl.json
+03.png
+03_translations.json
+123.txt
+gemini_key_validator.py
+gemini_key_validator_ui.py
