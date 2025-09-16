@@ -629,6 +629,12 @@ class MangaTranslator:
         regions = []
         for region_data in regions_data:
             try:
+                # Convert literal '\\n' to newline characters for the rendering engine
+                if 'text' in region_data and isinstance(region_data['text'], str):
+                    region_data['text'] = region_data['text'].replace('\\n', '\n')
+                if 'translation' in region_data and isinstance(region_data['translation'], str):
+                    region_data['translation'] = region_data['translation'].replace('\\n', '\n')
+
                 # If target_lang is missing or empty, set it from the config.
                 if not region_data.get('target_lang'):
                     if config and config.translator and config.translator.target_lang:
@@ -1406,6 +1412,9 @@ class MangaTranslator:
         return f"Here are the previous {context_type} for reference:\n" + "\n".join(numbered)
 
     async def _dispatch_with_context(self, config: Config, texts: list[str], ctx: Context):
+        # Attach config to context for translators that need it
+        ctx.config = config
+
         # 计算实际要使用的上下文页数和跳过的空页数
         # Calculate the actual number of context pages to use and empty pages to skip
         done_pages = self.all_page_translations
@@ -1456,17 +1465,57 @@ class MangaTranslator:
             else:
                 return await translator._translate(ctx.from_lang, config.translator.target_lang, texts)
 
+                return await dispatch_translation(
+                    config.translator.translator_gen,
+                    texts,
+                    config,
+                    self.use_mtpe,
+                    ctx,
+                    'cpu' if self._gpu_limited_memory else self.device
+                )
+        
+    async def _load_and_prepare_prompts(self, config: Config, ctx: Context):
+        """Loads custom HQ and line break prompts into the context object."""
+        # Load custom high-quality prompt from JSON file if specified
+        ctx.custom_prompt_json = None
+        if config.translator.high_quality_prompt_path:
+            try:
+                prompt_path = config.translator.high_quality_prompt_path
+                if not os.path.isabs(prompt_path):
+                    prompt_path = os.path.join(BASE_PATH, prompt_path)
+                
+                if os.path.exists(prompt_path):
+                    with open(prompt_path, 'r', encoding='utf-8') as f:
+                        ctx.custom_prompt_json = json.load(f)
+                    logger.info(f"Successfully loaded custom HQ prompt from: {prompt_path}")
+                    # Log the parsed content for user verification
+                    from .translators.gemini_hq import _flatten_prompt_data
+                    parsed_content = _flatten_prompt_data(ctx.custom_prompt_json)
+                    logger.info(f"--- Parsed Custom Prompt Content ---\n{parsed_content}\n------------------------------------")
+                else:
+                    logger.warning(f"Custom HQ prompt file not found at: {prompt_path}")
+            except Exception as e:
+                logger.error(f"Error loading custom HQ prompt: {e}")
 
-        return await dispatch_translation(
-            config.translator.translator_gen,
-            texts,
-            config.translator,
-            self.use_mtpe,
-            ctx,
-            'cpu' if self._gpu_limited_memory else self.device
-        )
+        # Load AI line break prompt if enabled
+        ctx.line_break_prompt_json = None
+        if config.render.disable_auto_wrap: # This is the "AI断句" switch
+            try:
+                line_break_prompt_path = os.path.join(BASE_PATH, 'dict', 'system_prompt_line_break.json')
+                if os.path.exists(line_break_prompt_path):
+                    with open(line_break_prompt_path, 'r', encoding='utf-8') as f:
+                        ctx.line_break_prompt_json = json.load(f)
+                    logger.info("AI line breaking is enabled. Loaded line break prompt.")
+                else:
+                    logger.warning("AI line breaking is enabled, but line break prompt file not found.")
+            except Exception as e:
+                logger.error(f"Failed to load line break prompt: {e}")
+        return ctx
 
     async def _run_text_translation(self, config: Config, ctx: Context):
+        # Centralized prompt loading logic
+        ctx = await self._load_and_prepare_prompts(config, ctx)
+
         # 检查text_regions是否为None或空
         if not ctx.text_regions:
             return []
@@ -1477,30 +1526,6 @@ class MangaTranslator:
     
         current_time = time.time()
         self._model_usage_timestamps[("translation", config.translator.translator)] = current_time
-
-        # Load custom high-quality prompt from JSON file if specified
-        ctx.custom_prompt_json = None
-        if config.translator.high_quality_prompt_path:
-            prompt_path = config.translator.high_quality_prompt_path
-            if not os.path.isabs(prompt_path):
-                prompt_path = os.path.join(BASE_PATH, prompt_path)
-            
-            if os.path.exists(prompt_path):
-                try:
-                    with open(prompt_path, 'r', encoding='utf-8') as f:
-                        ctx.custom_prompt_json = json.load(f)
-                    logger.info(f"Successfully loaded custom high-quality prompt from {prompt_path}")
-                except Exception as e:
-                    logger.error(f"Failed to load or parse custom prompt JSON from {prompt_path}: {e}")
-            else:
-                logger.warning(f"Custom high-quality prompt file not found at {prompt_path}")
-
-        if config.translator.translator in [Translator.gemini_hq, Translator.openai_hq]:
-            from PIL import Image
-            ctx.high_quality_batch_data = [{
-                'image': Image.fromarray(ctx.img_rgb),
-                'original_texts': [r.text for r in ctx.text_regions]
-            }]
 
         # --- Main translation logic ---
         if config.translator.translator == Translator.none:
@@ -3291,6 +3316,9 @@ class MangaTranslator:
                         enhanced_ctx = preprocessed_contexts[0][0] if preprocessed_contexts else Context()
                         enhanced_ctx.high_quality_batch_data = batch_data
                         enhanced_ctx.high_quality_batch_size = len(preprocessed_contexts)
+
+                        # Centralized prompt loading logic
+                        enhanced_ctx = await self._load_and_prepare_prompts(sample_config, enhanced_ctx)
                         
                         all_texts = [text for data in batch_data for text in data['original_texts']]
                         text_mapping = [(img_idx, region_idx) for img_idx, data in enumerate(batch_data) for region_idx, _ in enumerate(data['original_texts'])]

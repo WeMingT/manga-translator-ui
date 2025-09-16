@@ -166,9 +166,16 @@ def main():
                 detector=DetectorConfig(**config_dict.get('detector', {})),
                 colorizer=ColorizerConfig(**config_dict.get('colorizer', {})),
                 inpainter=InpainterConfig(**config_dict.get('inpainter', {})),
-                ocr=OcrConfig(**config_dict.get('ocr', {}))
+                ocr=OcrConfig(**config_dict.get('ocr', {})),
+                # Pass top-level arguments from the dictionary
+                filter_text=config_dict.get('filter_text'),
+                force_simple_sort=config_dict.get('force_simple_sort', False),
+                kernel_size=config_dict.get('kernel_size', 3),
+                mask_dilation_offset=config_dict.get('mask_dilation_offset', 20),
+                high_quality_batch_size=config_dict.get('high_quality_batch_size', 3)
             )
             flush_print("配置对象创建成功")
+            flush_print(f"[WORKER DEBUG] Parsed translator config: {config.translator}")
         except Exception as e:
             flush_print(f"创建配置对象失败: {e}")
             import traceback

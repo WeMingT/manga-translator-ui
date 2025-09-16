@@ -163,6 +163,7 @@ class RenderConfig(BaseModel):
     """Align rendered text"""
     disable_font_border: bool = False
     """Disable font border"""
+    disable_auto_wrap: bool = False
     font_size_offset: int = 0
     """Offset font size by a given amount, positive number increase font size and vice versa"""
     font_size_minimum: int = -1

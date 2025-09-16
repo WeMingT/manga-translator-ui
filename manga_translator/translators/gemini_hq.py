@@ -35,6 +35,27 @@ def encode_image_for_gemini(image, max_size=1024):
     return image
 
 
+def _flatten_prompt_data(data: Any, indent: int = 0) -> str:
+    """Recursively flattens a dictionary or list into a formatted string."""
+    prompt_parts = []
+    prefix = "  " * indent
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, (dict, list)):
+                prompt_parts.append(f"{prefix}- {key}:")
+                prompt_parts.append(_flatten_prompt_data(value, indent + 1))
+            else:
+                prompt_parts.append(f"{prefix}- {key}: {value}")
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, (dict, list)):
+                prompt_parts.append(_flatten_prompt_data(item, indent + 1))
+            else:
+                prompt_parts.append(f"{prefix}- {item}")
+    
+    return "\n".join(prompt_parts)
+
 class GeminiHighQualityTranslator(CommonTranslator):
     """
     Gemini高质量翻译器
@@ -104,92 +125,58 @@ class GeminiHighQualityTranslator(CommonTranslator):
 
             self.client = genai.GenerativeModel(**model_args)
     
-    def parse_args(self, config):
-        """解析配置参数，使用和原有Gemini翻译器相同的环境变量"""
-        # 从UI配置覆盖环境变量
-        ui_api_key = getattr(config, 'GEMINI_API_KEY', None) or getattr(config, 'api_key', None)
-        if ui_api_key:
-            self.api_key = ui_api_key
 
-        ui_base_url = getattr(config, 'api_base', None)
-        if ui_base_url:
-            self.base_url = ui_base_url
-        
-        self.model_name = getattr(config, 'model', self.model_name)
-        
-        # 设置翻译参数
-        self.max_tokens = getattr(config, 'max_tokens', self.max_tokens)
-        self.temperature = getattr(config, 'temperature', self.temperature)
-        
-        # 使用新配置重新设置客户端
-        self.client = None  # 强制重新初始化
-        self._setup_client()
-        
-        # 调用父类解析
-        super().parse_args(config)
     
-    def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None) -> str:
+    def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None) -> str:
         """构建系统提示词"""
-        custom_prompts = []
+        # Map language codes to full names for clarity in the prompt
+        lang_map = {
+            "CHS": "Simplified Chinese",
+            "CHT": "Traditional Chinese",
+            "JPN": "Japanese",
+            "ENG": "English",
+            "KOR": "Korean",
+            "VIN": "Vietnamese",
+            "FRA": "French",
+            "DEU": "German",
+            "ITA": "Italian",
+        }
+        target_lang_full = lang_map.get(target_lang, target_lang) # Fallback to the code itself
+
+        custom_prompt_str = ""
         if custom_prompt_json:
-            for key, value in custom_prompt_json.items():
-                if isinstance(value, str):
-                    custom_prompts.append(value)
-        
-        custom_prompt_str = "\n\n".join(custom_prompts)
+            custom_prompt_str = _flatten_prompt_data(custom_prompt_json)
+            self.logger.info(f"--- Custom Prompt Content ---\n{custom_prompt_str}\n---------------------------")
 
-        base_prompt = f"""You are an expert manga translator. Your task is to accurately translate manga text from the source language into **{{{target_lang}}}**. You will be given the full manga page for context.
+        line_break_prompt_str = ""
+        if line_break_prompt_json and line_break_prompt_json.get('line_break_prompt'):
+            line_break_prompt_str = line_break_prompt_json['line_break_prompt']
 
-**CRITICAL INSTRUCTIONS (FOLLOW STRICTLY):**
+        try:
+            from ..utils import BASE_PATH
+            import os
+            import json
+            prompt_path = os.path.join(BASE_PATH, 'dict', 'system_prompt_hq.json')
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                base_prompt_data = json.load(f)
+            base_prompt = base_prompt_data['system_prompt']
+        except Exception as e:
+            self.logger.warning(f"Failed to load system prompt from file, falling back to hardcoded prompt. Error: {e}")
+            base_prompt = f"""You are an expert manga translator. Your task is to accurately translate manga text from the source language into **{{{target_lang}}}**. You will be given the full manga page for context.\n\n**CRITICAL INSTRUCTIONS (FOLLOW STRICTLY):**\n\n1.  **DIRECT TRANSLATION ONLY**: Your output MUST contain ONLY the raw, translated text. Nothing else.\n    -   DO NOT include the original text.\n    -   DO NOT include any explanations, greetings, apologies, or any conversational text.\n    -   DO NOT use Markdown formatting (like ```json or ```).\n    -   The output is fed directly to an automated script. Any extra text will cause it to fail.\n\n2.  **MATCH LINE COUNT**: The number of lines in your output MUST EXACTLY match the number of text regions you are asked to translate. Each line in your output corresponds to one numbered text region in the input.\n\n3.  **TRANSLATE EVERYTHING**: Translate all text provided, including sound effects and single characters. Do not leave any line untranslated.\n\n4.  **ACCURACY AND TONE**:\n    -   Preserve the original tone, emotion, and character's voice.\n    -   Ensure consistent translation of names, places, and special terms.\n    -   For onomatopoeia (sound effects), provide the equivalent sound in {{{target_lang}}} or a brief description (e.g., '(rumble)', '(thud)').\n\n---\n\n**EXAMPLE OF CORRECT AND INCORRECT OUTPUT:**\n\n**[ CORRECT OUTPUT EXAMPLE ]**\nThis is a correct response. Notice it only contains the translated text, with each translation on a new line.\n\n(Imagine the user input was: "1. うるさい！", "2. 黙れ！")\n```\n吵死了！\n闭嘴！\n```\n\n**[ ❌ INCORRECT OUTPUT EXAMPLE ]**\nThis is an incorrect response because it includes extra text and explanations.\n\n(Imagine the user input was: "1. うるさい！", "2. 黙れ！")\n```\n好的，这是您的翻译：\n1. 吵死了！\n2. 闭嘴！\n```\n**REASONING:** The above example is WRONG because it includes "好的，这是您的翻译：" and numbering. Your response must be ONLY the translated text, line by line.\n\n---\n\n**FINAL INSTRUCTION:** Now, perform the translation task. Remember, your response must be clean, containing only the translated text.\n"""
 
-1.  **DIRECT TRANSLATION ONLY**: Your output MUST contain ONLY the raw, translated text. Nothing else.
-    -   DO NOT include the original text.
-    -   DO NOT include any explanations, greetings, apologies, or any conversational text.
-    -   DO NOT use Markdown formatting (like ```json or ```).
-    -   The output is fed directly to an automated script. Any extra text will cause it to fail.
+        # Replace placeholder with the full language name
+        base_prompt = base_prompt.replace("{{{target_lang}}}", target_lang_full)
 
-2.  **MATCH LINE COUNT**: The number of lines in your output MUST EXACTLY match the number of text regions you are asked to translate. Each line in your output corresponds to one numbered text region in the input.
-
-3.  **TRANSLATE EVERYTHING**: Translate all text provided, including sound effects and single characters. Do not leave any line untranslated.
-
-4.  **ACCURACY AND TONE**:
-    -   Preserve the original tone, emotion, and character's voice.
-    -   Ensure consistent translation of names, places, and special terms.
-    -   For onomatopoeia (sound effects), provide the equivalent sound in {{{target_lang}}} or a brief description (e.g., '(rumble)', '(thud)').
-
----
-
-**EXAMPLE OF CORRECT AND INCORRECT OUTPUT:**
-
-**[ CORRECT OUTPUT EXAMPLE ]**
-This is a correct response. Notice it only contains the translated text, with each translation on a new line.
-
-(Imagine the user input was: "1. うるさい！", "2. 黙れ！")
-```
-吵死了！
-闭嘴！
-```
-
-**[ ❌ INCORRECT OUTPUT EXAMPLE ]**
-This is an incorrect response because it includes extra text and explanations.
-
-(Imagine the user input was: "1. うるさい！", "2. 黙れ！")
-```
-好的，这是您的翻译：
-1. 吵死了！
-2. 闭嘴！
-```
-**REASONING:** The above example is WRONG because it includes "好的，这是您的翻译：" and numbering. Your response must be ONLY the translated text, line by line.
-
----
-
-**FINAL INSTRUCTION:** Now, perform the translation task. Remember, your response must be clean, containing only the translated text.
-"""
-
+        # Combine prompts
+        final_prompt = ""
+        if line_break_prompt_str:
+            final_prompt += f"{line_break_prompt_str}\n\n---\n\n"
         if custom_prompt_str:
-            return f"{custom_prompt_str}\n\n---\n\n{base_prompt}"
-        else:
-            return base_prompt
+            final_prompt += f"{custom_prompt_str}\n\n---\n\n"
+        
+        final_prompt += base_prompt
+        self.logger.info(f"--- Complete System Prompt ---\n{final_prompt}\n--------------------------")
+        return final_prompt
 
     def _build_user_prompt(self, batch_data: List[Dict], texts: List[str]) -> str:
         """构建用户提示词"""
@@ -207,11 +194,11 @@ This is an incorrect response because it includes extra text and explanations.
         for i, text in enumerate(texts):
             prompt += f"{i+1}. {text}\n"
         
-        prompt += "\nPlease provide translations in the same order:"
+        prompt += "\nCRITICAL: Provide translations in the exact same order as the numbered input text regions. Your first line of output must be the translation for text region #1, your second line for #2, and so on. DO NOT CHANGE THE ORDER."
         
         return prompt
 
-    async def _translate_batch_high_quality(self, texts: List[str], batch_data: List[Dict], source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None) -> List[str]:
+    async def _translate_batch_high_quality(self, texts: List[str], batch_data: List[Dict], source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None) -> List[str]:
         """高质量批量翻译方法"""
         if not texts:
             return []
@@ -240,7 +227,7 @@ This is an incorrect response because it includes extra text and explanations.
         self.logger.info("--------------------")
 
         # 添加系统提示词和用户提示词
-        system_prompt = self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json)
+        system_prompt = self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
         user_prompt = self._build_user_prompt(batch_data, texts)
         
         content_parts.append(system_prompt + "\n\n" + user_prompt)
@@ -265,6 +252,9 @@ This is an incorrect response because it includes extra text and explanations.
                 
                 # 尝试访问 .text 属性，如果API因安全原因等返回空内容，这里会触发异常
                 result_text = response.text.strip()
+                # 增加清理步骤，移除可能的Markdown代码块
+                if result_text.startswith("```") and result_text.endswith("```"):
+                    result_text = result_text[3:-3].strip()
                 
                 # 如果成功获取文本，则处理并返回
                 translations = []
@@ -273,6 +263,8 @@ This is an incorrect response because it includes extra text and explanations.
                     if line:
                         # 移除编号（如"1. "）
                         line = re.sub(r'^\d+\.\s*', '', line)
+                        # Replace other possible newline representations, but keep [BR]
+                        line = line.replace('\\n', '\n').replace('↵', '\n')
                         translations.append(line)
                 
                 # 确保翻译数量匹配
@@ -319,7 +311,8 @@ This is an incorrect response because it includes extra text and explanations.
             if batch_data and len(batch_data) > 0:
                 self.logger.info(f"高质量翻译模式：正在打包 {len(batch_data)} 张图片并发送...")
                 custom_prompt_json = getattr(ctx, 'custom_prompt_json', None)
-                return await self._translate_batch_high_quality(queries, batch_data, from_lang, to_lang, custom_prompt_json=custom_prompt_json)
+                line_break_prompt_json = getattr(ctx, 'line_break_prompt_json', None)
+                return await self._translate_batch_high_quality(queries, batch_data, from_lang, to_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
         
         # 普通单文本翻译（后备方案）
         if not self.client:

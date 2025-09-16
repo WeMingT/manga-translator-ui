@@ -27,7 +27,7 @@ from .gemini_2stage import Gemini2StageTranslator
 from .custom_openai import CustomOpenAiTranslator
 from .openai_hq import OpenAIHighQualityTranslator
 from .gemini_hq import GeminiHighQualityTranslator
-from ..config import Translator, TranslatorConfig, TranslatorChain
+from ..config import Config, Translator, TranslatorConfig, TranslatorChain
 from ..utils import Context
 
 OFFLINE_TRANSLATORS = {
@@ -89,7 +89,7 @@ async def prepare(chain: TranslatorChain):
             await translator.download()
 
 # TODO: Optionally take in strings instead of TranslatorChain for simplicity
-async def dispatch(chain: TranslatorChain, queries: List[str], translator_config: Optional[TranslatorConfig] = None, use_mtpe: bool = False, args:Optional[Context] = None, device: str = 'cpu') -> List[str]:
+async def dispatch(chain: TranslatorChain, queries: List[str], config: Config, use_mtpe: bool = False, args:Optional[Context] = None, device: str = 'cpu') -> List[str]:
     if not queries:
         return queries
 
@@ -105,8 +105,7 @@ async def dispatch(chain: TranslatorChain, queries: List[str], translator_config
             if isinstance(translator, OfflineTranslator):
                 await translator.load('auto', chain.langs[flag], device)
                 pass
-            if translator_config:
-                translator.parse_args(translator_config)
+            translator.parse_args(config.translator)
             if key == "gemini_2stage" or key == "chatgpt_2stage":
                 queries = await translator.translate('auto', chain.langs[flag], queries, args)
             else:
@@ -120,8 +119,7 @@ async def dispatch(chain: TranslatorChain, queries: List[str], translator_config
         translator = get_translator(key)
         if isinstance(translator, OfflineTranslator):
             await translator.load('auto', tgt_lang, device)
-        if translator_config:
-            translator.parse_args(translator_config)
+        translator.parse_args(config.translator)
         if key.value in ["gemini_2stage", "chatgpt_2stage", "gemini_hq", "openai_hq"]:
             queries = await translator.translate('auto', tgt_lang, queries, ctx=args)
         else:

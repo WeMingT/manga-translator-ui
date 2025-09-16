@@ -310,7 +310,7 @@ async def dispatch(
     dst_points_list = resize_regions_to_font_size(img, text_regions, config)
 
     for region, dst_points in tqdm(zip(text_regions, dst_points_list), '[render]', total=len(text_regions)):
-        img = render(img, region, dst_points, not config.render.no_hyphenation, config.render.line_spacing, config.render.disable_font_border)
+        img = render(img, region, dst_points, not config.render.no_hyphenation, config.render.line_spacing, config.render.disable_font_border, config)
     return img
 
 def render(
@@ -319,7 +319,8 @@ def render(
     dst_points,
     hyphenate,
     line_spacing,
-    disable_font_border
+    disable_font_border,
+    config: Config
 ):
     # --- START BRUTEFORCE COLOR FIX ---
     fg = (0, 0, 0) # Default to black
@@ -392,6 +393,7 @@ def render(
             region.target_lang,
             hyphenate,
             line_spacing,
+            config
         )
     else:
         temp_box = text_render.put_text_vertical(

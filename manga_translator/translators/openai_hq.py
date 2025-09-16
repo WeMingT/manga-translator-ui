@@ -39,6 +39,27 @@ def encode_image_for_openai(image, max_size=1024):
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
 
+def _flatten_prompt_data(data: Any, indent: int = 0) -> str:
+    """Recursively flattens a dictionary or list into a formatted string."""
+    prompt_parts = []
+    prefix = "  " * indent
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, (dict, list)):
+                prompt_parts.append(f"{prefix}- {key}:")
+                prompt_parts.append(_flatten_prompt_data(value, indent + 1))
+            else:
+                prompt_parts.append(f"{prefix}- {key}: {value}")
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, (dict, list)):
+                prompt_parts.append(_flatten_prompt_data(item, indent + 1))
+            else:
+                prompt_parts.append(f"{prefix}- {item}")
+    
+    return "\n".join(prompt_parts)
+
 class OpenAIHighQualityTranslator(CommonTranslator):
     """
     OpenAI高质量翻译器
@@ -64,42 +85,44 @@ class OpenAIHighQualityTranslator(CommonTranslator):
                 base_url=self.base_url
             )
     
-    def parse_args(self, config):
-        """解析配置参数，使用和原有OpenAI翻译器相同的环境变量"""
-        # 从UI配置覆盖环境变量
-        ui_api_key = getattr(config, 'OPENAI_API_KEY', None) or getattr(config, 'api_key', None)
-        if ui_api_key:
-            self.api_key = ui_api_key
 
-        ui_base_url = getattr(config, 'api_base', None)
-        if ui_base_url:
-            self.base_url = ui_base_url
-        
-        self.model = getattr(config, 'model', self.model)
-        
-        # 设置翻译参数
-        self.max_tokens = getattr(config, 'max_tokens', self.max_tokens)
-        self.temperature = getattr(config, 'temperature', self.temperature)
-        
-        # 使用新配置重新设置客户端
-        self.client = None  # 强制重新初始化
-        self._setup_client()
-        
-        # 调用父类解析
-        super().parse_args(config)
     
-    def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None) -> str:
+    def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None) -> str:
         """构建系统提示词"""
-        custom_prompts = []
-        if custom_prompt_json:
-            # The user wants to read all sections from the JSON
-            for key, value in custom_prompt_json.items():
-                if isinstance(value, str):
-                    custom_prompts.append(value)
-        
-        custom_prompt_str = "\n\n".join(custom_prompts)
+        # Map language codes to full names for clarity in the prompt
+        lang_map = {
+            "CHS": "Simplified Chinese",
+            "CHT": "Traditional Chinese",
+            "JPN": "Japanese",
+            "ENG": "English",
+            "KOR": "Korean",
+            "VIN": "Vietnamese",
+            "FRA": "French",
+            "DEU": "German",
+            "ITA": "Italian",
+        }
+        target_lang_full = lang_map.get(target_lang, target_lang) # Fallback to the code itself
 
-        base_prompt = f"""You are an expert manga translator. Your task is to accurately translate manga text from the source language into **{{{target_lang}}}**. You will be given the full manga page for context.
+        custom_prompt_str = ""
+        if custom_prompt_json:
+            custom_prompt_str = _flatten_prompt_data(custom_prompt_json)
+            self.logger.info(f"--- Custom Prompt Content ---\n{custom_prompt_str}\n---------------------------")
+
+        line_break_prompt_str = ""
+        if line_break_prompt_json and line_break_prompt_json.get('line_break_prompt'):
+            line_break_prompt_str = line_break_prompt_json['line_break_prompt']
+
+        try:
+            from ..utils import BASE_PATH
+            import os
+            import json
+            prompt_path = os.path.join(BASE_PATH, 'dict', 'system_prompt_hq.json')
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                base_prompt_data = json.load(f)
+            base_prompt = base_prompt_data['system_prompt']
+        except Exception as e:
+            self.logger.warning(f"Failed to load system prompt from file, falling back to hardcoded prompt. Error: {e}")
+            base_prompt = f"""You are an expert manga translator. Your task is to accurately translate manga text from the source language into **{{{target_lang}}}**. You will be given the full manga page for context.
 
 **CRITICAL INSTRUCTIONS (FOLLOW STRICTLY):**
 
@@ -147,10 +170,18 @@ This is an incorrect response because it includes extra text and explanations.
 **FINAL INSTRUCTION:** Now, perform the translation task. Remember, your response must be clean, containing only the translated text.
 """
 
+        # Replace placeholder with the full language name
+        base_prompt = base_prompt.replace("{{{target_lang}}}", target_lang_full)
+
+        # Combine prompts
+        final_prompt = ""
+        if line_break_prompt_str:
+            final_prompt += f"{line_break_prompt_str}\n\n---\n\n"
         if custom_prompt_str:
-            return f"{custom_prompt_str}\n\n---\n\n{base_prompt}"
-        else:
-            return base_prompt
+            final_prompt += f"{custom_prompt_str}\n\n---\n\n"
+        
+        final_prompt += base_prompt
+        return final_prompt
 
     def _build_user_prompt(self, batch_data: List[Dict], texts: List[str]) -> str:
         """构建用户提示词"""
@@ -168,11 +199,11 @@ This is an incorrect response because it includes extra text and explanations.
         for i, text in enumerate(texts):
             prompt += f"{i+1}. {text}\n"
         
-        prompt += "\nPlease provide translations in the same order:"
+        prompt += "\nCRITICAL: Provide translations in the exact same order as the numbered input text regions. Your first line of output must be the translation for text region #1, your second line for #2, and so on. DO NOT CHANGE THE ORDER."
         
         return prompt
 
-    async def _translate_batch_high_quality(self, texts: List[str], batch_data: List[Dict], source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None) -> List[str]:
+    async def _translate_batch_high_quality(self, texts: List[str], batch_data: List[Dict], source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None) -> List[str]:
         """高质量批量翻译方法"""
         if not texts:
             return []
@@ -200,7 +231,7 @@ This is an incorrect response because it includes extra text and explanations.
             })
         
         # 构建消息
-        system_prompt = self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json)
+        system_prompt = self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
         user_prompt = self._build_user_prompt(batch_data, texts)
         
         user_content = [{"type": "text", "text": user_prompt}]
@@ -229,6 +260,9 @@ This is an incorrect response because it includes extra text and explanations.
                 # 检查成功条件
                 if response.choices and response.choices[0].message.content and response.choices[0].finish_reason != 'content_filter':
                     result_text = response.choices[0].message.content.strip()
+                    # 增加清理步骤，移除可能的Markdown代码块
+                    if result_text.startswith("```") and result_text.endswith("```"):
+                        result_text = result_text[3:-3].strip()
                     
                     # 解析翻译结果
                     translations = []
@@ -236,6 +270,8 @@ This is an incorrect response because it includes extra text and explanations.
                         line = line.strip()
                         if line:
                             line = re.sub(r'^\d+\.\s*', '', line)
+                            # Replace other possible newline representations, but keep [BR]
+                            line = line.replace('\\n', '\n').replace('↵', '\n')
                             translations.append(line)
                     
                     while len(translations) < len(texts):
@@ -292,7 +328,8 @@ This is an incorrect response because it includes extra text and explanations.
             if batch_data and len(batch_data) > 0:
                 self.logger.info(f"使用OpenAI高质量翻译模式处理{len(batch_data)}张图片")
                 custom_prompt_json = getattr(ctx, 'custom_prompt_json', None)
-                return await self._translate_batch_high_quality(queries, batch_data, from_lang, to_lang, custom_prompt_json=custom_prompt_json)
+                line_break_prompt_json = getattr(ctx, 'line_break_prompt_json', None)
+                return await self._translate_batch_high_quality(queries, batch_data, from_lang, to_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
         
         # 普通单文本翻译（后备方案）
         if not self.client:

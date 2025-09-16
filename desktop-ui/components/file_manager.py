@@ -76,6 +76,13 @@ class FileManager:
                 image_data = data[image_key]
 
             regions = image_data.get('regions', [])
+
+            # Per user request, convert literal '\\n' to '↵' for display in the editor
+            for region in regions:
+                if 'text' in region and isinstance(region['text'], str):
+                    region['text'] = region['text'].replace('\\n', '↵')
+                if 'translation' in region and isinstance(region['translation'], str):
+                    region['translation'] = region['translation'].replace('\\n', '↵')
             
             # Get the default target language from the config service
             config = self.config_service.get_config()

@@ -826,10 +826,20 @@ def is_cjk_lang(lang: str):
 
 def put_text_horizontal(font_size: int, text: str, width: int, height: int, alignment: str,
                         reversed_direction: bool, fg: Tuple[int, int, int], bg: Tuple[int, int, int],
-                        lang: str = 'en_US', hyphenate: bool = True, line_spacing: int = 0, layout_mode: str = 'default'):
+                        lang: str = 'en_US', hyphenate: bool = True, line_spacing: int = 0, config=None):
     text = compact_special_symbols(text)
     if not text : 
         return
+
+    layout_mode = 'default'
+    if config:
+        layout_mode = config.render.layout_mode
+        # Check for no-wrap condition and handle AI line breaks
+        if layout_mode == 'smart_scaling' and config.render.disable_auto_wrap:
+            width = 99999
+            # Use a case-insensitive regex to handle variations like [br], [ BR ], etc.
+            text = re.sub(r'\s*\[BR\]\s*', '\n', text, flags=re.IGNORECASE)
+
     bg_size = int(max(font_size * 0.07, 1)) if bg is not None else 0
     spacing_y = int(font_size * (line_spacing or 0.01))
 
