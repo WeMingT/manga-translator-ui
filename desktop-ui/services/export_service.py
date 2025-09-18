@@ -192,13 +192,22 @@ class ExportService:
 
                     final_image.paste(rendered_text_layer, (0, 0), rendered_text_layer)
 
-                    # Handle RGBA to RGB conversion for JPEG
-                    if output_path.lower().endswith(('.jpg', '.jpeg')):
+                    # Handle image saving, applying quality settings for supported formats
+                    output_lower = output_path.lower()
+                    
+                    if output_lower.endswith(('.jpg', '.jpeg')):
                         self.logger.info("Output is JPEG, converting from RGBA to RGB...")
                         final_image = final_image.convert('RGB')
-                            
-                    # Save the final composited image
-                    final_image.save(output_path)
+                        save_quality = config.get('cli', {}).get('save_quality', 95)
+                        self.logger.info(f"Saving JPEG with quality: {save_quality}")
+                        final_image.save(output_path, quality=save_quality)
+                    elif output_lower.endswith('.webp'):
+                        save_quality = config.get('cli', {}).get('save_quality', 95)
+                        self.logger.info(f"Saving WEBP with quality: {save_quality}")
+                        final_image.save(output_path, quality=save_quality)
+                    else:
+                        # For other formats like PNG, save directly
+                        final_image.save(output_path)
                     
                     if success_callback:
                         success_callback(f"图片已导出到: {output_path}")

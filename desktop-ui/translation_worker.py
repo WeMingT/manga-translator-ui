@@ -253,10 +253,17 @@ def main():
                                     continue
 
                                 image_to_save = ctx.result
-                                if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                                    image_to_save = image_to_save.convert('RGB')
-                                
-                                image_to_save.save(final_output_path)
+                                output_lower = final_output_path.lower()
+                                save_quality = config_dict.get('cli', {}).get('save_quality', 95)
+
+                                if output_lower.endswith(('.jpg', '.jpeg')):
+                                    if image_to_save.mode in ('RGBA', 'LA'):
+                                        image_to_save = image_to_save.convert('RGB')
+                                    image_to_save.save(final_output_path, quality=save_quality)
+                                elif output_lower.endswith('.webp'):
+                                    image_to_save.save(final_output_path, quality=save_quality)
+                                else:
+                                    image_to_save.save(final_output_path)
                                 flush_print(f"  -> ✅ [BATCH] 保存成功: {os.path.basename(final_output_path)}")
                             except Exception as e:
                                 flush_print(f"  -> ❌ [BATCH] 保存文件时出错 {os.path.basename(ctx.image_name)}: {e}")
@@ -320,10 +327,17 @@ def main():
                                     flush_print(f"  -> ⚠️  跳过已存在的文件: {os.path.basename(final_output_path)} (如需覆盖请勾选 '覆盖已存在文件')")
                                 else:
                                     image_to_save = ctx.result
-                                    if final_output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                                        image_to_save = image_to_save.convert('RGB')
-                                    
-                                    image_to_save.save(final_output_path)
+                                    output_lower = final_output_path.lower()
+                                    save_quality = config_dict.get('cli', {}).get('save_quality', 95)
+
+                                    if output_lower.endswith(('.jpg', '.jpeg')):
+                                        if image_to_save.mode in ('RGBA', 'LA'):
+                                            image_to_save = image_to_save.convert('RGB')
+                                        image_to_save.save(final_output_path, quality=save_quality)
+                                    elif output_lower.endswith('.webp'):
+                                        image_to_save.save(final_output_path, quality=save_quality)
+                                    else:
+                                        image_to_save.save(final_output_path)
                                     flush_print(f"  -> ✅ 翻译完成: {os.path.basename(final_output_path)}")
                             else:
                                 flush_print(f"  -> ✅ 文本导出成功: {os.path.basename(file_path)}")

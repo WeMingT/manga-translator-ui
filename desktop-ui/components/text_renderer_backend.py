@@ -1,6 +1,7 @@
 import customtkinter as ctk
 from PIL import Image, ImageTk
 import numpy as np
+import re
 import math
 import cv2
 import hashlib
@@ -8,7 +9,7 @@ from typing import List, Dict, Any, Set
 import editing_logic
 
 # Import backend rendering functions and data structures
-from manga_translator.rendering.text_render import put_text_horizontal, put_text_vertical, set_font
+from manga_translator.rendering.text_render import put_text_horizontal, put_text_vertical, set_font, auto_add_horizontal_tags
 from manga_translator.rendering import resize_regions_to_font_size
 from manga_translator.utils import TextBlock
 from services.transform_service import TransformService
@@ -103,7 +104,7 @@ class BackendTextRenderer:
         else:
             print(f"[BackendTextRenderer] 字体文件不存在: {full_font_path}")
 
-    def draw_regions(self, text_blocks: List[TextBlock], dst_points_list: List[np.ndarray], selected_indices: List[int] = [], transform_service: TransformService = None, hide_indices: Set[int] = None, fast_mode: bool = False, hyphenate: bool = True, line_spacing: float = None, disable_font_border: bool = False):
+    def draw_regions(self, text_blocks: List[TextBlock], dst_points_list: List[np.ndarray], selected_indices: List[int] = [], transform_service: TransformService = None, hide_indices: Set[int] = None, fast_mode: bool = False, hyphenate: bool = True, line_spacing: float = None, disable_font_border: bool = False, render_config: dict = None):
         if not transform_service or text_blocks is None:
             return
 
@@ -138,55 +139,70 @@ class BackendTextRenderer:
             if self.text_visible and not fast_mode and dst_points_list and i < len(dst_points_list):
                 dst_points = dst_points_list[i]
                 if dst_points is not None:
-                    self._draw_region_text(i, text_block, dst_points, transform_service, hyphenate, line_spacing, disable_font_border)
+                    self._draw_region_text(i, text_block, dst_points, transform_service, hyphenate, line_spacing, disable_font_border, render_config)
 
-    def _draw_region_text(self, i: int, text_block: TextBlock, dst_points: np.ndarray, transform_service: TransformService, hyphenate: bool, line_spacing: float, disable_font_border: bool = False):
-        text_to_draw = text_block.translation or text_block.text
-        if not text_to_draw:
-            return
-
-        cache_key = self._generate_render_cache_key(text_block, dst_points, hyphenate, line_spacing, disable_font_border)
-        
-        if cache_key in self._text_render_cache:
-            temp_box, render_w, render_h, norm_h, norm_v = self._text_render_cache[cache_key]
-        else:
-            try:
-                fg_color, bg_color = text_block.get_font_colors()
-                if disable_font_border:
-                    bg_color = None
-                
-                middle_pts = (dst_points[:, [1, 2, 3, 0]] + dst_points) / 2
-                norm_h = np.linalg.norm(middle_pts[:, 1] - middle_pts[:, 3], axis=1)
-                norm_v = np.linalg.norm(middle_pts[:, 2] - middle_pts[:, 0], axis=1)
-                render_w, render_h = int(round(norm_h[0])), int(round(norm_v[0]))
-                if render_w <= 0 or render_h <= 0:
-                    return
-
-                try:
-                    print(f"[BACKEND RENDER] Region {i}: Attempting to set font: {text_block.font_family}")
-                    set_font(text_block.font_family)
-                    print(f"[BACKEND RENDER] Region {i}: Font set successfully.")
-                except Exception as e:
-                    print(f"[BACKEND RENDER] Region {i}: ERROR calling set_font with path '{text_block.font_family}': {e}")
-                    # Continue without setting the font, it will use the last successful one
-                
-                temp_box = None
-                if text_block.horizontal:
-                    temp_box = put_text_horizontal(text_block.font_size, text_block.get_translation_for_rendering(), render_w, render_h, text_block.alignment, text_block.direction == 'hl', fg_color, bg_color, text_block.target_lang, hyphenate, line_spacing, layout_mode=text_block.layout_mode)
-                else:
-                    temp_box = put_text_vertical(text_block.font_size, text_block.get_translation_for_rendering(), render_h, text_block.alignment, fg_color, bg_color, line_spacing)
-
-                if temp_box is None or temp_box.size == 0:
-                    return
-                
-                self._cache_render_result(cache_key, temp_box, render_w, render_h, norm_h, norm_v)
-            except Exception as e:
-                print(f"ERROR during text rendering pre-computation for region {i}: {e}")
-                import traceback
-                traceback.print_exc()
+    def _draw_region_text(self, i: int, text_block: TextBlock, dst_points: np.ndarray, transform_service: TransformService, hyphenate: bool, line_spacing: float, disable_font_border: bool = False, render_config: dict = None):
+        original_translation = text_block.translation
+        try:
+            # --- TEXT PROCESSING PIPELINE ---
+            text_to_process = original_translation or text_block.text
+            if not text_to_process:
                 return
 
-        try:
+            # 1. Normalize newlines and [BR] tags
+            processed_text = re.sub(r'\s*\[BR\]\s*', '\n', text_to_process.replace('↵', '\n'), flags=re.IGNORECASE)
+
+            # 2. For vertical text, auto-add horizontal tags (This is now handled inside put_text_vertical based on config)
+            # if not text_block.horizontal:
+            #     processed_text = auto_add_horizontal_tags(processed_text)
+            
+            # 3. Temporarily overwrite the translation on the object for caching and rendering
+            text_block.translation = processed_text
+
+            # --- ORIGINAL CACHING & RENDERING LOGIC ---
+            cache_key = self._generate_render_cache_key(text_block, dst_points, hyphenate, line_spacing, disable_font_border)
+            
+            if cache_key in self._text_render_cache:
+                temp_box, render_w, render_h, norm_h, norm_v = self._text_render_cache[cache_key]
+            else:
+                try:
+                    from manga_translator.config import Config, RenderConfig
+                    fg_color, bg_color = text_block.get_font_colors()
+                    if disable_font_border:
+                        bg_color = None
+                    
+                    middle_pts = (dst_points[:, [1, 2, 3, 0]] + dst_points) / 2
+                    norm_h = np.linalg.norm(middle_pts[:, 1] - middle_pts[:, 3], axis=1)
+                    norm_v = np.linalg.norm(middle_pts[:, 2] - middle_pts[:, 0], axis=1)
+                    render_w, render_h = int(round(norm_h[0])), int(round(norm_v[0]))
+                    if render_w <= 0 or render_h <= 0:
+                        return
+
+                    try:
+                        set_font(text_block.font_family)
+                    except Exception as e:
+                        print(f"[BACKEND RENDER] Region {i}: ERROR calling set_font with path '{text_block.font_family}': {e}")
+
+                    # Create a proper Config object from the render_config dict
+                    config_obj = Config(render=RenderConfig(**render_config)) if render_config else Config()
+
+                    temp_box = None
+                    if text_block.horizontal:
+                        temp_box = put_text_horizontal(text_block.font_size, text_block.get_translation_for_rendering(), render_w, render_h, text_block.alignment, text_block.direction == 'hl', fg_color, bg_color, text_block.target_lang, hyphenate, line_spacing, config=config_obj)
+                    else:
+                        temp_box = put_text_vertical(text_block.font_size, text_block.get_translation_for_rendering(), render_h, text_block.alignment, fg_color, bg_color, line_spacing, config=config_obj)
+
+                    if temp_box is None or temp_box.size == 0:
+                        return
+                    
+                    self._cache_render_result(cache_key, temp_box, render_w, render_h, norm_h, norm_v)
+                except Exception as e:
+                    print(f"ERROR during text rendering pre-computation for region {i}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return
+
+            # --- ORIGINAL PASTING LOGIC ---
             h_temp, w_temp, _ = temp_box.shape
             r_temp = w_temp / h_temp if h_temp > 0 else 0
             r_orig = norm_h[0] / norm_v[0] if norm_v[0] > 0 else 0
@@ -243,6 +259,9 @@ class BackendTextRenderer:
 
         except Exception as e:
             print(f"Error during backend text rendering for region {i}: {e}")
+        finally:
+            # Restore the original translation to avoid side effects
+            text_block.translation = original_translation
 
     def _draw_region_box(self, i: int, dst_points: np.ndarray, transform_service: TransformService):
         """绘制绿色框 - 显示根据译文长度缩放后的实际渲染区域"""

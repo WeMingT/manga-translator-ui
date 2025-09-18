@@ -106,7 +106,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         custom_prompt_str = ""
         if custom_prompt_json:
             custom_prompt_str = _flatten_prompt_data(custom_prompt_json)
-            self.logger.info(f"--- Custom Prompt Content ---\n{custom_prompt_str}\n---------------------------")
+            # self.logger.info(f"--- Custom Prompt Content ---\n{custom_prompt_str}\n---------------------------")
 
         line_break_prompt_str = ""
         if line_break_prompt_json and line_break_prompt_json.get('line_break_prompt'):
