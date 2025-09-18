@@ -146,7 +146,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
         custom_prompt_str = ""
         if custom_prompt_json:
             custom_prompt_str = _flatten_prompt_data(custom_prompt_json)
-            self.logger.info(f"--- Custom Prompt Content ---\n{custom_prompt_str}\n---------------------------")
+            # self.logger.info(f"--- Custom Prompt Content ---\n{custom_prompt_str}\n---------------------------")
 
         line_break_prompt_str = ""
         if line_break_prompt_json and line_break_prompt_json.get('line_break_prompt'):
@@ -175,7 +175,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
             final_prompt += f"{custom_prompt_str}\n\n---\n\n"
         
         final_prompt += base_prompt
-        self.logger.info(f"--- Complete System Prompt ---\n{final_prompt}\n--------------------------")
+        # self.logger.info(f"--- Complete System Prompt ---\n{final_prompt}\n--------------------------")
         return final_prompt
 
     def _build_user_prompt(self, batch_data: List[Dict], texts: List[str]) -> str:

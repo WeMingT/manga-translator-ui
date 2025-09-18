@@ -140,7 +140,7 @@ class CanvasRenderer:
                 self.tk_removed_mask_image = ImageTk.PhotoImage(resized_removed)
                 self.canvas.create_image(x_offset, y_offset, anchor="nw", image=self.tk_removed_mask_image, tags="removed_mask_overlay")
 
-    def redraw_all(self, regions=None, selected_indices=None, hide_indices=None, fast_mode=False, view_mode='normal', raw_mask=None, original_size=None, hyphenate: bool = True, line_spacing: float = None, disable_font_border: bool = False):
+    def redraw_all(self, regions=None, selected_indices=None, hide_indices=None, fast_mode=False, view_mode='normal', raw_mask=None, original_size=None, hyphenate: bool = True, line_spacing: float = None, disable_font_border: bool = False, render_config: dict = None):
         self.canvas.delete("all")
         if not self.image:
             return
@@ -216,7 +216,8 @@ class CanvasRenderer:
                     fast_mode=fast_mode,
                     hyphenate=hyphenate,
                     line_spacing=line_spacing,
-                    disable_font_border=disable_font_border
+                    disable_font_border=disable_font_border,
+                    render_config=render_config
                 )
 
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
