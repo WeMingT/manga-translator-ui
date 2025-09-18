@@ -8,6 +8,8 @@ from tkinter import colorchooser
 from typing import Dict, Any, Callable, Optional
 import logging
 
+from manga_translator.rendering.text_render import auto_add_horizontal_tags
+
 from ui_components import CollapsibleFrame
 from manga_translator.config import Ocr, Translator
 
@@ -139,6 +141,32 @@ class PropertyPanel(ctk.CTkScrollableFrame):
             except Exception as e:
                 print(f"Error inserting newline: {e}")
 
+    def _mark_horizontal(self):
+        """Wraps the selected text in the translation textbox with <H> tags."""
+        textbox = self.widgets.get('translation_text')
+        if not textbox:
+            return
+
+        try:
+            # Get selected text range
+            start_index = textbox.index("sel.first")
+            end_index = textbox.index("sel.last")
+            selected_text = textbox.get(start_index, end_index)
+
+            if selected_text:
+                # Wrap the text and replace
+                tagged_text = f"<H>{selected_text}</H>"
+                textbox.delete(start_index, end_index)
+                textbox.insert(start_index, tagged_text)
+                self._on_text_change() # Manually trigger update
+
+        except tk.TclError:
+            # This error occurs if no text is selected
+            show_toast(self, "请先用鼠标选中一段要横排的文本", level="info")
+        except Exception as e:
+            print(f"Error marking horizontal text: {e}")
+
+
     def _create_text_section(self):
         """创建文本编辑部分"""
         # 文本内容标题
@@ -190,7 +218,7 @@ class PropertyPanel(ctk.CTkScrollableFrame):
         # --- Insert Buttons Frame ---
         button_frame = ctk.CTkFrame(self)
         button_frame.grid(row=10, column=0, sticky="ew", padx=5, pady=(0, 0))
-        button_frame.grid_columnconfigure((0, 1), weight=1)
+        button_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
         self.widgets['insert_placeholder_button'] = ctk.CTkButton(
             button_frame,
@@ -204,7 +232,14 @@ class PropertyPanel(ctk.CTkScrollableFrame):
             text="插入换行",
             command=self._insert_newline
         )
-        self.widgets['insert_newline_button'].grid(row=0, column=1, padx=(2, 0), pady=2, sticky="ew")
+        self.widgets['insert_newline_button'].grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+
+        self.widgets['mark_horizontal_button'] = ctk.CTkButton(
+            button_frame,
+            text="标记横排",
+            command=self._mark_horizontal
+        )
+        self.widgets['mark_horizontal_button'].grid(row=0, column=2, padx=(2, 0), pady=2, sticky="ew")
         
         # 文本统计
         self.widgets['text_stats'] = ctk.CTkLabel(self, text="字符数: 0", font=ctk.CTkFont(size=10))
@@ -433,13 +468,20 @@ class PropertyPanel(ctk.CTkScrollableFrame):
         original_text = region_data.get('text', '')
         translation_text = region_data.get('translation', '')
         
+        # Conditionally preprocess text based on the global setting
+        config = get_config_service().get_config()
+        if config.get('render', {}).get('auto_rotate_symbols', False):
+            processed_translation = auto_add_horizontal_tags(translation_text)
+        else:
+            processed_translation = translation_text
+
         # 更新原文（现在可编辑）
         self.widgets['original_text'].delete("1.0", "end")
         self.widgets['original_text'].insert("1.0", original_text)
         
         # 更新译文
         self.widgets['translation_text'].delete("1.0", "end")
-        self.widgets['translation_text'].insert("1.0", translation_text)
+        self.widgets['translation_text'].insert("1.0", processed_translation.replace('\n', '↵'))
         
         # 更新文本统计
         self._update_text_stats()
@@ -476,6 +518,7 @@ class PropertyPanel(ctk.CTkScrollableFrame):
         direction_map_rev = {"auto": "自动", "h": "横排", "v": "竖排"}
         direction_val = region_data.get('direction', 'auto')
         self.widgets['direction'].set(direction_map_rev.get(direction_val, "自动"))
+        self._highlight_horizontal_tags()
     
     def clear_panel(self):
         """清空面板"""
@@ -517,6 +560,7 @@ class PropertyPanel(ctk.CTkScrollableFrame):
     def _on_text_change(self, event=None):
         """译文变化处理"""
         self._update_text_stats()
+        self._highlight_horizontal_tags()
         self._execute_callback('text_changed')
     
     def _on_original_text_change(self, event=None):
@@ -612,6 +656,51 @@ class PropertyPanel(ctk.CTkScrollableFrame):
             self.widgets['font_color'].delete(0, "end")
             self.widgets['font_color'].insert(0, color[1])
             self._execute_callback('style_changed')
+
+    def _highlight_horizontal_tags(self):
+        """
+        Highlights the content within <H> tags and hides the tags themselves
+        for a WYSIWYG experience.
+        """
+        import re
+        textbox = self.widgets.get('translation_text')
+        if not textbox:
+            return
+
+        # --- Configure tags ---
+        # Tag for the visible, highlighted content
+        if "horizontal_highlight" not in textbox.tag_names():
+            textbox.tag_config("horizontal_highlight", background="#4B4B4B", foreground="white")
+        
+        # Tag to hide the <H> and </H> markers
+        if "horizontal_elide" not in textbox.tag_names():
+            textbox.tag_config("horizontal_elide", elide=True)
+
+        # --- Clear old tags before re-applying ---
+        textbox.tag_remove("horizontal_highlight", "1.0", "end")
+        textbox.tag_remove("horizontal_elide", "1.0", "end")
+
+        text = textbox.get("1.0", "end-1c")
+        
+        # --- Find all tags and apply highlighting and elision ---
+        # The pattern now captures the tags and the content separately
+        # (<H>)(.*?)(</H>)
+        for match in re.finditer(r'(<H>)(.*?)(</H>)', text, re.IGNORECASE | re.DOTALL):
+            # Elide the opening tag <H>
+            start_tag_start = f"1.0+{match.start(1)}c"
+            start_tag_end = f"1.0+{match.end(1)}c"
+            textbox.tag_add("horizontal_elide", start_tag_start, start_tag_end)
+
+            # Highlight the content
+            content_start = f"1.0+{match.start(2)}c"
+            content_end = f"1.0+{match.end(2)}c"
+            textbox.tag_add("horizontal_highlight", content_start, content_end)
+
+            # Elide the closing tag </H>
+            end_tag_start = f"1.0+{match.start(3)}c"
+            end_tag_end = f"1.0+{match.end(3)}c"
+            textbox.tag_add("horizontal_elide", end_tag_start, end_tag_end)
+
     
     def _update_text_stats(self):
         """更新译文统计"""

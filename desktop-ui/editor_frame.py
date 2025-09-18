@@ -1370,10 +1370,15 @@ class EditorFrame(ctk.CTkFrame):
         if len(self.selected_indices) == 1:
             index = self.selected_indices[0]
             raw_text = self.property_panel.widgets['translation_text'].get("1.0", "end-1c")
-            new_text = raw_text.replace('↵', '\n')
-            if self.regions_data[index].get('translation') != new_text:
+            
+            # Clean the text before saving
+            import re
+            text_with_newlines = raw_text.replace('↵', '\n')
+            clean_text = re.sub(r'</?H>', '', text_with_newlines, flags=re.IGNORECASE)
+
+            if self.regions_data[index].get('translation') != clean_text:
                 old_data = copy.deepcopy(self.regions_data[index])
-                self.regions_data[index]['translation'] = new_text
+                self.regions_data[index]['translation'] = clean_text
                 self.history_manager.save_state(ActionType.MODIFY_TEXT, index, old_data, self.regions_data[index])
                 self._update_canvas_regions()
                 self._update_history_buttons()
@@ -1663,6 +1668,12 @@ class EditorFrame(ctk.CTkFrame):
         # Also update the new mask settings UI
         if hasattr(self, '_load_mask_settings_from_config'):
             self._load_mask_settings_from_config()
+
+        # Force reload of property panel to reflect text processing changes
+        if self.selected_indices and len(self.selected_indices) == 1:
+            index = self.selected_indices[0]
+            if index < len(self.regions_data):
+                self.property_panel.load_region_data(self.regions_data[index], index)
 
     def _clear_all_files(self):
         """Clears the file list, internal state, and editor canvas."""

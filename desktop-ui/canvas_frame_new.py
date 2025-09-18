@@ -101,7 +101,8 @@ class CanvasFrame(ctk.CTkFrame):
             'original_size': self.original_size,
             'hyphenate': hyphenate,
             'line_spacing': line_spacing,
-            'disable_font_border': disable_font_border
+            'disable_font_border': disable_font_border,
+            'render_config': self.render_config
         }
         
         if use_debounce and not fast_mode:
