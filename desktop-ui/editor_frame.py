@@ -948,7 +948,7 @@ class EditorFrame(ctk.CTkFrame):
         if tool in ["画笔", "橡皮擦"]:
             self.canvas_frame.mouse_handler.set_mode('mask_edit')
         else:
-            self.canvas_frame.mouse_handler.set_mode('pan') # Or whatever the default mode is
+            self.canvas_frame.mouse_handler.set_mode('select')
 
     def _on_brush_size_changed(self, size: str):
         self.mask_brush_size = int(size)
