@@ -78,3 +78,9 @@ logs/
 *.png
 temp_requirements.txt
 desktop_qt_ui/mypy.ini
+# Ignore tool-specific caches in desktop_qt_ui
+desktop_qt_ui/.ruff_cache/
+desktop_qt_ui/.claude/
+desktop_qt_ui/.mypy_cache/
+desktop_qt_ui/logs/
+.qoder/
