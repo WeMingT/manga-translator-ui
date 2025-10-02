@@ -1,7 +1,7 @@
 {
   "app": {
-    "last_open_dir": "D:/xiazai/图片助手(ImageAssistant)_批量图片下载器/並行世界の君君僕僕 第16話(1)",
-    "last_output_path": "D:/xiazai/图片助手(ImageAssistant)_批量图片下载器/output"
+    "last_open_dir": "",
+    "last_output_path": ""
   },
   "filter_text": null,
   "kernel_size": 3,
@@ -82,7 +82,7 @@
     "use_mtpe": false,
     "save_text": true,
     "load_text": false,
-    "template": true,
+    "template": false,
     "prep_manual": false,
     "save_quality": 100,
     "batch_size": 1,
