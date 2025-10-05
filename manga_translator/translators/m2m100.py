@@ -66,9 +66,11 @@ class M2M100Translator(OfflineTranslator):
         self.sentence_piece_processor = spm.SentencePieceProcessor(model_file=self._get_file_path(self._CT2_MODEL_DIR, 'sentencepiece.model'))
 
     async def _unload(self):
-        self.model.unload_model()
-        del self.model
-        del self.sentence_piece_processor
+        if hasattr(self, 'model'):
+            self.model.unload_model()
+            del self.model
+        if hasattr(self, 'sentence_piece_processor'):
+            del self.sentence_piece_processor
 
     async def _infer(self, from_lang: str, to_lang: str, queries: List[str], ctx=None) -> List[str]:
         queries_tokenized = self.tokenize(queries, from_lang)

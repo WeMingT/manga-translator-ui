@@ -80,9 +80,11 @@ class JparacrawlTranslator(OfflineTranslator):
         }
 
     async def _unload(self):
-        self.model.unload_model()
-        del self.model
-        del self.sentence_piece_processors
+        if hasattr(self, 'model'):
+            self.model.unload_model()
+            del self.model
+        if hasattr(self, 'sentence_piece_processors'):
+            del self.sentence_piece_processors
 
     async def infer(self, from_lang: str, to_lang: str, queries: List[str]) -> List[str]:
         if from_lang == 'auto':

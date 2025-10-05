@@ -38,18 +38,27 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         ConfigGPT.__init__(self, config_key=_CONFIG_KEY)
         CommonTranslator.__init__(self)
 
-        if not OPENAI_API_KEY and check_openai_key:
+        # 重新加载 .env 文件以获取最新配置
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+
+        # 重新读取环境变量
+        api_key = os.getenv('OPENAI_API_KEY', OPENAI_API_KEY)
+        api_base = os.getenv('OPENAI_API_BASE', OPENAI_API_BASE)
+        http_proxy = os.getenv('OPENAI_HTTP_PROXY', OPENAI_HTTP_PROXY)
+
+        if not api_key and check_openai_key:
             raise MissingAPIKeyException('OPENAI_API_KEY environment variable required')
 
         # 根据代理与基础URL等参数实例化 openai.AsyncOpenAI 客户端
         client_args = {
-            "api_key": OPENAI_API_KEY,
-            "base_url": OPENAI_API_BASE
+            "api_key": api_key,
+            "base_url": api_base
         }
-        if OPENAI_HTTP_PROXY:
+        if http_proxy:
             from httpx import AsyncClient
             client_args["http_client"] = AsyncClient(proxies={
-                "all://*openai.com": f"http://{OPENAI_HTTP_PROXY}"
+                "all://*openai.com": f"http://{http_proxy}"
             })
 
         self.client = openai.AsyncOpenAI(**client_args)
@@ -60,7 +69,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         # 初始化术语表相关属性
         self.dict_path = OPENAI_GLOSSARY_PATH
         self.glossary_entries = {}
-        
+
         # 检查用户是否明确设置了glossary环境变量
         user_set_glossary = os.getenv('OPENAI_GLOSSARY_PATH') is not None
         
@@ -190,7 +199,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
 
             # 执行翻译
             success, partial_results = await self._translate_batch(
-                from_lang, to_lang, batch_queries, indices, prompt, split_level=0
+                from_lang, to_lang, batch_queries, indices, prompt, split_level=0, ctx=ctx
             )
             # 将结果写入 translations
             for i, r in zip(indices, partial_results):
@@ -295,15 +304,16 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
 
         return False, []
 
-    async def _translate_batch(  
-        self,  
-        from_lang: str,  
-        to_lang: str,  
-        batch_queries: List[str],  
-        batch_indices: List[int],  
-        prompt: str,  
-        split_level: int = 0  
-    ):  
+    async def _translate_batch(
+        self,
+        from_lang: str,
+        to_lang: str,
+        batch_queries: List[str],
+        batch_indices: List[int],
+        prompt: str,
+        split_level: int = 0,
+        ctx = None
+    ):
         """  
         尝试翻译 batch_queries。若失败或返回不完整，则进一步拆分。  
         Attempt to translate batch_queries. If failed or incomplete, further split the batch.  
@@ -587,8 +597,8 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
             
             try:
                 (left_success, left_results), (right_success, right_results) = await asyncio.gather(
-                    self._translate_batch(from_lang, to_lang, left_queries, left_indices, left_prompt, split_level+1),
-                    self._translate_batch(from_lang, to_lang, right_queries, right_indices, right_prompt, split_level+1),
+                    self._translate_batch(from_lang, to_lang, left_queries, left_indices, left_prompt, split_level+1, ctx=ctx),
+                    self._translate_batch(from_lang, to_lang, right_queries, right_indices, right_prompt, split_level+1, ctx=ctx),
                     return_exceptions=False
                 )
             except Exception as e:
@@ -596,10 +606,10 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                 # 如果并发失败，回退到串行处理
                 self.logger.info("Falling back to sequential processing due to split translation error")
                 left_success, left_results = await self._translate_batch(
-                    from_lang, to_lang, left_queries, left_indices, left_prompt, split_level+1
+                    from_lang, to_lang, left_queries, left_indices, left_prompt, split_level+1, ctx=ctx
                 )
                 right_success, right_results = await self._translate_batch(
-                    from_lang, to_lang, right_queries, right_indices, right_prompt, split_level+1
+                    from_lang, to_lang, right_queries, right_indices, right_prompt, split_level+1, ctx=ctx
                 )
 
             # 合并结果  

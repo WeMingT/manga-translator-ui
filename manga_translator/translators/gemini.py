@@ -36,18 +36,25 @@ class GeminiTranslator(CommonGPTTranslator):
         self.templateCache = None
         self.cachedVals={None}
 
-        if not GEMINI_API_KEY:
+        # 重新加载 .env 文件以获取最新配置
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+
+        # 重新读取环境变量
+        import os
+        api_key = os.getenv('GEMINI_API_KEY', GEMINI_API_KEY)
+        api_base = os.getenv('GEMINI_API_BASE')
+
+        if not api_key:
             raise MissingAPIKeyException(
                         'Please set the GEMINI_API_KEY environment variable '
                         'before using the Gemini translator.'
                     )
 
-        import os
-        api_base = os.getenv('GEMINI_API_BASE')
         client_options = {"api_endpoint": api_base} if api_base else None
 
         genai.configure(
-            api_key=GEMINI_API_KEY,
+            api_key=api_key,
             transport='rest',
             client_options=client_options
         )

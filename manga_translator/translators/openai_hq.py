@@ -85,6 +85,9 @@ class OpenAIHighQualityTranslator(CommonTranslator):
     def __init__(self):
         super().__init__()
         self.client = None
+        # 重新加载 .env 文件以获取最新配置
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
         self.api_key = os.getenv('OPENAI_API_KEY', OPENAI_API_KEY)
         self.base_url = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
         self.model = os.getenv('OPENAI_MODEL', "gpt-4o")

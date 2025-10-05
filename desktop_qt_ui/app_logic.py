@@ -495,6 +495,18 @@ class MainAppLogic(QObject):
         """
         Resolves input paths and uses a 'Worker-to-Thread' model to start the translation task.
         """
+        # 通过调用配置服务的 reload_config 方法，强制全面重新加载所有配置
+        try:
+            self.logger.info("即将开始后台任务，强制重新加载所有配置...")
+            self.config_service.reload_config()
+            self.logger.info("配置已刷新，继续执行任务。")
+        except Exception as e:
+            self.logger.error(f"重新加载配置时发生严重错误: {e}")
+            # 根据需要，这里可以决定是否要中止任务
+            # from PyQt6.QtWidgets import QMessageBox
+            # QMessageBox.critical(None, "配置错误", f"无法加载最新配置: {e}")
+            # return
+
         if self.thread is not None and self.thread.isRunning():
             self.logger.warning("一个任务已经在运行中。")
             return
@@ -636,6 +648,8 @@ class MainAppLogic(QObject):
             self.logger.error(f"完成任务状态更新或信号发射时发生致命错误: {e}", exc_info=True)
         finally:
             print("--- DEBUG: on_task_finished step 5: Entering finally block.")
+            if self.thread and self.thread.isRunning():
+                self.thread.quit()
             self.thread = None
             self.worker = None
             print("--- MainAppLogic: Slot on_task_finished finished.")
@@ -832,7 +846,15 @@ class TranslationWorker(QObject):
                 if k in Config.__fields__ and k not in explicit_keys
             }
 
-            render_config_data = self.config_dict.get('render', {})
+            render_config_data = self.config_dict.get('render', {}).copy()
+
+            # 转换 direction 值：'h' -> 'horizontal', 'v' -> 'vertical'
+            if 'direction' in render_config_data:
+                direction_value = render_config_data['direction']
+                if direction_value == 'h':
+                    render_config_data['direction'] = 'horizontal'
+                elif direction_value == 'v':
+                    render_config_data['direction'] = 'vertical'
 
             translator_config_data = self.config_dict.get('translator', {}).copy()
             hq_prompt_path = translator_config_data.get('high_quality_prompt_path')
@@ -980,8 +1002,17 @@ class TranslationWorker(QObject):
         finally:
             manga_logger.removeHandler(log_handler)
 
+            # 翻译结束后清空翻译器缓存，确保下次翻译使用最新的 .env 配置
+            try:
+                from manga_translator.translators import translator_cache
+                translator_cache.clear()
+                self.log_received.emit(f"--- [CLEANUP] Cleared translator cache")
+            except Exception as e:
+                self.log_received.emit(f"--- [CLEANUP] Warning: Failed to clear cache: {e}")
+
     @pyqtSlot()
     def process(self):
+        loop = None
         try:
             import asyncio
             self.log_received.emit("--- [1] THREAD: process() method entered, starting asyncio task.")
@@ -989,14 +1020,33 @@ class TranslationWorker(QObject):
             # 创建事件循环并保存任务引用
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            try:
-                self._current_task = loop.create_task(self._do_processing())
-                loop.run_until_complete(self._current_task)
-                self.log_received.emit("--- [END] THREAD: asyncio task finished.")
-            except asyncio.CancelledError:
-                self.log_received.emit("--- [CANCELLED] THREAD: asyncio task was cancelled.")
-            finally:
-                loop.close()
+            
+            self._current_task = loop.create_task(self._do_processing())
+            loop.run_until_complete(self._current_task)
+            self.log_received.emit("--- [END] THREAD: asyncio task finished.")
+
+        except asyncio.CancelledError:
+            self.log_received.emit("--- [CANCELLED] THREAD: asyncio task was cancelled.")
         except Exception as e:
             import traceback
             self.error.emit(f"An error occurred in the asyncio runner: {str(e)}\n{traceback.format_exc()}")
+        finally:
+            if loop:
+                try:
+                    # Cancel all remaining tasks
+                    tasks = asyncio.all_tasks(loop=loop)
+                    for task in tasks:
+                        task.cancel()
+                    
+                    # Gather all tasks to let them finish cancelling
+                    if tasks:
+                        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+
+                    # Shutdown async generators
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception as e:
+                    self.log_received.emit(f"--- ERROR during asyncio cleanup: {e}")
+                finally:
+                    loop.close()
+                    asyncio.set_event_loop(None)
+                    self.log_received.emit("--- [CLEANUP] THREAD: asyncio loop closed.")

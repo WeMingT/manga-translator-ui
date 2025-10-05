@@ -55,7 +55,10 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
         text_block.translation = processed_text
 
         # --- 2. 渲染 ---
-        hyphenate = render_params.get('hyphenate', True)
+        # 正确的逻辑：当AI断句开启(disable_auto_wrap=True)时，关闭内置换行(hyphenate=False)
+        disable_auto_wrap = render_params.get('disable_auto_wrap', False)
+        hyphenate = not disable_auto_wrap
+
         render_params.get('line_spacing')
         disable_font_border = render_params.get('disable_font_border', False)
         
@@ -90,7 +93,7 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
         line_spacing_from_params = render_params.get('line_spacing')
 
         if text_block.horizontal:
-            rendered_surface = put_text_horizontal(font_size, text_block.get_translation_for_rendering(), render_w, render_h, text_block.alignment, text_block.direction == 'hl', fg_color, bg_color, text_block.target_lang, hyphenate, line_spacing_from_params, config=config_obj)
+            rendered_surface = put_text_horizontal(font_size, text_block.get_translation_for_rendering(), render_w, render_h, text_block.alignment, text_block.direction == 'hl', fg_color, bg_color, text_block.target_lang, hyphenate, line_spacing_from_params, config=config_obj, region_count=total_regions)
         else:
             rendered_surface = put_text_vertical(font_size, text_block.get_translation_for_rendering(), render_h, text_block.alignment, fg_color, bg_color, line_spacing_from_params, config=config_obj, region_count=total_regions)
 

@@ -83,6 +83,9 @@ class GeminiHighQualityTranslator(CommonTranslator):
         super().__init__()
         self.client = None
         # Initial setup from environment variables
+        # 重新加载 .env 文件以获取最新配置
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
         self.api_key = os.getenv('GEMINI_API_KEY', GEMINI_API_KEY)
         self.base_url = os.getenv('GEMINI_API_BASE', 'https://generativelanguage.googleapis.com')
         self.model_name = os.getenv('GEMINI_MODEL', "gemini-1.5-flash")

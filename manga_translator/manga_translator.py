@@ -2561,13 +2561,7 @@ class MangaTranslator:
                         region._alignment = config.render.alignment
                         region._direction = config.render.direction
                 results.extend(batch)
-                
-            # 强制垃圾回收以释放内存
-            import gc
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                
+
         return results
 
     async def _concurrent_translate_contexts(self, contexts_with_configs: List[tuple]) -> List[tuple]:

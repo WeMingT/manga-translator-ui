@@ -126,8 +126,10 @@ class ModelMangaOCR(OfflineOCR):
 
 
     async def _unload(self):
-        del self.model
-        del self.mocr
+        if hasattr(self, 'model'):
+            del self.model
+        if hasattr(self, 'mocr'):
+            del self.mocr
     
     async def _infer(self, image: np.ndarray, textlines: List[Quadrilateral], config: OcrConfig, verbose: bool = False, ignore_bubble: int = 0) -> List[TextBlock]:
         text_height = 48

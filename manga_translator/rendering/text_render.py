@@ -514,10 +514,13 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
     bg_size = int(max(font_size * 0.07, 1)) if bg is not None else 0
     spacing_x = int(font_size * (line_spacing or 0.2))
 
-    # Conditional wrapping logic based on the new region_count parameter
+    # Conditional wrapping logic based on disable_auto_wrap and region_count
     effective_max_height = h
-    if config and config.render.layout_mode == 'smart_scaling':
-        if config.render.disable_auto_wrap or region_count <= 1:
+    if config and config.render.disable_auto_wrap:
+        # 当AI断句开启时，使用无限高度，让文本按AI断句标记换行
+        effective_max_height = 99999
+    elif config and config.render.layout_mode == 'smart_scaling':
+        if region_count <= 1:
             effective_max_height = 99999
 
     # Use original font size for line breaking calculation
@@ -714,7 +717,26 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
     whitespace_offset_x = get_char_offset_x(font_size, ' ')
     hyphen_offset_x = get_char_offset_x(font_size, '-')
 
-    words = re.split(r'\s+', text)
+    # 先按换行符分割段落，然后对每段分割单词
+    # 使用特殊标记来保留换行位置
+    paragraphs = text.split('\n')
+    words = []
+    newline_positions = set()  # 记录哪些位置是段落结束（需要强制换行）
+
+    for para_idx, paragraph in enumerate(paragraphs):
+        if paragraph.strip():  # 非空段落
+            para_words = re.split(r'[ \t]+', paragraph)  # 只按空格和制表符分割，不包括 \n
+            words.extend(para_words)
+            if para_idx < len(paragraphs) - 1:  # 不是最后一段
+                newline_positions.add(len(words) - 1)  # 标记这个单词后面需要换行
+        elif para_idx < len(paragraphs) - 1:  # 空段落但不是最后一个
+            # 空行也需要保留
+            words.append('')
+            newline_positions.add(len(words) - 1)
+
+    # 如果没有单词，返回空结果
+    if not words:
+        return [], []
 
     word_widths = []
     for i, word in enumerate(words):
@@ -804,6 +826,9 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
             line_words.append(i)
             line_width += current_width + word_widths[i]
             i += 1
+            # 检查是否需要强制换行（AI 断句）
+            if (i - 1) in newline_positions:
+                break_line()
         elif word_widths[i] > max_width:
             j = 0
             hyphenation_idx = 0
@@ -824,8 +849,18 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
             line_words.append(i)
             line_width += current_width
             i += 1
+            # 检查是否需要强制换行（AI 断句）
+            if (i - 1) in newline_positions:
+                break_line()
         else:
-            break_line()
+            if hyphenate:
+                break_line()
+            else:
+                line_words.append(i)
+                line_width += current_width + word_widths[i]
+                i += 1
+                if (i - 1) in newline_positions:
+                    break_line()
 
 
     # 连字符优化阶段
@@ -1050,16 +1085,23 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
     layout_mode = 'default'
     if config:
         layout_mode = config.render.layout_mode
-        # Check for no-wrap condition and handle AI line breaks
-        if layout_mode == 'smart_scaling':
-            # In smart_scaling mode, wrapping is conditional.
-            # It wraps only if manual line breaks ([BR] or \n) are present.
-            # Otherwise, it expands without wrapping.
-            text = re.sub(r'\s*\[BR\]\s*', '\n', text, flags=re.IGNORECASE)
-            if '\n' not in text:
-                # No manual breaks found, so disable wrapping by setting a large width.
-                if config.render.disable_auto_wrap or region_count <= 1:
-                    width = 99999
+
+    # 当AI断句开启时，统一处理换行符并使用无限宽度
+    if config and config.render.disable_auto_wrap:
+        # 统一处理所有类型的AI换行符
+        text = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text, flags=re.IGNORECASE)
+        # 使用无限宽度，让文本完全按照AI断句标记换行
+        width = 99999
+    elif layout_mode == 'smart_scaling':
+        # In smart_scaling mode, wrapping is conditional.
+        # It wraps only if manual line breaks ([BR] or \n) are present.
+        # Otherwise, it expands without wrapping.
+        # 统一处理所有类型的AI换行符
+        text = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text, flags=re.IGNORECASE)
+        if '\n' not in text:
+            # No manual breaks found, so disable wrapping by setting a large width.
+            if region_count <= 1:
+                width = 99999
 
     bg_size = int(max(font_size * 0.07, 1)) if bg is not None else 0
     spacing_y = int(font_size * (line_spacing or 0.01))

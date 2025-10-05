@@ -179,6 +179,29 @@ class ConfigService(QObject):
             self.logger.error(f"保存配置文件失败: {e}")
             return False
 
+    def reload_config(self):
+        """
+        强制从 .env 和 JSON 文件完全重新加载配置。
+        这能确保外部对文件的任何修改都能在程序中生效。
+        """
+        self.logger.info("正在强制重新加载配置...")
+        
+        # 1. 重新加载 .env 文件到 os.environ。翻译引擎会自动从此读取。
+        load_dotenv(self.env_path, override=True)
+        self.logger.info(f".env 文件已从 {self.env_path} 重新加载，环境变量已更新。")
+
+        # 2. 重新创建 AppSettings 对象 (用于UI设置)
+        self.current_config = AppSettings()
+
+        # 3. 在新创建的 AppSettings 对象之上，重新应用 JSON 配置文件中的设置
+        config_file_to_load = self.config_path or self.default_config_path
+        if config_file_to_load and os.path.exists(config_file_to_load):
+            self.load_config_file(config_file_to_load)
+
+        # 4. 通知所有监听者配置已更改
+        self.config_changed.emit(self.current_config.dict())
+        self.logger.info("配置重载完成。")
+
     def reload_from_disk(self):
         """
         强制从当前设置的 config_path 重新加载配置, 并通知所有监听者。

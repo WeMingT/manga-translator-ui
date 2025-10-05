@@ -149,26 +149,43 @@
 
 **用途**：自定义导出原文的格式，方便使用外部工具翻译
 
-**模版文件位置**：`dict/template_example.txt`
+**模版文件位置**：`examples/translation_template.json`
 
-**模版格式**：
-```
-前缀内容
-<original>原文占位符</original>, <translated>翻译占位符</translated>
-后缀内容
-```
+**模版格式说明**：
+- 使用 JSON 格式
+- 使用 `<original>` 作为原文占位符
+- 使用 `<translated>` 作为译文占位符
+- 可以添加前缀、后缀和自定义分隔符
 
 **示例模版**：
 ```json
-[
-  {"original": "<original>", "translated": "<translated>"},
-]
+{
+    "<original>": "<translated>",
+    "<original>": "<translated>",
+    "<original>": "<translated>"
+}
 ```
 
+**三个文本框的具体示例**：
+```json
+{
+    "你好": "Hello",
+    "世界": "World",
+    "欢迎": "Welcome"
+}
+```
+
+**使用要求**：
+1. 必须使用 `<original>` 和 `<translated>` 作为占位符
+2. 导出时会按照模版中的条目数量进行分组
+3. 每组包含的文本框数量 = 模版中的占位符对数量（本例为 3 个）
+4. 适合批量翻译多个文本框并保持固定格式
+
 **使用方法**：
-1. 编辑 `dict/template_example.txt` 文件
-2. 使用 `<original>` 和 `<translated>` 作为占位符
+1. 编辑 `examples/translation_template.json` 文件
+2. 自定义 JSON 格式和占位符位置
 3. 导出原文时，程序会按照模版格式生成 TXT 文件
+4. 手动翻译后，可以使用"导入翻译并渲染"功能导入
 
 ### AI 断句功能
 
@@ -397,7 +414,7 @@
    - 查看 `ocrs/` 文件夹中的图片，确认每个文本框的内容
    - 查看 `bboxes.png`，确认哪些文本框被成功识别
    - 如果识别率低：降低 **OCR 置信度**，或提高 **Unclip 比例**（让文本框包含更多周边区域）
-   - 如果识别错误多：提高 **OCR 置信度**，或在编辑器中手动调整文本框（确保一个蓝框里只有一行字）
+   - 如果识别错误多：提高 **OCR 置信度**
 
 ---
 
