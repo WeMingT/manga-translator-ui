@@ -56,7 +56,7 @@ transformers
 tqdm
 uvicorn
 websockets
-xformers
+xformers==0.0.32.post2
 deepl
 groq
 torchsummary
