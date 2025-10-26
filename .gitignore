@@ -111,3 +111,6 @@ test_colorize_only_mode.py
 
 # Ignore .cursor directory
 .cursor/
+
+# Ignore specific font file
+/fonts/字魂白鸽天行体(商用需授权).ttf
