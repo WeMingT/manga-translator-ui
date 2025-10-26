@@ -60,8 +60,9 @@ class GeminiTranslator(CommonGPTTranslator):
         )
 
         # 只有在使用官方API时才尝试获取模型信息，避免第三方API的404错误
-        is_third_party_api = api_base and api_base != 'https://generativelanguage.googleapis.com'
-        if not is_third_party_api:
+        # 判断是否为官方 API：未设置 base_url 或 base_url 是官方地址
+        is_official_api = not api_base or api_base == 'https://generativelanguage.googleapis.com' or api_base.startswith('https://generativelanguage.googleapis.com')
+        if is_official_api:
             try:
                 model_info = genai.get_model(f'models/{GEMINI_MODEL}')
                 self._MAX_TOKENS = model_info.output_token_limit
@@ -71,7 +72,7 @@ class GeminiTranslator(CommonGPTTranslator):
 
         # 只有在使用官方API时才设置safety_settings，第三方API可能不支持
         self.safety_settings = None
-        if not is_third_party_api:
+        if is_official_api:
             self.safety_settings = [
                 {
                     "category": "HARM_CATEGORY_HARASSMENT",
@@ -90,8 +91,9 @@ class GeminiTranslator(CommonGPTTranslator):
                     "threshold": "BLOCK_NONE",
                 }
             ]
+            self.logger.info(f"使用官方Google API，应用安全设置。Base URL: {api_base or '默认'}")
         else:
-            self.logger.info("检测到第三方API，已禁用安全设置和模型信息获取")
+            self.logger.info(f"检测到第三方API，已禁用安全设置和模型信息获取。Base URL: {api_base}")
         
         generation_config = {
             "temperature": self.temperature,

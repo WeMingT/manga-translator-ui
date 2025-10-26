@@ -52,6 +52,7 @@ class PropertyPanel(QWidget):
     translation_requested = pyqtSignal()
     font_size_changed = pyqtSignal(int, int)
     font_color_changed = pyqtSignal(int, str)
+    font_family_changed = pyqtSignal(int, str)  # New signal for font family
     alignment_changed = pyqtSignal(int, str)
     direction_changed = pyqtSignal(int, str)
     copy_region_requested = pyqtSignal()
@@ -212,6 +213,14 @@ class PropertyPanel(QWidget):
         self.style_edit_frame = CollapsibleFrame("样式设置")
         style_content_widget = QWidget()
         style_layout = QFormLayout(style_content_widget)
+        
+        # Font family selector
+        self.font_family_combo = QComboBox()
+        self.font_family_combo.setEditable(False)
+        self._populate_font_list()
+        style_layout.addRow("字体:", self.font_family_combo)
+        
+        # Font size
         font_size_layout = QHBoxLayout()
         self.font_size_input = QLineEdit()
         font_size_layout.addWidget(self.font_size_input)
@@ -219,14 +228,44 @@ class PropertyPanel(QWidget):
         self.font_size_slider.setRange(8, 72)
         style_layout.addRow("字体大小:", font_size_layout)
         style_layout.addRow("", self.font_size_slider)
+        
+        # Font color
         self.font_color_button = QPushButton()
         style_layout.addRow("字体颜色:", self.font_color_button)
+        
+        # Alignment and direction
         self.alignment_combo = QComboBox()
         self.direction_combo = QComboBox()
         style_layout.addRow("对齐:", self.alignment_combo)
         style_layout.addRow("方向:", self.direction_combo)
+        
         self.style_edit_frame.add_widget(style_content_widget)
         layout.addWidget(self.style_edit_frame)
+    
+    def _populate_font_list(self):
+        """Populate font combo box with available fonts from fonts folder"""
+        import os
+        from manga_translator.utils import BASE_PATH
+        
+        fonts_dir = os.path.join(BASE_PATH, 'fonts')
+        font_files = []
+        
+        if os.path.exists(fonts_dir):
+            for filename in os.listdir(fonts_dir):
+                if filename.lower().endswith(('.ttf', '.otf', '.ttc')):
+                    # Display name without extension
+                    display_name = os.path.splitext(filename)[0]
+                    font_files.append((display_name, filename))
+        
+        # Sort by display name
+        font_files.sort(key=lambda x: x[0])
+        
+        # Add default option
+        self.font_family_combo.addItem("默认字体", "")
+        
+        # Add font files
+        for display_name, filename in font_files:
+            self.font_family_combo.addItem(display_name, filename)
 
     def _create_action_section(self, layout):
         self.action_frame = CollapsibleFrame("操作")
@@ -255,6 +294,7 @@ class PropertyPanel(QWidget):
         self.ignore_bubble_checkbox.stateChanged.connect(self._on_mask_config_changed) # Changed
 
         # Style
+        self.font_family_combo.currentIndexChanged.connect(self._on_font_family_changed)
         self.font_size_input.editingFinished.connect(self._on_font_size_editing_finished)
         self.font_size_slider.valueChanged.connect(self._on_font_size_slider_changed)
         self.font_color_button.clicked.connect(self._on_font_color_clicked)
@@ -573,6 +613,24 @@ class PropertyPanel(QWidget):
 
         self.font_color_button.setStyleSheet(f"background-color: {color_hex};")
         
+        # Update font family selector
+        font_path = region_data.get("font_path", "")
+        if font_path:
+            # Extract filename from path
+            import os
+            font_filename = os.path.basename(font_path)
+            # Find and select the item with this filename
+            for i in range(self.font_family_combo.count()):
+                if self.font_family_combo.itemData(i) == font_filename:
+                    self.font_family_combo.setCurrentIndex(i)
+                    break
+            else:
+                # Not found, set to default
+                self.font_family_combo.setCurrentIndex(0)
+        else:
+            # Use default font
+            self.font_family_combo.setCurrentIndex(0)
+        
         alignment_map = {"auto": "自动", "left": "左对齐", "center": "居中", "right": "右对齐"}
         self.alignment_combo.setCurrentText(alignment_map.get(region_data.get("alignment", "auto"), "自动"))
         
@@ -719,6 +777,15 @@ class PropertyPanel(QWidget):
         if self.current_region_index != -1:
             self.font_size_input.setText(str(value))
             self.font_size_changed.emit(self.current_region_index, value)
+    def _on_font_family_changed(self, index):
+        if self.current_region_index == -1 or self.block_updates:
+            return
+        # Get the font filename from combo box data
+        font_filename = self.font_family_combo.itemData(index)
+        if font_filename is None:
+            font_filename = ""
+        self.font_family_changed.emit(self.current_region_index, font_filename)
+    
     def _on_font_color_clicked(self):
         if self.current_region_index == -1:
             return

@@ -338,7 +338,8 @@ class MainAppLogic(QObject):
                     'smart_scaling': "智能缩放 (推荐)",
                     'strict': "严格边界 (缩小字体)",
                     'fixed_font': "固定字体 (扩大文本框)",
-                    'disable_all': "完全禁用 (裁剪文本)"
+                    'disable_all': "完全禁用 (裁剪文本)",
+                    'balloon_fill': "填充气泡 (气泡检测)"
                 },
                 "translator": {
                     "youdao": "有道翻译", "baidu": "百度翻译", "deepl": "DeepL", "papago": "Papago",

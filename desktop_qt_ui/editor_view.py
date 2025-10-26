@@ -271,6 +271,7 @@ class EditorView(QWidget):
         self.property_panel.translation_requested.connect(self.controller.run_translation_for_selection)
         self.property_panel.font_size_changed.connect(self.controller.update_font_size)
         self.property_panel.font_color_changed.connect(self.controller.update_font_color)
+        self.property_panel.font_family_changed.connect(self.controller.update_font_family)
         self.property_panel.alignment_changed.connect(self.controller.update_alignment)
         self.property_panel.direction_changed.connect(self.controller.update_direction)
         self.property_panel.mask_config_changed.connect(self.controller.update_mask_config)

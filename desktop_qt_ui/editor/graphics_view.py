@@ -1,4 +1,5 @@
 
+import os
 import cv2
 import numpy as np
 from manga_translator.rendering import resize_regions_to_font_size
@@ -548,6 +549,11 @@ class GraphicsView(QGraphicsView):
             # 同步算法计算的 font_size 到 render_params，确保缓存键使用正确的值
             render_params['font_size'] = unrotated_text_block.font_size
             
+            # Set region-specific font_path for cache key
+            region_font_path = region_data.get('font_path', '')
+            if region_font_path and os.path.exists(region_font_path):
+                render_params['font_path'] = region_font_path
+            
             cache_key = (
                 unrotated_text_block.get_translation_for_rendering(),
                 tuple(map(tuple, self._dst_points_cache[i].reshape(-1, 2))),
@@ -583,6 +589,17 @@ class GraphicsView(QGraphicsView):
             cached_result = self._text_render_cache.get(cache_key)
 
             if cached_result is None:
+                # Set font for this region if specified
+                region_font_path = region_data.get('font_path', '')
+                if region_font_path and os.path.exists(region_font_path):
+                    text_renderer_backend.update_font_config(region_font_path)
+                else:
+                    # Use default font from global parameters
+                    default_params_obj = render_parameter_service.get_default_parameters()
+                    font_path = default_params_obj.font_path
+                    if font_path:
+                        text_renderer_backend.update_font_config(font_path)
+                
                 identity_transform = QTransform()
                 render_result = text_renderer_backend.render_text_for_region(
                     unrotated_text_block,
@@ -690,7 +707,7 @@ class GraphicsView(QGraphicsView):
         # 3. 调用后端进行布局计算（只计算单个区域）
         try:
             print(f"[_recalculate_single_region_render_data] region {index}: 调用 resize_regions_to_font_size")
-            single_region_dst_points = resize_regions_to_font_size(self._image_np, [text_block], config_obj)
+            single_region_dst_points = resize_regions_to_font_size(self._image_np, [text_block], config_obj, self._image_np)
             print(f"[_recalculate_single_region_render_data] region {index}: resize_regions_to_font_size 返回: {single_region_dst_points is not None}, len={len(single_region_dst_points) if single_region_dst_points else 0}")
             if single_region_dst_points and len(single_region_dst_points) > 0:
                 print(f"[_recalculate_single_region_render_data] region {index}: dst_points[0] is None: {single_region_dst_points[0] is None}")
@@ -766,6 +783,17 @@ class GraphicsView(QGraphicsView):
         render_params = render_parameter_service.export_parameters_for_backend(index, region_data)
         # 同步算法计算的 font_size 到 render_params
         render_params['font_size'] = unrotated_text_block.font_size
+        
+        # Set font for this region if specified
+        region_font_path = region_data.get('font_path', '')
+        if region_font_path and os.path.exists(region_font_path):
+            text_renderer_backend.update_font_config(region_font_path)
+        else:
+            # Use default font from global parameters
+            default_params_obj = render_parameter_service.get_default_parameters()
+            font_path = default_params_obj.font_path
+            if font_path:
+                text_renderer_backend.update_font_config(font_path)
 
         # 渲染文字（不使用缓存，因为几何已经改变）
         identity_transform = QTransform()
@@ -861,7 +889,7 @@ class GraphicsView(QGraphicsView):
                 self._dst_points_cache = []
                 return
             
-            self._dst_points_cache = resize_regions_to_font_size(self._image_np, valid_blocks, config_obj)
+            self._dst_points_cache = resize_regions_to_font_size(self._image_np, valid_blocks, config_obj, self._image_np)
             print(f"[View] Recalculated dst_points for {len(self._dst_points_cache)} regions.")
         except Exception as e:
             print(f"[View] Error during resize_regions_to_font_size: {e}")
