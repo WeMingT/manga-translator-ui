@@ -108,3 +108,6 @@ test_colorize_only_mode.py
 
 # Ignore .kiro directory
 .kiro/
+
+# Ignore .cursor directory
+.cursor/

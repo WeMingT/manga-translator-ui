@@ -123,9 +123,10 @@ class GeminiHighQualityTranslator(CommonTranslator):
             )
             
             # Apply different configs for different API types
-            is_third_party_api = self.base_url and self.base_url != 'https://generativelanguage.googleapis.com'
+            # 判断是否为官方 API：未设置 base_url 或 base_url 是官方地址
+            is_official_api = not self.base_url or self.base_url == 'https://generativelanguage.googleapis.com' or self.base_url.startswith('https://generativelanguage.googleapis.com')
 
-            if not is_third_party_api:
+            if is_official_api:
                 # Official Google API - full config
                 generation_config = {
                     "temperature": self.temperature,
@@ -139,7 +140,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     "generation_config": generation_config,
                     "safety_settings": self.safety_settings
                 }
-                self.logger.info("使用官方Google API，应用完整配置。")
+                self.logger.info(f"使用官方Google API，应用完整配置（包含安全设置）。Base URL: {self.base_url or '默认'}")
             else:
                 # Third-party API - minimal config to avoid format issues
                 generation_config = {
@@ -150,7 +151,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     "model_name": self.model_name,
                     "generation_config": generation_config,
                 }
-                self.logger.info("检测到第三方API，使用简化配置避免格式冲突。")
+                self.logger.info(f"检测到第三方API，使用简化配置（不发送安全设置）。Base URL: {self.base_url}")
 
             self.client = genai.GenerativeModel(**model_args)
     

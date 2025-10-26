@@ -193,7 +193,7 @@ class RenderConfig(BaseModel):
     auto_rotate_symbols: bool = False
     """Automatically rotate symbols like '!!' or '??' in vertical text"""
     layout_mode: str = 'smart_scaling'
-    """The layout mode to use for rendering. Only affects the default renderer."""
+    """The layout mode to use for rendering. Options: 'default', 'smart_scaling', 'strict', 'disable_all', 'balloon_fill'"""
     _font_color_fg = None
     _font_color_bg = None
     @property

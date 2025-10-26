@@ -1967,7 +1967,23 @@ class MangaTranslator:
             else:
                 output = await dispatch_eng_render(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, self.font_path, config.render.line_spacing)
         else:
-            output = await dispatch_rendering(ctx.img_inpainted, ctx.text_regions, self.font_path, config)
+            # Request debug image for balloon_fill mode when verbose
+            need_debug_img = self.verbose and config.render.layout_mode == 'balloon_fill'
+            result = await dispatch_rendering(ctx.img_inpainted, ctx.text_regions, self.font_path, config, ctx.img_rgb, return_debug_img=need_debug_img)
+            
+            # Handle debug image if returned
+            if need_debug_img and isinstance(result, tuple):
+                output, debug_img = result
+                # Save balloon_fill debug image
+                if debug_img is not None:
+                    try:
+                        debug_path = self._result_path('balloon_fill_boxes.png')
+                        imwrite_unicode(debug_path, cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR), logger)
+                        logger.info(f"📸 Balloon fill debug image saved: {debug_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to save balloon_fill debug image: {e}")
+            else:
+                output = result
         return output
 
     def _result_path(self, path: str) -> str:
@@ -2890,6 +2906,9 @@ class MangaTranslator:
                 if skipped > 0:
                     logger.warning(f"Skipped {skipped} pages with no sentences")
 
+            # 将config附加到ctx，供翻译器使用（例如AI断句功能）
+            ctx.config = config
+            
             # openai_hq, gemini_hq 等需要传递ctx参数
             if config.translator.translator in [Translator.openai_hq, Translator.gemini_hq]:
                 # 所有需要上下文的翻译器都在这里传递ctx
@@ -2913,7 +2932,7 @@ class MangaTranslator:
             return await dispatch_translation(
                 config.translator.translator_gen,
                 texts,
-                config.translator,
+                config,
                 self.use_mtpe,
                 ctx,
                 'cpu' if self._gpu_limited_memory else self.device

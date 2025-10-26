@@ -824,6 +824,42 @@ class EditorController(QObject):
             description=f"Update Font Color Region {region_index}"
         )
         self.execute_command(command)
+    
+    @pyqtSlot(int, str)
+    def update_font_family(self, region_index: int, font_filename: str):
+        """Update the font family for a specific region.
+        
+        Args:
+            region_index: Index of the region
+            font_filename: Font filename (e.g., 'Arial.ttf') or empty string for default
+        """
+        import os
+        from manga_translator.utils import BASE_PATH
+        
+        old_region_data = self.model.get_region_by_index(region_index)
+        if not old_region_data:
+            return
+        
+        # Convert filename to full path
+        if font_filename:
+            font_path = os.path.join(BASE_PATH, 'fonts', font_filename)
+        else:
+            font_path = ""
+        
+        # Check if font_path changed
+        if old_region_data.get('font_path') == font_path:
+            return
+
+        new_region_data = old_region_data.copy()
+        new_region_data['font_path'] = font_path
+        command = UpdateRegionCommand(
+            model=self.model,
+            region_index=region_index,
+            old_data=old_region_data,
+            new_data=new_region_data,
+            description=f"Update Font Family Region {region_index}"
+        )
+        self.execute_command(command)
 
     @pyqtSlot(int, str)
     def update_alignment(self, region_index: int, alignment_text: str):
