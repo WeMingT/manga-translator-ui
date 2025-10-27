@@ -312,6 +312,12 @@ class DetectorConfig(BaseModel):
     """Invert the image colors for detection. Might improve detection."""
     det_gamma_correct: bool = False
     """Applies gamma correction for detection. Might improve detection."""
+    use_yolo_obb: bool = False
+    """Enable YOLO OBB auxiliary detector for hybrid detection"""
+    yolo_obb_conf: float = 0.4
+    """Confidence threshold for YOLO OBB detector"""
+    yolo_obb_iou: float = 0.6
+    """IoU threshold for YOLO OBB detector NMS"""
     box_threshold: float = 0.7
     """Threshold for bbox generation"""
     unclip_ratio: float = 2.3

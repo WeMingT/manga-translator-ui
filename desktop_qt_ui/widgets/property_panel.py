@@ -765,6 +765,23 @@ class PropertyPanel(QWidget):
             text_with_newlines = text_with_tags.replace('↵', '\n')
 
             self.translated_text_modified.emit(self.current_region_index, text_with_newlines)
+    
+    def get_selected_ocr_model(self) -> str:
+        """获取当前选择的OCR模型"""
+        return self.ocr_model_combo.currentText()
+    
+    def get_selected_translator(self) -> str:
+        """获取当前选择的翻译器（返回key而不是display name）"""
+        display_name = self.translator_combo.currentText()
+        return self.translator_display_to_key.get(display_name, display_name)
+    
+    def get_selected_target_language(self) -> str:
+        """获取当前选择的目标语言（返回key而不是display name）"""
+        display_name = self.target_language_combo.currentText()
+        # 使用 lang_name_to_code 映射（在 populate_options_from_config 中创建）
+        if hasattr(self, 'lang_name_to_code'):
+            return self.lang_name_to_code.get(display_name, display_name)
+        return display_name
     def _on_font_size_editing_finished(self):
         text = self.font_size_input.text()
         if text.isdigit() and self.current_region_index != -1:

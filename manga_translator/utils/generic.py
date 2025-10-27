@@ -1130,7 +1130,9 @@ def det_rearrange_forward(
             pad_size = pad_h
             batches[-1].append(p)
             if verbose:
-                imwrite_unicode(f'result/rearrange_{ii}.png', p[..., ::-1])
+                import logging
+                logger = logging.getLogger('manga_translator')
+                imwrite_unicode(f'result/rearrange_{ii}.png', p[..., ::-1], logger)
         return batches, down_scale_ratio, pad_size
 
     h, w = img.shape[:2]
@@ -1198,13 +1200,19 @@ def main():
     s2 = [Point(1 + offset, 1 + offset), Point(1 + offset, 3 + offset), Point(3 + offset, 3 + offset + 1.5), Point(3 + offset + 1.5, 3 + offset), Point(3 + offset, 1 + offset)]
     print(gjk_distance(s1, s2))
 
-def imwrite_unicode(path: str, img: np.ndarray, logger) -> bool:
+def imwrite_unicode(path: str, img: np.ndarray, logger, params=None) -> bool:
     """
     Writes an image to a file, handling unicode paths correctly.
+    
+    Args:
+        path: Output file path
+        img: Image array
+        logger: Logger instance
+        params: Optional cv2.imencode parameters (e.g., [cv2.IMWRITE_PNG_COMPRESSION, 9])
     """
     try:
         ext = os.path.splitext(path)[1]
-        result, buf = cv2.imencode(ext, img)
+        result, buf = cv2.imencode(ext, img, params) if params is not None else cv2.imencode(ext, img)
         if result:
             with open(path, "wb") as f:
                 f.write(buf)

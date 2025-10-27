@@ -163,13 +163,19 @@ def resize_depth(depth, width, height):
 
     return depth_resized
 
-def write_depth(path, depth, bits=1):
+def write_depth(path, depth, bits=1, logger=None):
     """Write depth map to pfm and png file.
 
     Args:
         path (str): filepath without extension
         depth (array): depth
+        bits (int): bit depth (1 or 2)
+        logger: logger instance
     """
+    import logging
+    if logger is None:
+        logger = logging.getLogger('manga_translator')
+        
     write_pfm(path + ".pfm", depth.astype(np.float32))
 
     depth_min = depth.min()
@@ -183,8 +189,8 @@ def write_depth(path, depth, bits=1):
         out = np.zeros(depth.shape, dtype=depth.type)
 
     if bits == 1:
-        imwrite_unicode(path + ".png", out.astype("uint8"))
+        imwrite_unicode(path + ".png", out.astype("uint8"), logger)
     elif bits == 2:
-        imwrite_unicode(path + ".png", out.astype("uint16"))
+        imwrite_unicode(path + ".png", out.astype("uint16"), logger)
 
     return

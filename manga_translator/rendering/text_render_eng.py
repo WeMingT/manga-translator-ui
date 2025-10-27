@@ -532,6 +532,40 @@ def render_textblock_list_eng(
         #     textlines_image = textlines_image.resize((int(textlines_image.width / resize_ratio), int(textlines_image.height / resize_ratio)))
         abs_x = int(abs_cx - textlines_image.width / 2)
         abs_y = int(abs_cy - textlines_image.height / 2)
+        
+        # 智能边界调整：向中心方向移动而不是裁剪
+        img_h, img_w = img.shape[:2]
+        text_w, text_h = textlines_image.width, textlines_image.height
+        original_abs_x, original_abs_y = abs_x, abs_y
+        adjusted = False
+        
+        # X 方向调整
+        if abs_x < 0:
+            abs_x = 0
+            adjusted = True
+        elif abs_x + text_w > img_w:
+            abs_x = img_w - text_w
+            adjusted = True
+        
+        # Y 方向调整
+        if abs_y < 0:
+            abs_y = 0
+            adjusted = True
+        elif abs_y + text_h > img_h:
+            abs_y = img_h - text_h
+            adjusted = True
+        
+        # 确保调整后仍在边界内
+        abs_x = max(0, min(abs_x, img_w - text_w))
+        abs_y = max(0, min(abs_y, img_h - text_h))
+        
+        if adjusted:
+            logger.info(f"Adjusted text position to fit image bounds: ({original_abs_x}, {original_abs_y}) -> ({abs_x}, {abs_y})")
+        
+        # 检查文本是否太大无法放入图片
+        if text_w > img_w or text_h > img_h:
+            logger.warning(f"Text too large for image, will be clipped. Text size: {text_w}x{text_h}, Image size: {img_w}x{img_h}")
+        
         img_pil.paste(textlines_image, (abs_x, abs_y), mask=textlines_image)
         # cv2.imshow('ballon_region', ballon_region)
         # cv2.imshow('cropped', original_img[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]])
