@@ -1,5 +1,6 @@
 
 import re
+import logging
 
 import cv2
 import numpy as np
@@ -13,6 +14,8 @@ from manga_translator.rendering.text_render import (
 from manga_translator.utils import TextBlock
 from PyQt6.QtCore import QPointF
 from PyQt6.QtGui import QImage, QPixmap, QPolygonF
+
+logger = logging.getLogger('manga_translator')
 
 
 def resource_path(relative_path):
@@ -47,6 +50,7 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
         # --- 1. 文本预处理 ---
         text_to_render = original_translation or text_block.text
         if not text_to_render:
+            logger.warning(f"[EDITOR RENDER SKIPPED] Text is empty")
             return None
 
         processed_text = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text_to_render.replace('↵', '\n'), flags=re.IGNORECASE)
@@ -74,7 +78,9 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
         if disable_font_border:
             bg_color = None
 
-        if render_w <= 0 or render_h <= 0: return None
+        if render_w <= 0 or render_h <= 0:
+            logger.warning(f"[EDITOR RENDER SKIPPED] Invalid render dimensions: width={render_w}, height={render_h}")
+            return None
 
         config_data = render_params.copy()
         if config_data.get('direction') == 'v':
@@ -105,11 +111,14 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
         else:
             rendered_surface = put_text_vertical(font_size, text_block.get_translation_for_rendering(), render_h, text_block.alignment, fg_color, bg_color, line_spacing_from_params, config=config_obj, region_count=region_count)
 
-        if rendered_surface is None or rendered_surface.size == 0: return None
+        if rendered_surface is None or rendered_surface.size == 0:
+            logger.warning(f"[EDITOR RENDER SKIPPED] Rendered surface is None or empty. Text: '{text_block.translation[:50] if hasattr(text_block, 'translation') else 'N/A'}...'")
+            return None
         
         # --- 3. 宽高比校正 (与后端渲染逻辑完全同步) ---
         h_temp, w_temp, _ = rendered_surface.shape
         if h_temp == 0 or w_temp == 0:
+            logger.warning(f"[EDITOR RENDER SKIPPED] Rendered surface has zero dimensions: width={w_temp}, height={h_temp}")
             return None
         r_temp = w_temp / h_temp
         
@@ -175,13 +184,17 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
 
         # 计算屏幕上的最小边界框
         x_s, y_s, w_s, h_s = cv2.boundingRect(np.round(dst_points_screen).astype(np.int32))
-        if w_s <= 0 or h_s <= 0: return None
+        if w_s <= 0 or h_s <= 0:
+            logger.warning(f"[EDITOR RENDER SKIPPED] Screen bounding box has invalid dimensions: x={x_s}, y={y_s}, width={w_s}, height={h_s}. Text may be outside visible area.")
+            return None
 
         # 将目标点偏移到边界框的局部坐标
         dst_points_warp = dst_points_screen - [x_s, y_s]
 
         matrix, _ = cv2.findHomography(src_points, dst_points_warp, cv2.RANSAC, 5.0)
-        if matrix is None: return None
+        if matrix is None:
+            logger.warning(f"[EDITOR RENDER SKIPPED] Failed to compute homography matrix for text transformation")
+            return None
 
         warped_image = cv2.warpPerspective(box, matrix, (w_s, h_s), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0,0))
 

@@ -116,11 +116,13 @@ def imssave(imgs, img_path):
     """
     img_name, ext = os.path.splitext(os.path.basename(img_path))
 
+    import logging
+    logger = logging.getLogger('manga_translator')
     for i, img in enumerate(imgs):
         if img.ndim == 3:
             img = img[:, :, [2, 1, 0]]
         new_path = os.path.join(os.path.dirname(img_path), img_name+str('_s{:04d}'.format(i))+'.png')
-        imwrite_unicode(new_path, img)
+        imwrite_unicode(new_path, img, logger)
 
 
 def split_imageset(original_dataroot, target_dataroot, n_channels=3, p_size=800, p_overlap=96, p_max=1000):
@@ -201,17 +203,23 @@ def imread_uint(path, n_channels=3):
 # --------------------------------------------
 # matlab's imwrite
 # --------------------------------------------
-def imsave(img, img_path):
+def imsave(img, img_path, logger=None):
+    import logging
+    if logger is None:
+        logger = logging.getLogger('manga_translator')
     img = np.squeeze(img)
     if img.ndim == 3:
         img = img[:, :, [2, 1, 0]]
-    imwrite_unicode(img_path, img)
+    imwrite_unicode(img_path, img, logger)
 
-def imwrite(img, img_path):
+def imwrite(img, img_path, logger=None):
+    import logging
+    if logger is None:
+        logger = logging.getLogger('manga_translator')
     img = np.squeeze(img)
     if img.ndim == 3:
         img = img[:, :, [2, 1, 0]]
-    imwrite_unicode(img_path, img)
+    imwrite_unicode(img_path, img, logger)
 
 
 

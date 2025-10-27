@@ -52,6 +52,9 @@ class DetectorSettings(BaseModel):
     det_gamma_correct: bool = False
     box_threshold: float = 0.5
     unclip_ratio: float = 2.5
+    use_yolo_obb: bool = False
+    yolo_obb_conf: float = 0.4
+    yolo_obb_iou: float = 0.6
 
 class InpainterSettings(BaseModel):
     inpainter: str = "lama_mpe"
@@ -75,7 +78,7 @@ class RenderSettings(BaseModel):
     line_spacing: Optional[float] = None
     font_size: Optional[int] = None
     auto_rotate_symbols: bool = True
-    rtl: bool = False
+    rtl: bool = True
     layout_mode: str = "smart_scaling"
     max_font_size: int = 0
     font_scale_ratio: float = 1.0

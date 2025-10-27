@@ -273,7 +273,8 @@ async def dispatch(textlines: List[Quadrilateral], width: int, height: int, conf
     # 获取边缘距离比例阈值
     edge_ratio_threshold = getattr(config.ocr, 'merge_edge_ratio_threshold', 0.0)
     text_regions: List[TextBlock] = []
-    for (txtlns, fg_color, bg_color) in merge_bboxes_text_region(textlines, width, height, debug=debug, edge_ratio_threshold=edge_ratio_threshold):
+    
+    for idx, (txtlns, fg_color, bg_color) in enumerate(merge_bboxes_text_region(textlines, width, height, debug=debug, edge_ratio_threshold=edge_ratio_threshold)):
         # --- 在创建TextBlock之前进行去重 ---
         unique_txtlns = []
         seen_coords = set()
@@ -317,4 +318,5 @@ async def dispatch(textlines: List[Quadrilateral], width: int, height: int, conf
         region = TextBlock(lines, texts, font_size=font_size, angle=angle, prob=np.exp(total_logprobs),
                            fg_color=fg_color, bg_color=bg_color)
         text_regions.append(region)
+    
     return text_regions

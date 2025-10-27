@@ -121,7 +121,7 @@ class Model48pxOCR(OfflineOCR):
                     
                     # 使用高压缩保存
                     compression_params = [cv2.IMWRITE_PNG_COMPRESSION, 9]
-                    imwrite_unicode(os.path.join(ocr_result_dir, f'{ix}.png'), img_data, compression_params)
+                    imwrite_unicode(os.path.join(ocr_result_dir, f'{ix}.png'), img_data, self.logger, compression_params)
                 ix += 1
             image_tensor = (torch.from_numpy(region).float() - 127.5) / 127.5
             image_tensor = einops.rearrange(image_tensor, 'N H W C -> N C H W')
@@ -131,6 +131,34 @@ class Model48pxOCR(OfflineOCR):
                 ret = self.model.infer_beam_batch_tensor(image_tensor, widths, beams_k = 5, max_seq_length = 255)
             for i, (pred_chars_index, prob, fg_pred, bg_pred, fg_ind_pred, bg_ind_pred) in enumerate(ret):
                 if prob < threshold:
+                    # Decode text first to log it
+                    seq = []
+                    for chid in pred_chars_index:
+                        ch = self.model.dictionary[chid]
+                        if ch == '<S>':
+                            continue
+                        if ch == '</S>':
+                            break
+                        if ch == '<SP>':
+                            ch = ' '
+                        seq.append(ch)
+                    txt = ''.join(seq)
+                    self.logger.info(f'[FILTERED] prob: {prob:.4f} < threshold: {threshold} - Text: "{txt}"')
+                    # Keep the textline with empty text for hybrid OCR to retry
+                    cur_region = quadrilaterals[indices[i]][0]
+                    if isinstance(cur_region, Quadrilateral):
+                        cur_region.text = ''  # Empty text for hybrid OCR
+                        cur_region.prob = prob
+                        cur_region.fg_r = 0
+                        cur_region.fg_g = 0
+                        cur_region.fg_b = 0
+                        cur_region.bg_r = 255
+                        cur_region.bg_g = 255
+                        cur_region.bg_b = 255
+                    else:
+                        cur_region.text.append('')
+                        cur_region.update_font_colors(np.array([0, 0, 0]), np.array([255, 255, 255]))
+                    out_regions.append(cur_region)
                     continue
                 has_fg = (fg_ind_pred[:, 1] > fg_ind_pred[:, 0])
                 has_bg = (bg_ind_pred[:, 1] > bg_ind_pred[:, 0])

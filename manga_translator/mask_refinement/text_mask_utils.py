@@ -2,6 +2,7 @@ from typing import Tuple, List
 import numpy as np
 import cv2
 import math
+import logging
 
 from tqdm import tqdm
 from shapely.geometry import Polygon
@@ -14,11 +15,13 @@ from ..utils import Quadrilateral, image_resize, imwrite_unicode
 
 COLOR_RANGE_SIGMA = 1.5 # how many stddev away is considered the same color
 
-def save_rgb(fn, img):
+def save_rgb(fn, img, logger=None):
+    if logger is None:
+        logger = logging.getLogger('manga_translator')
     if len(img.shape) == 3 and img.shape[2] == 3:
-        imwrite_unicode(fn, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        imwrite_unicode(fn, cv2.cvtColor(img, cv2.COLOR_RGB2BGR), logger)
     else:
-        imwrite_unicode(fn, img)
+        imwrite_unicode(fn, img, logger)
 
 def area_overlap(x1, y1, w1, h1, x2, y2, w2, h2):  # returns None if rectangles don't intersect
     x_overlap = max(0, min(x1 + w1, x2 + w2) - max(x1, x2))
