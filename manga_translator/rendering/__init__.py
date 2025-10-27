@@ -894,6 +894,11 @@ def render(
             config,
             len(region.lines)  # Pass region count
         )
+    
+    if temp_box is None:
+        logger.warning(f"[RENDER SKIPPED] Text rendering returned None. Text: '{region.translation[:100]}...'")
+        return img
+    
     h, w, _ = temp_box.shape
     if h == 0 or w == 0:
         logger.warning(f"Skipping rendering for region with invalid dimensions (w={w}, h={h}). Text: '{region.translation}'")
@@ -947,13 +952,68 @@ def render(
 
     src_points = np.array([[0, 0], [box.shape[1], 0], [box.shape[1], box.shape[0]], [0, box.shape[0]]]).astype(np.float32)
 
-    M, _ = cv2.findHomography(src_points, dst_points, cv2.RANSAC, 5.0)
+    # 智能边界调整：检查文本是否超出图片边界，如果超出则平移到图片内
+    img_h, img_w = img.shape[:2]
+    x, y, w, h = cv2.boundingRect(np.round(dst_points[0]).astype(np.int32))
+    
+    adjusted = False
+    offset_x, offset_y = 0, 0
+    
+    # 检查并计算需要的偏移
+    if y < 0:
+        offset_y = -y
+        adjusted = True
+    elif y + h > img_h:
+        offset_y = img_h - (y + h)
+        adjusted = True
+    
+    if x < 0:
+        offset_x = -x
+        adjusted = True
+    elif x + w > img_w:
+        offset_x = img_w - (x + w)
+        adjusted = True
+    
+    # 应用偏移到目标点
+    adjusted_dst_points = dst_points.copy()
+    if adjusted:
+        adjusted_dst_points[0, :, 0] += offset_x
+        adjusted_dst_points[0, :, 1] += offset_y
+        logger.info(f"Adjusted text position to fit within image: offset=({offset_x}, {offset_y}), original_bbox=({x}, {y}, {w}, {h})")
+
+    M, _ = cv2.findHomography(src_points, adjusted_dst_points[0], cv2.RANSAC, 5.0)
     # 使用INTER_LANCZOS4获得最高质量的插值,避免字体模糊
     rgba_region = cv2.warpPerspective(box, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-    x, y, w, h = cv2.boundingRect(np.round(dst_points).astype(np.int64))
-    canvas_region = rgba_region[y:y+h, x:x+w, :3]
-    mask_region = rgba_region[y:y+h, x:x+w, 3:4].astype(np.float32) / 255.0
-    img[y:y+h, x:x+w] = np.clip((img[y:y+h, x:x+w].astype(np.float32) * (1 - mask_region) + canvas_region.astype(np.float32) * mask_region), 0, 255).astype(np.uint8)
+    x_adj, y_adj, w_adj, h_adj = cv2.boundingRect(np.round(adjusted_dst_points[0]).astype(np.int32))
+    
+    # 边界检查：确保调整后仍在图片内
+    valid_y1 = max(0, y_adj)
+    valid_y2 = min(img_h, y_adj + h_adj)
+    valid_x1 = max(0, x_adj)
+    valid_x2 = min(img_w, x_adj + w_adj)
+    
+    # 计算rgba_region中对应的区域
+    region_y1 = valid_y1
+    region_y2 = region_y1 + (valid_y2 - valid_y1)
+    region_x1 = valid_x1
+    region_x2 = region_x1 + (valid_x2 - valid_x1)
+    
+    # 检查是否有有效区域
+    if valid_y2 > valid_y1 and valid_x2 > valid_x1:
+        canvas_region = rgba_region[region_y1:region_y2, region_x1:region_x2, :3]
+        mask_region = rgba_region[region_y1:region_y2, region_x1:region_x2, 3:4].astype(np.float32) / 255.0
+        
+        # 确保尺寸匹配
+        target_region = img[valid_y1:valid_y2, valid_x1:valid_x2]
+        if canvas_region.shape[:2] == target_region.shape[:2]:
+            img[valid_y1:valid_y2, valid_x1:valid_x2] = np.clip(
+                (target_region.astype(np.float32) * (1 - mask_region) + canvas_region.astype(np.float32) * mask_region), 
+                0, 255
+            ).astype(np.uint8)
+        else:
+            logger.warning(f"Text region size mismatch: canvas={canvas_region.shape[:2]}, target={target_region.shape[:2]}, skipping region")
+    else:
+        logger.warning(f"Text region completely outside image bounds after adjustment: x={x_adj}, y={y_adj}, w={w_adj}, h={h_adj}, image_size=({img_w}, {img_h}). Text: '{region.translation[:50] if hasattr(region, 'translation') else 'N/A'}...'")
     return img
 
 async def dispatch_eng_render(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '', line_spacing: int = 0, disable_font_border: bool = False) -> np.ndarray:

@@ -172,8 +172,8 @@ class MainView(QWidget):
         for key, value in data.items():
             full_key = f"{prefix}.{key}" if prefix else key
 
-            # 跳过这三个选项，因为已经用下拉框替代
-            if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export"]:
+            # 跳过这些选项，因为已经用下拉框替代或不需要在UI中显示
+            if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export", "cli.colorize_only"]:
                 continue
 
             label_text = key

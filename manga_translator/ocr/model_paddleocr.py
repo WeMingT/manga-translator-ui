@@ -34,6 +34,30 @@ class ModelPaddleOCR(OfflineOCR):
     # _MODEL_DIR and _MODEL_SUB_DIR are inherited from ModelWrapper and OfflineOCR
     # Final path: BASE_PATH/models/ocr
 
+    # Model mapping for unified model management
+    _MODEL_MAPPING = {
+        'ch_onnx': {
+            'url': 'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.1/ch_PP-OCRv5_rec_server_infer.onnx',
+            'hash': 'e09385400eaaaef34ceff54aeb7c4f0f1fe014c27fa8b9905d4709b65746562a',
+            'file': '.',
+        },
+        'ch_dict': {
+            'url': 'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.1/ppocrv5_dict.txt',
+            'hash': 'd1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b',
+            'file': '.',
+        },
+        'korean_onnx': {
+            'url': 'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.1/korean_PP-OCRv5_rec_mobile_infer.onnx',
+            'hash': 'cd6e2ea50f6943ca7271eb8c56a877a5a90720b7047fe9c41a2e541a25773c9b',
+            'file': '.',
+        },
+        'korean_dict': {
+            'url': 'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.1/ppocrv5_korean_dict.txt',
+            'hash': 'a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7',
+            'file': '.',
+        }
+    }
+
     _MODELS = {
         'ch': {  # Chinese/Japanese/English
             'onnx': 'ch_PP-OCRv5_rec_server_infer.onnx',
@@ -151,7 +175,7 @@ class ModelPaddleOCR(OfflineOCR):
 
                     # Use high compression for saving
                     compression_params = [cv2.IMWRITE_PNG_COMPRESSION, 9]
-                    imwrite_unicode(os.path.join(ocr_result_dir, f'{i}.png'), img_data, compression_params)
+                    imwrite_unicode(os.path.join(ocr_result_dir, f'{i}.png'), img_data, self.logger, compression_params)
 
                 regions.append(region_bgr)
                 valid_indices.append(i)
@@ -175,12 +199,21 @@ class ModelPaddleOCR(OfflineOCR):
                 for idx, pred in zip(valid_indices, predictions):
                     text, confidence = self._decode_ctc(pred)
 
+                    textline = textlines[idx]
+                    
                     if confidence < threshold:
-                        if verbose:
-                            self.logger.info(f"Skipped '{text}' (conf: {confidence:.3f})")
+                        self.logger.info(f"[FILTERED] prob: {confidence:.3f} < threshold: {threshold} - Text: \"{text}\"")
+                        # Keep the textline with empty text for hybrid OCR to retry
+                        textline.text = ''  # Empty text for hybrid OCR
+                        textline.prob = confidence
+                        textline.fg_r = 0
+                        textline.fg_g = 0
+                        textline.fg_b = 0
+                        textline.bg_r = 255
+                        textline.bg_g = 255
+                        textline.bg_b = 255
                         continue
 
-                    textline = textlines[idx]
                     textline.text = text
                     textline.prob = confidence
 
@@ -188,8 +221,7 @@ class ModelPaddleOCR(OfflineOCR):
                     region_idx = valid_indices.index(idx)
                     self._estimate_colors(regions[region_idx], textline)
 
-                    if verbose:
-                        self.logger.info(f'prob: {confidence:.3f} {text} fg: ({textline.fg_r}, {textline.fg_g}, {textline.fg_b}) bg: ({textline.bg_r}, {textline.bg_g}, {textline.bg_b})')
+                    self.logger.info(f'prob: {confidence:.3f} {text} fg: ({textline.fg_r}, {textline.fg_g}, {textline.fg_b}) bg: ({textline.bg_r}, {textline.bg_g}, {textline.bg_b})')
 
             except Exception as e:
                 self.logger.error(f"Inference failed: {e}")

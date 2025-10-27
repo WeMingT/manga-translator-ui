@@ -82,15 +82,16 @@ class Model32pxOCR(OfflineOCR):
                 tmp = region_imgs[idx]
                 # Determine whether to skip the text block, and return True to skip.
                 if ignore_bubble >=1 and ignore_bubble <=50 and is_ignore(region_imgs[idx],ignore_bubble):
+                    self.logger.info(f'[FILTERED] Region {ix} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble})')
                     ix+=1
                     continue
                 region[i, :, : W, :]=tmp
                 if verbose:
                     os.makedirs('result/ocrs/', exist_ok=True)
                     if quadrilaterals[idx][1] == 'v':
-                        imwrite_unicode(f'result/ocrs/{ix}.png', cv2.rotate(cv2.cvtColor(region[i, :, :, :], cv2.COLOR_RGB2BGR), cv2.ROTATE_90_CLOCKWISE))
+                        imwrite_unicode(f'result/ocrs/{ix}.png', cv2.rotate(cv2.cvtColor(region[i, :, :, :], cv2.COLOR_RGB2BGR), cv2.ROTATE_90_CLOCKWISE), self.logger)
                     else:
-                        imwrite_unicode(f'result/ocrs/{ix}.png', cv2.cvtColor(region[i, :, :, :], cv2.COLOR_RGB2BGR))
+                        imwrite_unicode(f'result/ocrs/{ix}.png', cv2.cvtColor(region[i, :, :, :], cv2.COLOR_RGB2BGR), self.logger)
                 ix += 1
             image_tensor = (torch.from_numpy(region).float() - 127.5) / 127.5
             image_tensor = einops.rearrange(image_tensor, 'N H W C -> N C H W')
@@ -100,6 +101,34 @@ class Model32pxOCR(OfflineOCR):
                 ret = self.model.infer_beam_batch(image_tensor, widths, beams_k = 5, max_seq_length = 255)
             for i, (pred_chars_index, prob, fr, fg, fb, br, bg, bb) in enumerate(ret):
                 if prob < threshold:
+                    # Decode text first to log it
+                    seq = []
+                    for chid in pred_chars_index:
+                        ch = self.model.dictionary[chid]
+                        if ch == '<S>':
+                            continue
+                        if ch == '</S>':
+                            break
+                        if ch == '<SP>':
+                            ch = ' '
+                        seq.append(ch)
+                    txt = ''.join(seq)
+                    self.logger.info(f'[FILTERED] prob: {prob:.4f} < threshold: {threshold} - Text: "{txt}"')
+                    # Keep the textline with empty text for hybrid OCR to retry
+                    cur_region = quadrilaterals[indices[i]][0]
+                    if isinstance(cur_region, Quadrilateral):
+                        cur_region.text = ''  # Empty text for hybrid OCR
+                        cur_region.prob = prob
+                        cur_region.fg_r = 0
+                        cur_region.fg_g = 0
+                        cur_region.fg_b = 0
+                        cur_region.bg_r = 255
+                        cur_region.bg_g = 255
+                        cur_region.bg_b = 255
+                    else:
+                        cur_region.text.append('')
+                        cur_region.update_font_colors(np.array([0, 0, 0]), np.array([255, 255, 255]))
+                    out_regions.append(cur_region)
                     continue
                 fr = (torch.clip(fr.view(-1), 0, 1).mean() * 255).long().item()
                 fg = (torch.clip(fg.view(-1), 0, 1).mean() * 255).long().item()

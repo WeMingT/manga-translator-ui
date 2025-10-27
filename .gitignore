@@ -59,6 +59,7 @@ desktop-ui/temp/
 desktop-ui/user_data/
 manga-image-translator-main/
 PaddleOCR-main/
+X-AnyLabeling-main/
 
 # Ignore temporary clone check directory
 temp_clone_check/

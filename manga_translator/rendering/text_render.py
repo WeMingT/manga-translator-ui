@@ -648,6 +648,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
                 combined_temp = cv2.add(temp_canvas_text, temp_canvas_border)
                 x, y, w, h_crop = cv2.boundingRect(combined_temp)
                 if w == 0 or h_crop == 0:
+                    logger.warning(f"[RENDER SKIPPED] Horizontal block in vertical text has zero dimensions. Width: {w}, Height: {h_crop}")
                     continue
 
                 horizontal_block_text = temp_canvas_text[y:y+h_crop, x:x+w]
@@ -661,8 +662,36 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
                 paste_x = line_start_x + (font_size - rw) // 2
                 paste_y = pen_line[1]
 
-                if paste_y + rh > canvas_text.shape[0] or paste_x + rw > canvas_text.shape[1] or paste_x < 0 or paste_y < 0:
-                    continue
+                # 智能边界调整：向中心方向移动而不是跳过
+                canvas_h, canvas_w = canvas_text.shape
+                adjusted = False
+                if paste_y + rh > canvas_h or paste_x + rw > canvas_w or paste_x < 0 or paste_y < 0:
+                    adjusted = True
+                    # 向中心调整位置
+                    center_x = canvas_w // 2
+                    center_y = canvas_h // 2
+                    
+                    # X 方向调整
+                    if paste_x < 0:
+                        paste_x = 0
+                    elif paste_x + rw > canvas_w:
+                        paste_x = canvas_w - rw
+                    
+                    # Y 方向调整
+                    if paste_y < 0:
+                        paste_y = 0
+                    elif paste_y + rh > canvas_h:
+                        paste_y = canvas_h - rh
+                    
+                    # 确保调整后仍在边界内
+                    paste_x = max(0, min(paste_x, canvas_w - rw))
+                    paste_y = max(0, min(paste_y, canvas_h - rh))
+                    
+                    if paste_x < 0 or paste_y < 0 or paste_x + rw > canvas_w or paste_y + rh > canvas_h:
+                        logger.warning(f"Text block too large for canvas, skipping. Size: {rw}x{rh}, Canvas: {canvas_w}x{canvas_h}")
+                        continue
+                    
+                    logger.info(f"Adjusted text position to fit canvas bounds: ({line_start_x + (font_size - rw) // 2}, {pen_line[1]}) -> ({paste_x}, {paste_y})")
 
                 target_text_roi = canvas_text[paste_y:paste_y+rh, paste_x:paste_x+rw]
                 canvas_text[paste_y:paste_y+rh, paste_x:paste_x+rw] = np.maximum(target_text_roi, horizontal_block_text)
@@ -688,6 +717,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
     x, y, w, h = cv2.boundingRect(combined_canvas)
 
     if w == 0 or h == 0:
+        logger.warning(f"[RENDER SKIPPED] Vertical text rendered with zero width or height. Width: {w}, Height: {h}, Text: {text[:50]}...")
         return
 
     result = line_box[y:y+h, x:x+w]
@@ -1155,6 +1185,7 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
 
     text = compact_special_symbols(text)
     if not text :
+        logger.warning(f"[RENDER SKIPPED] Horizontal text is empty after processing")
         return
 
     layout_mode = 'default'
@@ -1240,8 +1271,10 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
     return result
 
 def test():
+    import logging
+    logger = logging.getLogger('manga_translator')
     canvas = put_text_horizontal(64, 1.0, '因为不同‼ [这"真的是普]通的》肉！那个"姑娘"的恶作剧！是吗？咲夜⁉', 400, (0, 0, 0), (255, 128, 128))
-    imwrite_unicode('text_render_combined.png', canvas)
+    imwrite_unicode('text_render_combined.png', canvas, logger)
 
 # Initialize font selection on module load
 update_font_selection()

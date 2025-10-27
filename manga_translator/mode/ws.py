@@ -250,15 +250,15 @@ class MangaTranslatorWS(MangaTranslator):
         render_mask[np.sum(ctx.img_rgb != output, axis=2) > 0] = 1
         ctx.render_mask = render_mask
         if self.verbose:
-            imwrite_unicode(self._result_path('ws_render_in.png'), cv2.cvtColor(ctx.img_rgb, cv2.COLOR_RGB2BGR))
-            imwrite_unicode(self._result_path('ws_render_out.png'), cv2.cvtColor(output, cv2.COLOR_RGB2BGR))
-            imwrite_unicode(self._result_path('ws_mask.png'), render_mask * 255)
+            imwrite_unicode(self._result_path('ws_render_in.png'), cv2.cvtColor(ctx.img_rgb, cv2.COLOR_RGB2BGR), logger)
+            imwrite_unicode(self._result_path('ws_render_out.png'), cv2.cvtColor(output, cv2.COLOR_RGB2BGR), logger)
+            imwrite_unicode(self._result_path('ws_mask.png'), render_mask * 255, logger)
 
         # only keep sections in mask
         if self.verbose:
-            imwrite_unicode(self._result_path('ws_inmask.png'), cv2.cvtColor(ctx.img_rgb, cv2.COLOR_RGB2BGRA) * render_mask)
+            imwrite_unicode(self._result_path('ws_inmask.png'), cv2.cvtColor(ctx.img_rgb, cv2.COLOR_RGB2BGRA) * render_mask, logger)
         output = cv2.cvtColor(output, cv2.COLOR_RGB2RGBA) * render_mask
         if self.verbose:
-            imwrite_unicode(self._result_path('ws_output.png'), cv2.cvtColor(output, cv2.COLOR_RGBA2BGRA) * render_mask)
+            imwrite_unicode(self._result_path('ws_output.png'), cv2.cvtColor(output, cv2.COLOR_RGBA2BGRA) * render_mask, logger)
 
         return output

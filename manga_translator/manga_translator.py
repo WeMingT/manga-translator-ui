@@ -32,6 +32,10 @@ from .utils import (
     TextBlock,
     imwrite_unicode
 )
+import matplotlib
+matplotlib.use('Agg')  # 使用非GUI后端
+import matplotlib.pyplot as plt
+from matplotlib import cm
 from .utils.path_manager import (
     get_json_path,
     get_inpainted_path,
@@ -843,7 +847,35 @@ class MangaTranslator:
             ctx.mask = None
 
         if self.verbose and ctx.mask_raw is not None:
-            imwrite_unicode(self._result_path('mask_raw.png'), ctx.mask_raw, logger)
+            # 生成带置信度颜色映射和颜色条的热力图
+            logger.info(f"Generating confidence heatmap for mask_raw (shape: {ctx.mask_raw.shape}, dtype: {ctx.mask_raw.dtype})")
+            heatmap = self._create_confidence_heatmap(ctx.mask_raw, equalize=False)
+            logger.info(f"Heatmap generated (shape: {heatmap.shape}), saving to mask_raw.png")
+            imwrite_unicode(self._result_path('mask_raw.png'), heatmap, logger)
+            
+            # 如果有raw_mask_mask，生成对比图
+            if hasattr(ctx, 'raw_mask_mask') and ctx.raw_mask_mask is not None:
+                try:
+                    logger.info(f"Generating mask vs db comparison heatmap...")
+                    logger.info(f"[DEBUG] raw_mask_mask shape: {ctx.raw_mask_mask.shape}, ctx.mask_raw shape: {ctx.mask_raw.shape}")
+                    
+                    # 确保两个mask尺寸一致
+                    if ctx.raw_mask_mask.shape != ctx.mask_raw.shape:
+                        logger.info(f"[DEBUG] Resizing raw_mask_mask from {ctx.raw_mask_mask.shape} to {ctx.mask_raw.shape}")
+                        raw_mask_mask_resized = cv2.resize(ctx.raw_mask_mask, 
+                                                          (ctx.mask_raw.shape[1], ctx.mask_raw.shape[0]), 
+                                                          interpolation=cv2.INTER_LINEAR)
+                    else:
+                        raw_mask_mask_resized = ctx.raw_mask_mask
+                    
+                    heatmap_mask = self._create_confidence_heatmap(raw_mask_mask_resized, equalize=False)
+                    heatmap_db = heatmap  # 复用刚生成的db热力图
+                    comparison = np.hstack([heatmap_mask, heatmap_db])
+                    comparison_path = self._result_path('mask_comparison.png')
+                    imwrite_unicode(comparison_path, comparison, logger)
+                    logger.info(f'Saved mask vs db comparison to {comparison_path}')
+                except Exception as e:
+                    logger.error(f'Failed to generate mask vs db comparison: {e}')
 
         # --- BEGIN: Save raw detection boxes image in verbose mode ---
         if self.verbose and ctx.textlines:
@@ -1132,7 +1164,53 @@ class MangaTranslator:
                                         config.detector.box_threshold,
                                         config.detector.unclip_ratio, config.detector.det_invert, config.detector.det_gamma_correct, config.detector.det_rotate,
                                         config.detector.det_auto_rotate,
-                                        self.device, self.verbose)
+                                        self.device, self.verbose,
+                                        config.detector.use_yolo_obb, config.detector.yolo_obb_conf, config.detector.yolo_obb_iou)
+        
+        # 处理bbox调试图（如果检测器返回了）
+        if self.verbose and result and len(result) == 3 and result[2] is not None:
+            third_elem = result[2]
+            # 检查是否是tuple（包含三张图）
+            if isinstance(third_elem, tuple) and len(third_elem) == 3:
+                try:
+                    logger.info(f'[DEBUG] Processing 3-element tuple: {[type(x) for x in third_elem]}')
+                    bbox_img, binary_mask_img, raw_mask_mask = third_elem
+                    # 保存边框调试图
+                    bbox_debug_path = self._result_path('bboxes_with_scores.png')
+                    imwrite_unicode(bbox_debug_path, bbox_img, logger)
+                    logger.info(f'Saved bbox debug image to {bbox_debug_path}')
+                    # 保存二值化mask
+                    binary_mask_path = self._result_path('mask_binary.png')
+                    imwrite_unicode(binary_mask_path, binary_mask_img, logger)
+                    logger.info(f'Saved binary mask to {binary_mask_path}')
+                    # 暂存raw_mask_mask到ctx以便后续生成对比图
+                    ctx.raw_mask_mask = raw_mask_mask
+                    logger.info(f'[DEBUG] Stored raw_mask_mask for later comparison (shape: {raw_mask_mask.shape})')
+                    result = (result[0], result[1], None)
+                except Exception as e:
+                    logger.error(f'Failed to save bbox debug images: {e}')
+            # 兼容2张图的情况
+            elif isinstance(third_elem, tuple) and len(third_elem) == 2:
+                try:
+                    bbox_img, binary_mask_img = third_elem
+                    bbox_debug_path = self._result_path('bboxes_with_scores.png')
+                    imwrite_unicode(bbox_debug_path, bbox_img, logger)
+                    logger.info(f'Saved bbox debug image to {bbox_debug_path}')
+                    binary_mask_path = self._result_path('mask_binary.png')
+                    imwrite_unicode(binary_mask_path, binary_mask_img, logger)
+                    logger.info(f'Saved binary mask to {binary_mask_path}')
+                    result = (result[0], result[1], None)
+                except Exception as e:
+                    logger.error(f'Failed to save bbox debug images: {e}')
+            # 兼容单张图的情况
+            elif isinstance(third_elem, np.ndarray) and len(third_elem.shape) == 3:
+                try:
+                    bbox_debug_path = self._result_path('bboxes_with_scores.png')
+                    imwrite_unicode(bbox_debug_path, third_elem, logger)
+                    logger.info(f'Saved bbox debug image to {bbox_debug_path}')
+                    result = (result[0], result[1], None)
+                except Exception as e:
+                    logger.error(f'Failed to save bbox debug image: {e}')
         
         # --- BEGIN NON-MAXIMUM SUPPRESSION (NMS) FOR DE-DUPLICATION ---
         if result and result[0]:
@@ -1238,12 +1316,18 @@ class MangaTranslator:
 
             # --- BEGIN: HYBRID OCR LOGIC ---
             if config.ocr.use_hybrid_ocr:
-                # Identify textlines that failed recognition
-                failed_indices = [i for i, tl in enumerate(textlines) if not tl.text.strip()]
+                # Identify textlines that failed recognition or have low confidence
+                # 判断失败条件：文本为空 或 置信度低于阈值
+                prob_threshold = config.ocr.prob if config.ocr.prob is not None else 0.1
+                failed_indices = [
+                    i for i, tl in enumerate(textlines) 
+                    if not tl.text.strip() or tl.prob < prob_threshold
+                ]
                 
                 if failed_indices:
-                    failed_textlines = [ctx.textlines[i] for i in failed_indices]
-                    logger.info(f"{len(failed_textlines)} textlines failed with primary OCR. Trying secondary OCR...")
+                    # Use textlines[i] instead of ctx.textlines[i] because OCR may have changed the order
+                    failed_textlines = [textlines[i] for i in failed_indices]
+                    logger.info(f"{len(failed_textlines)} textlines failed or have low confidence (< {prob_threshold}) with primary OCR. Trying secondary OCR...")
                     
                     secondary_ocr_engine = config.ocr.secondary_ocr
                     # We can reuse the same config object, just switching the engine
@@ -1986,6 +2070,102 @@ class MangaTranslator:
                 output = result
         return output
 
+    def _create_confidence_heatmap(self, mask: np.ndarray, vmin: float = 0.0, vmax: float = 1.0, equalize: bool = True) -> np.ndarray:
+        """
+        将灰度mask转换为带颜色条的置信度热力图
+        
+        Args:
+            mask: 灰度mask数组 (0-255)
+            vmin: 颜色映射的最小值 (0-1)，低于此值显示为最低颜色
+            vmax: 颜色映射的最大值 (0-1)，高于此值显示为最高颜色
+            equalize: 是否应用直方图均衡化增强对比度
+        
+        Returns:
+            带颜色条的BGR图像
+        """
+        # 如果是多通道图像，转换为单通道
+        if len(mask.shape) == 3:
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        
+        # 直方图均衡化增强对比度
+        if equalize:
+            mask = cv2.equalizeHist(mask)
+        
+        # 归一化mask到0-1范围
+        if mask.max() > 0:
+            mask_normalized = mask.astype(np.float32) / 255.0
+        else:
+            mask_normalized = mask.astype(np.float32)
+        
+        # 调整映射范围：将[vmin, vmax]映射到[0, 1]
+        if vmin != 0.0 or vmax != 1.0:
+            mask_normalized = np.clip((mask_normalized - vmin) / (vmax - vmin), 0, 1)
+        
+        # 应用颜色映射（使用jet colormap）
+        colormap = cm.get_cmap('jet')
+        colored_mask = colormap(mask_normalized)
+        
+        # 转换为BGR格式 (matplotlib返回RGBA)
+        colored_mask_bgr = (colored_mask[:, :, :3] * 255).astype(np.uint8)
+        colored_mask_bgr = cv2.cvtColor(colored_mask_bgr, cv2.COLOR_RGB2BGR)
+        
+        # 创建带颜色条的图像
+        h, w = mask.shape
+        # 创建颜色条 (宽度为图像宽度的10%，最小50像素)
+        colorbar_width = max(50, int(w * 0.1))
+        colorbar_height = h
+        
+        # 生成颜色条
+        colorbar = np.linspace(1, 0, colorbar_height).reshape(-1, 1)
+        colorbar = np.tile(colorbar, (1, colorbar_width))
+        colored_colorbar = colormap(colorbar)
+        colored_colorbar_bgr = (colored_colorbar[:, :, :3] * 255).astype(np.uint8)
+        colored_colorbar_bgr = cv2.cvtColor(colored_colorbar_bgr, cv2.COLOR_RGB2BGR)
+        
+        # 创建带文字标注的颜色条
+        # 添加白色边框和文字背景
+        colorbar_with_labels = np.ones((colorbar_height, colorbar_width + 100, 3), dtype=np.uint8) * 255
+        colorbar_with_labels[:, :colorbar_width] = colored_colorbar_bgr
+        
+        # 添加刻度和文字
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        font_thickness = 1
+        num_ticks = 11  # 显示11个刻度
+        
+        for i in range(num_ticks):
+            # 映射到实际值范围 [vmax, vmin]
+            normalized_value = 1.0 - i / (num_ticks - 1)  # 从1.0到0.0
+            actual_value = vmin + normalized_value * (vmax - vmin)  # 映射到[vmin, vmax]
+            y_pos = int(i * (colorbar_height - 1) / (num_ticks - 1))
+            
+            # 绘制刻度线
+            cv2.line(colorbar_with_labels, 
+                    (colorbar_width, y_pos), 
+                    (colorbar_width + 10, y_pos), 
+                    (0, 0, 0), 1)
+            
+            # 绘制文字
+            text = f'{actual_value:.2f}'
+            text_size = cv2.getTextSize(text, font, font_scale, font_thickness)[0]
+            text_y = y_pos + text_size[1] // 2
+            cv2.putText(colorbar_with_labels, text, 
+                       (colorbar_width + 15, text_y), 
+                       font, font_scale, (0, 0, 0), font_thickness)
+        
+        # 添加标题
+        title = 'Confidence'
+        title_size = cv2.getTextSize(title, font, font_scale, font_thickness)[0]
+        title_x = colorbar_width + (100 - title_size[0]) // 2
+        cv2.putText(colorbar_with_labels, title, 
+                   (title_x, 20), 
+                   font, font_scale, (0, 0, 0), font_thickness)
+        
+        # 拼接原图和颜色条
+        result_image = np.hstack([colored_mask_bgr, colorbar_with_labels])
+        
+        return result_image
+
     def _result_path(self, path: str) -> str:
         """
         Returns path to result folder where intermediate images are saved when using verbose flag
@@ -2369,7 +2549,11 @@ class MangaTranslator:
             ctx.mask = None
 
         if self.verbose and ctx.mask_raw is not None:
-            imwrite_unicode(self._result_path('mask_raw.png'), ctx.mask_raw, logger)
+            # 生成带置信度颜色映射和颜色条的热力图
+            logger.info(f"Generating confidence heatmap for mask_raw (shape: {ctx.mask_raw.shape}, dtype: {ctx.mask_raw.dtype})")
+            heatmap = self._create_confidence_heatmap(ctx.mask_raw, equalize=False)
+            logger.info(f"Heatmap generated (shape: {heatmap.shape}), saving to mask_raw.png")
+            imwrite_unicode(self._result_path('mask_raw.png'), heatmap, logger)
 
         if not ctx.textlines:
             await self._report_progress('skip-no-regions', True)

@@ -1664,11 +1664,40 @@ class EditorController(QObject):
         current_regions = self.model.get_regions()
         updated_regions = list(current_regions) # Create a shallow copy of the list
 
+        # 从属性面板获取用户选择的OCR配置
+        ocr_config = None
+        if self.view and hasattr(self.view, 'property_panel'):
+            selected_ocr = self.view.property_panel.get_selected_ocr_model()
+            if selected_ocr:
+                # 获取当前的OCR配置并更新ocr字段
+                from manga_translator.config import OcrConfig, Ocr
+                full_config = self.config_service.get_config()
+                current_ocr_config = full_config.ocr if hasattr(full_config, 'ocr') else OcrConfig()
+                try:
+                    # 将字符串转换为Ocr枚举
+                    ocr_enum = Ocr(selected_ocr) if selected_ocr else current_ocr_config.ocr
+                    ocr_config = OcrConfig(
+                        ocr=ocr_enum,
+                        use_mocr_merge=current_ocr_config.use_mocr_merge,
+                        use_hybrid_ocr=current_ocr_config.use_hybrid_ocr,
+                        secondary_ocr=current_ocr_config.secondary_ocr,
+                        min_text_length=current_ocr_config.min_text_length,
+                        ignore_bubble=current_ocr_config.ignore_bubble,
+                        prob=current_ocr_config.prob,
+                        merge_gamma=current_ocr_config.merge_gamma,
+                        merge_sigma=current_ocr_config.merge_sigma,
+                        merge_edge_ratio_threshold=current_ocr_config.merge_edge_ratio_threshold
+                    )
+                    self.logger.info(f"Using OCR model from property panel: {selected_ocr}")
+                except (ValueError, AttributeError) as e:
+                    self.logger.warning(f"Invalid OCR selection '{selected_ocr}', using default: {e}")
+                    ocr_config = None
+
         success_count = 0
         for i, region_data in enumerate(regions_to_process):
             region_idx = indices[i]
             try:
-                ocr_result = await self.ocr_service.recognize_region(image, region_data)
+                ocr_result = await self.ocr_service.recognize_region(image, region_data, config=ocr_config)
                 if ocr_result and ocr_result.text:
                     # Create a copy of the specific region dict to modify
                     new_region_data = updated_regions[region_idx].copy()
@@ -1707,10 +1736,37 @@ class EditorController(QObject):
         self.async_service.submit_task(self._async_translation_task(texts_to_translate, selected_indices, image, all_regions))
 
     async def _async_translation_task(self, texts, indices, image, regions):
+        # 从属性面板获取用户选择的翻译器配置
+        translator_to_use = None
+        target_lang_to_use = None
+        
+        if self.view and hasattr(self.view, 'property_panel'):
+            selected_translator = self.view.property_panel.get_selected_translator()
+            selected_target_lang = self.view.property_panel.get_selected_target_language()
+            
+            if selected_translator:
+                from manga_translator.config import Translator
+                try:
+                    # 将字符串转换为Translator枚举
+                    translator_to_use = Translator(selected_translator)
+                    self.logger.info(f"Using translator from property panel: {selected_translator}")
+                except (ValueError, AttributeError) as e:
+                    self.logger.warning(f"Invalid translator selection '{selected_translator}', using default: {e}")
+            
+            if selected_target_lang:
+                target_lang_to_use = selected_target_lang
+                self.logger.info(f"Using target language from property panel: {selected_target_lang}")
+        
         # 将image和所有regions信息传递给翻译服务以提供完整上下文
         success_count = 0
         try:
-            results = await self.translation_service.translate_text_batch(texts, image=image, regions=regions)
+            results = await self.translation_service.translate_text_batch(
+                texts, 
+                translator=translator_to_use,
+                target_lang=target_lang_to_use,
+                image=image, 
+                regions=regions
+            )
             current_regions = self.model.get_regions()
             updated_regions = list(current_regions) # Create a shallow copy
 
