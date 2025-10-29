@@ -442,5 +442,13 @@ class YOLOOBBDetector(OfflineDetector):
         
         self.logger.info(f"YOLO OBB检测到 {len(textlines)} 个文本框")
         
+        # ✅ Detection完成后立即清理GPU内存（ONNX Runtime使用CUDA，需要清理）
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        
         return textlines, None, None
 

@@ -229,4 +229,13 @@ class DefaultDetector(OfflineDetector):
             if bbox_debug_img and isinstance(bbox_debug_img, tuple):
                 bbox_debug_img = (*bbox_debug_img, raw_mask_db)
         
+        # ✅ Detection完成后立即清理GPU内存
+        if (self.device.startswith('cuda') or self.device == 'mps'):
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+        
         return textlines, raw_mask, bbox_debug_img

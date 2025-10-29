@@ -172,6 +172,11 @@ class Model48pxCTCOCR(OfflineOCR):
 
                 out_regions.append(cur_region)
 
+        # ✅ OCR完成后立即清理内存
+        del image_tensor, region
+        if self.use_gpu and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         if is_quadrilaterals:
             return out_regions
         return textlines

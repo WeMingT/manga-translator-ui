@@ -525,8 +525,9 @@ class MainView(QWidget):
         elif index == 4:  # 仅上色
             config.cli.colorize_only = True
 
-        # 保存配置
+        # ✅ 保存配置到内存和文件
         self.config_service.set_config(config)
+        self.config_service.save_config_file()
 
         # 立即更新按钮文字
         self.update_start_button_text()

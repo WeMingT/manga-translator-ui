@@ -59,7 +59,7 @@ transformers
 tqdm
 uvicorn
 websockets
-xformers==0.0.32.post2
+# xformers==0.0.32.post2  # CPU版本不需要，仅GPU使用
 google-generativeai
 git+https://github.com/lucasb-eyer/pydensecrf.git
 deepl

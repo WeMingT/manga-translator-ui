@@ -162,6 +162,9 @@ class ModelMangaOCR(OfflineOCR):
             merged_region_imgs.append(q.get_transformed_region(image, merged_d, merged_text_height))
         for idx in range(len(merged_region_imgs)):
             texts[idx] = self.mocr(Image.fromarray(merged_region_imgs[idx]))
+        
+        # ✅ 清理合并后的region图像
+        del merged_region_imgs
             
         ix = 0
         out_regions = {}
@@ -189,6 +192,12 @@ class ModelMangaOCR(OfflineOCR):
                 image_tensor = image_tensor.to(self.device)
             with torch.no_grad():
                 ret = self.model.infer_beam_batch(image_tensor, widths, beams_k = 5, max_seq_length = 255)
+            
+            # ✅ 处理完一个chunk后立即清理
+            del image_tensor, region
+            if self.use_gpu and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             for i, (pred_chars_index, prob, fg_pred, bg_pred, fg_ind_pred, bg_ind_pred) in enumerate(ret):
                 if prob < 0.2:
                     # Decode text first to log it
@@ -264,6 +273,9 @@ class ModelMangaOCR(OfflineOCR):
                     cur_region.update_font_colors(np.array([fr, fg, fb]), np.array([br, bg, bb]))
 
                 out_regions[idx_keys[i]] = cur_region
+            
+            # ✅ 清理chunk处理结果
+            del ret
                 
         output_regions = []
         for i, nodes in enumerate(merged_idx):
@@ -318,6 +330,11 @@ class ModelMangaOCR(OfflineOCR):
                 cur_region.text.append(txt)
                 cur_region.update_font_colors(np.array([fr, fg, fb]), np.array([br, bg, bb]))
             output_regions.append(cur_region)
+        
+        # ✅ OCR完成后最终清理
+        del region_imgs, quadrilaterals, merged_quadrilaterals, out_regions
+        if self.use_gpu and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         if is_quadrilaterals:
             return output_regions

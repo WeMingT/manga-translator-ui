@@ -1235,10 +1235,15 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
     bg_size = int(max(font_size * 0.07, 1)) if bg is not None else 0
     spacing_y = int(font_size * (line_spacing or 0.01))
 
+    # ✅ DEBUG: 输出渲染参数
+    logger.info(f"[RENDER DEBUG] text='{text[:50]}...', lang={lang}, layout_mode={layout_mode}, is_cjk={is_cjk_lang(lang)}")
+
     if layout_mode != 'default' and is_cjk_lang(lang):
         line_text_list, line_width_list = calc_horizontal_cjk(font_size, text, width)
+        logger.info(f"[RENDER DEBUG] Using calc_horizontal_cjk, lines={len(line_text_list)}")
     else:
         line_text_list, line_width_list = calc_horizontal(font_size, text, width, height, lang, hyphenate)
+        logger.info(f"[RENDER DEBUG] Using calc_horizontal, lines={len(line_text_list)}")
 
     canvas_w = max(line_width_list) + (font_size + bg_size) * 2
     canvas_h = font_size * len(line_width_list) + spacing_y * (len(line_width_list) - 1) + (font_size + bg_size) * 2

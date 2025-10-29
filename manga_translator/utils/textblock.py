@@ -239,18 +239,32 @@ class TextBlock(object):
         # Note: The UI might add/use other fields like 'center' which it calculates itself.
         # This export is from the perspective of the backend pipeline.
         
-        # Convert each line polygon to its axis-aligned bounding box,
-        # but keep the 4-point polygon structure.
+        # 将倾斜的多边形反旋转成正矩形（配合angle字段使用）
+        import math
+        
+        # 计算中心点
+        all_vertices = self.lines.reshape((-1, 2))
+        center_x = np.mean(all_vertices[:, 0])
+        center_y = np.mean(all_vertices[:, 1])
+        
+        # 反旋转角度（将倾斜的坐标旋转回正）
+        angle_rad = -math.radians(self.angle)  # 负号表示反旋转
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        
         new_lines = []
         for line_poly in self.lines:
-            x_min, y_min = np.min(line_poly, axis=0)
-            x_max, y_max = np.max(line_poly, axis=0)
-            new_lines.append([
-                [x_min, y_min],
-                [x_max, y_min],
-                [x_max, y_max],
-                [x_min, y_max]
-            ])
+            unrotated_poly = []
+            for x, y in line_poly:
+                # 平移到原点
+                dx = x - center_x
+                dy = y - center_y
+                # 旋转
+                new_x = dx * cos_a - dy * sin_a
+                new_y = dx * sin_a + dy * cos_a
+                # 平移回去
+                unrotated_poly.append([new_x + center_x, new_y + center_y])
+            new_lines.append(unrotated_poly)
 
         return {
             'lines': new_lines,

@@ -176,6 +176,15 @@ class ComicTextDetector(OfflineDetector):
         textlines = [Quadrilateral(pts.astype(int), '', score) for pts, score in zip(lines, scores)]
         mask_refined = refine_mask(image, mask, textlines, refine_mode=None)
 
+        # ✅ Detection完成后立即清理GPU内存
+        if (self.device.startswith('cuda') or self.device == 'mps'):
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+        
         return textlines, mask_refined, None
 
         # blk_list = group_output(blks, lines, im_w, im_h, mask)

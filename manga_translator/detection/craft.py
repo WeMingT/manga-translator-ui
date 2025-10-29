@@ -197,4 +197,9 @@ class CRAFTDetector(OfflineDetector):
         textlines = [Quadrilateral(pts.astype(int), '', 1) for pts in polys_ret]
         textlines = list(filter(lambda q: q.area > 16, textlines))
 
+        # ✅ Detection完成后立即清理GPU内存
+        del x, y, y_refiner, feature
+        if (self.device.startswith('cuda') or self.device == 'mps') and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         return textlines, mask, None

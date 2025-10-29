@@ -671,12 +671,7 @@ class GraphicsView(QGraphicsView):
         constructor_args['angle'] = 0
 
         try:
-            print(f"[_recalculate_single_region_render_data] region {index}: 创建 TextBlock, translation='{constructor_args.get('translation', '')}', texts={constructor_args.get('texts', [])}")
             text_block = TextBlock(**constructor_args)
-            print(f"[_recalculate_single_region_render_data] region {index}: TextBlock 创建成功")
-            print(f"[_recalculate_single_region_render_data] region {index}: lines shape: {text_block.lines.shape}")
-            print(f"[_recalculate_single_region_render_data] region {index}: min_rect: {text_block.min_rect}")
-            print(f"[_recalculate_single_region_render_data] region {index}: min_rect shape: {text_block.min_rect.shape if text_block.min_rect is not None else 'None'}")
             self._text_blocks_cache[index] = text_block
         except Exception as e:
             print(f"[View] Failed to create TextBlock for region {index}: {e}")
@@ -706,15 +701,10 @@ class GraphicsView(QGraphicsView):
 
         # 3. 调用后端进行布局计算（只计算单个区域）
         try:
-            print(f"[_recalculate_single_region_render_data] region {index}: 调用 resize_regions_to_font_size")
             single_region_dst_points = resize_regions_to_font_size(self._image_np, [text_block], config_obj, self._image_np)
-            print(f"[_recalculate_single_region_render_data] region {index}: resize_regions_to_font_size 返回: {single_region_dst_points is not None}, len={len(single_region_dst_points) if single_region_dst_points else 0}")
             if single_region_dst_points and len(single_region_dst_points) > 0:
-                print(f"[_recalculate_single_region_render_data] region {index}: dst_points[0] is None: {single_region_dst_points[0] is None}")
                 self._dst_points_cache[index] = single_region_dst_points[0]
-                print(f"[View] Recalculated dst_points for region {index}.")
             else:
-                print(f"[_recalculate_single_region_render_data] region {index}: dst_points 为空,设置为 None")
                 self._dst_points_cache[index] = None
         except Exception as e:
             print(f"[View] Failed to calculate dst_points for region {index}: {e}")

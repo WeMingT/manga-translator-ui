@@ -57,7 +57,7 @@ transformers
 tqdm
 uvicorn
 websockets
-xformers==0.0.32.post2
+xformers==0.0.32.post2  # 从 https://download.pytorch.org/whl/cu129 下载
 deepl
 groq
 torchsummary
