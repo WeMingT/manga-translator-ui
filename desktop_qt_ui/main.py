@@ -28,6 +28,17 @@ from PyQt6.QtWidgets import QApplication
 from main_window import MainWindow
 from services import init_services
 
+def print_memory_snapshot():
+    """打印内存快照（前100行）"""
+    snapshot = tracemalloc.take_snapshot()
+    top_stats = snapshot.statistics('lineno')
+    print("\n" + "="*80)
+    print("📊 内存占用 TOP 100:")
+    print("="*80)
+    for i, stat in enumerate(top_stats[:100], 1):
+        print(f"{i}. {stat}")
+    print("="*80 + "\n")
+
 def main():
     """
     应用主入口

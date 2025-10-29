@@ -11,10 +11,10 @@ from ldm.modules.attention import MemoryEfficientCrossAttention
 try:
     import xformers
     import xformers.ops
+    XFORMERS_IS_AVAILABLE = True
+except (ImportError, AttributeError) as e:
     XFORMERS_IS_AVAILABLE = False
-except:
-    XFORMERS_IS_AVAILABLE = False
-    print("No module 'xformers'. Proceeding without it.")
+    print("No module 'xformers' or triton issue. Proceeding without it.")
 
 
 def get_timestep_embedding(timesteps, embedding_dim):

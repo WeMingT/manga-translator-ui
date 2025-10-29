@@ -159,12 +159,12 @@ def generate_line_break_combinations(text: str):
                 continue
             
             # Build modified text
-            offset = 0
+            # 从右到左删除，这样删除右边的BR不会影响左边BR的位置
             modified_text = text
             for idx in sorted(combo, reverse=True):  # Remove from right to left
                 start, end = breaks[idx]
-                modified_text = modified_text[:start - offset] + modified_text[end - offset:]
-                offset += (end - start)
+                # 从右到左删除时不需要offset调整，因为右边的删除不影响左边的位置
+                modified_text = modified_text[:start] + modified_text[end:]
             
             combinations.append((modified_text, f"remove_{combo}", None))
     
@@ -282,15 +282,22 @@ def optimize_line_breaks_for_region(region: TextBlock, config: Config, target_fo
     original_br_count = len(re.findall(r'\[BR\]', original_translation, flags=re.IGNORECASE))
     optimized_br_count = len(re.findall(r'\[BR\]', best_text, flags=re.IGNORECASE))
     
+    # 只有在BR数量减少时才应用优化
     if optimized_br_count < original_br_count:
         removed_count = original_br_count - optimized_br_count
         logger.info(f"[AI断句自动扩大文字] 优化完成：去掉了 {removed_count} 个换行符，字体大小提升至 {best_font_size:.1f}px")
         logger.info(f"[AI断句自动扩大文字] 原文: {original_translation}")
         logger.info(f"[AI断句自动扩大文字] 优化后: {best_text}")
+        return best_text, best_font_size
+    elif best_text != original_translation and optimized_br_count == original_br_count:
+        # BR数量未变但文本改变，说明有bug
+        logger.warning(f"[AI断句自动扩大文字] 警告：文本被修改但BR数量未变，保持原文本")
+        logger.warning(f"[AI断句自动扩大文字] 原文: {original_translation}")
+        logger.warning(f"[AI断句自动扩大文字] 错误结果: {best_text}")
+        return original_translation, best_font_size
     else:
         logger.info(f"[AI断句自动扩大文字] 未进行优化：保持原断句方案最佳，字体大小 {best_font_size:.1f}px")
-    
-    return best_text, best_font_size
+        return original_translation, best_font_size
 
 def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], config: Config, original_img: np.ndarray = None, return_debug_img: bool = False):
     """

@@ -132,4 +132,14 @@ class StableDiffusionInpainter(OfflineInpainter):
         if new_h != height or new_w != width:
             img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation = cv2.INTER_LINEAR)
         ans = img_inpainted * mask_original + img_original * (1 - mask_original)
+        
+        # ✅ Inpainting完成后立即清理GPU内存和numpy数组（不删除输入参数）
+        del img, img_inpainted, img_original, mask_original
+        if self.device.startswith('cuda') and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        import gc
+        gc.collect()
+        
         return ans

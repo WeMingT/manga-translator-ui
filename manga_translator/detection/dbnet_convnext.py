@@ -585,6 +585,15 @@ class DBConvNextDetector(OfflineDetector):
         #         cv2.polylines(img_bbox_raw, [txtln.pts], True, color=(255, 0, 0), thickness=2)
         #     cv2.imwrite(f'result/bboxes_unfiltered.png', cv2.cvtColor(img_bbox_raw, cv2.COLOR_RGB2BGR))
 
+        # ✅ Detection完成后立即清理GPU内存
+        if (self.device.startswith('cuda') or self.device == 'mps'):
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+        
         return textlines, raw_mask, None
 
 

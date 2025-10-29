@@ -71,11 +71,12 @@ class RegionTextItem(QGraphicsItemGroup):
 
         # lines 是模型坐标，需要转换为Qt局部坐标: local = model - center
         self.polygons = []
-        for line in model_lines:
+        for i, line in enumerate(model_lines):
             local_poly = QPolygonF()
             for x, y in line:
                 local_poly.append(QPointF(x - self.visual_center.x(), y - self.visual_center.y()))
             self.polygons.append(local_poly)
+
 
         self.text_item = TransparentPixmapItem(self)
         # 设置 text_item 的 Z-order 为负数,让它在父 item 的绘制内容(绿框、白框)之下
@@ -172,10 +173,6 @@ class RegionTextItem(QGraphicsItemGroup):
 
     def update_from_data(self, region_data: dict):
         """Updates the item's entire state from a new region_data dictionary."""
-        print(f"[UPDATE_FROM_DATA] Region {self.region_index}: 开始更新")
-        print(f"  当前 pos={self.pos()}, rotation={self.rotation()}")
-        print(f"  新 region_data center={region_data.get('center', 'N/A')}, angle={region_data.get('angle', 'N/A')}")
-
         # 保存旧的场景边界矩形（在改变几何之前）
         old_scene_rect = self.sceneBoundingRect() if self.scene() else None
 
@@ -207,11 +204,12 @@ class RegionTextItem(QGraphicsItemGroup):
 
         # 转换为局部坐标: local = world - center
         self.polygons = []
-        for line in model_lines:
+        for i, line in enumerate(model_lines):
             local_poly = QPolygonF()
             for x, y in line:
                 local_poly.append(QPointF(x - self.visual_center.x(), y - self.visual_center.y()))
             self.polygons.append(local_poly)
+
 
         # 更新白框和绿框
         self._update_frames_from_geometry(self.desktop_geometry)
@@ -221,7 +219,6 @@ class RegionTextItem(QGraphicsItemGroup):
 
         # 恢复选中状态
         if was_selected != self.isSelected():
-            print(f"[UPDATE_FROM_DATA] Region {self.region_index}: 恢复选中状态 {was_selected}")
             self.setSelected(was_selected)
 
         self.update()
@@ -234,7 +231,6 @@ class RegionTextItem(QGraphicsItemGroup):
             update_rect = old_scene_rect.united(new_scene_rect)
             self.scene().invalidate(update_rect, QGraphicsScene.SceneLayer.ItemLayer)
             self.scene().update(update_rect)
-            print(f"[UPDATE_FROM_DATA] Region {self.region_index}: 刷新空间索引，旧rect={old_scene_rect}, 新rect={new_scene_rect}")
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemSelectedChange:

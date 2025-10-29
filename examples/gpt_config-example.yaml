@@ -54,6 +54,12 @@ chat_system_template: >
   - Insert `[BR]` at natural breaking points: after complete phrases, before new subjects, at punctuation marks.
   - The `[BR]` symbol is the ONLY allowed non-translation marker. Do not use actual newlines.
 
+  SPACING RULES:
+  - DO NOT add spaces in your translation unless it is between English words or other language words that require spaces.
+  - For Chinese/Japanese/Korean translations, DO NOT add spaces between characters in regular dialogue or text.
+  - However, spaces ARE allowed in titles and chapter numbers (e.g., "第93话 请你再说一遍").
+  - If you need to separate clauses or sentences in regular text, use appropriate punctuation marks (like commas, periods, or full-width punctuation) instead of spaces.
+
   Translate to {to_lang}.
 
 # If you wish to use a value across multiple configurations: 
@@ -130,6 +136,11 @@ CoT_Template:
         * GOOD: "Karai-san"
     7. LINE BREAKING: Within a single translation output, you may insert `[BR]` markers based on the "[Original regions: X]" hint.
        This does NOT violate the 1:1 rule, as it's internal formatting within one translation line.
+    8. SPACING RULES:
+      - DO NOT add spaces in your translation unless it is between English words or other language words that require spaces.
+      - For Chinese/Japanese/Korean translations, DO NOT add spaces between characters in regular dialogue or text.
+      - However, spaces ARE allowed in titles and chapter numbers (e.g., "第93话 请你再说一遍").
+      - If you need to separate clauses or sentences in regular text, use appropriate punctuation marks (like commas, periods, or full-width punctuation) instead of spaces.
 
     !TERMINATION CONDITIONS!
     1. If you generate ANY additional lines beyond input line count:

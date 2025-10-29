@@ -639,6 +639,7 @@ class MainAppLogic(QObject):
 
         # This part runs for both sequential and batch modes
         self.logger.info(f"翻译任务完成。总共成功处理 {self.saved_files_count} 个文件。")
+        
         try:
             print("--- DEBUG: on_task_finished step 1: Setting translating state to False.")
             self.state_manager.set_translating(False)
@@ -803,6 +804,21 @@ class TranslationWorker(QObject):
         # 取消当前运行的异步任务
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
+        
+        # 添加GPU显存清理（自动清理模式）
+        self.log_received.emit("--- [CLEANUP] Cleaning up GPU memory...")
+        try:
+            import gc
+            import torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                self.log_received.emit("--- [CLEANUP] GPU memory cleared")
+            else:
+                self.log_received.emit("--- [CLEANUP] GPU not available, skipped GPU cleanup")
+        except Exception as e:
+            self.log_received.emit(f"--- [CLEANUP] Warning: Failed to cleanup GPU: {e}")
 
     async def _do_processing(self):
         log_handler = QtLogHandler(self.log_received)
@@ -961,6 +977,10 @@ class TranslationWorker(QObject):
                             # 输出详细的错误信息（包含原始错误）
                             self.log_received.emit(f"\n⚠️ 图片 {os.path.basename(ctx.image_name)} 翻译失败：")
                             self.log_received.emit(ctx.translation_error)
+                        elif hasattr(ctx, 'success') and ctx.success:
+                            # 优先检查success标志（因为result可能被清理了）
+                            results.append({'success': True, 'original_path': ctx.image_name, 'image_data': None})
+                            success_count += 1
                         elif ctx.result:
                             results.append({'success': True, 'original_path': ctx.image_name, 'image_data': None})
                             success_count += 1
@@ -1019,6 +1039,20 @@ class TranslationWorker(QObject):
                 self.log_received.emit(f"💾 文件已保存到：{self.output_folder}")
             
             self.finished.emit(results)
+            
+            # ✅ 翻译完成后打印内存快照（调试用）
+            try:
+                import tracemalloc
+                snapshot = tracemalloc.take_snapshot()
+                top_stats = snapshot.statistics('lineno')
+                self.log_received.emit("\n" + "="*80)
+                self.log_received.emit("📊 内存占用 TOP 100:")
+                self.log_received.emit("="*80)
+                for i, stat in enumerate(top_stats[:100], 1):
+                    self.log_received.emit(f"{i}. {stat}")
+                self.log_received.emit("="*80 + "\n")
+            except Exception as e:
+                self.log_received.emit(f"Failed to print memory snapshot: {e}")
 
         except asyncio.CancelledError as e:
             self.log_received.emit(f"Task cancelled: {e}")

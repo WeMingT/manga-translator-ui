@@ -12,9 +12,10 @@ from .diffusionmodules.util import checkpoint
 try:
     import xformers
     import xformers.ops
+    XFORMERS_IS_AVAILABLE = True
+except (ImportError, AttributeError) as e:
     XFORMERS_IS_AVAILABLE = False
-except ImportError:
-    XFORMERS_IS_AVAILABLE = False
+    # 忽略triton相关的AttributeError
 
 # CrossAttn precision handling
 import os

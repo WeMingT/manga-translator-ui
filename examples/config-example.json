@@ -11,12 +11,12 @@
     "target_lang": "CHS",
     "no_text_lang_skip": false,
     "gpt_config": "../examples/gpt_config-example.yaml",
-    "high_quality_prompt_path": "dict/wyxxl.json"
+    "high_quality_prompt_path": "dict/prompt_example.json"
   },
   "ocr": {
     "use_mocr_merge": false,
     "ocr": "48px",
-    "use_hybrid_ocr": false,
+    "use_hybrid_ocr": true,
     "secondary_ocr": "mocr",
     "min_text_length": 0,
     "ignore_bubble": 0,
@@ -41,7 +41,7 @@
     "yolo_obb_overlap_threshold": 0.1
   },
   "inpainter": {
-    "inpainter": "lama_mpe",
+    "inpainter": "lama_large",
     "inpainting_size": 2048,
     "inpainting_precision": "bf16"
   },

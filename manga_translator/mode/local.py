@@ -301,6 +301,28 @@ class MangaTranslatorLocal(MangaTranslator):
                     if self.text_regions:
                         self._save_text_to_file(path, ctx)
                         logger.info(f"Translations saved to JSON for {path}")
+                
+                # ✅ 标记成功（在清理result之前）
+                ctx.success = True
+                
+                # ✅ 清理ctx中的大对象（保存后立即释放内存）
+                ctx.result = None
+                ctx.input = None
+                if hasattr(ctx, 'img_rgb'):
+                    ctx.img_rgb = None
+                if hasattr(ctx, 'img_inpainted'):
+                    ctx.img_inpainted = None
+                if hasattr(ctx, 'img_rendered'):
+                    ctx.img_rendered = None
+                if hasattr(ctx, 'img_colorized'):
+                    ctx.img_colorized = None
+                if hasattr(ctx, 'img_alpha'):
+                    ctx.img_alpha = None
+                if hasattr(ctx, 'mask'):
+                    ctx.mask = None
+                if hasattr(ctx, 'mask_raw'):
+                    ctx.mask_raw = None
+                
                 return True
         return False
 
@@ -431,6 +453,27 @@ class MangaTranslatorLocal(MangaTranslator):
                                 img.save(img_path, quality=self.save_quality)
                             if ctx.text_regions:
                                 self._save_text_to_file(file_path, ctx)
+                        
+                        # ✅ 标记成功（在清理result之前）
+                        ctx.success = True
+                        
+                        # ✅ 清理ctx中的大对象（保存后立即释放内存）
+                        ctx.result = None
+                        ctx.input = None
+                        if hasattr(ctx, 'img_rgb'):
+                            ctx.img_rgb = None
+                        if hasattr(ctx, 'img_inpainted'):
+                            ctx.img_inpainted = None
+                        if hasattr(ctx, 'img_rendered'):
+                            ctx.img_rendered = None
+                        if hasattr(ctx, 'img_colorized'):
+                            ctx.img_colorized = None
+                        if hasattr(ctx, 'img_alpha'):
+                            ctx.img_alpha = None
+                        if hasattr(ctx, 'mask'):
+                            ctx.mask = None
+                        if hasattr(ctx, 'mask_raw'):
+                            ctx.mask_raw = None
                     else:
                         # 处理翻译失败的情况 - 抛出异常终止进程
                         has_original_text = ctx and hasattr(ctx, 'text_regions') and ctx.text_regions
@@ -496,6 +539,21 @@ class MangaTranslatorLocal(MangaTranslator):
             
             # 每个批次后都执行内存清理
             force_cleanup()
+            
+            # GPU显存强制清理（增强版）
+            if hasattr(self, 'device') and (self.device == 'cuda' or self.device == 'mps'):
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        # 多次垃圾回收确保彻底清理
+                        import gc
+                        for _ in range(3):
+                            gc.collect()
+                        logger.debug('Enhanced GPU memory cleanup completed')
+                except Exception as e:
+                    logger.warning(f'GPU memory cleanup failed: {e}')
             
             # 内存状态报告
             memory_percent, available_mb = safe_get_memory_info()
