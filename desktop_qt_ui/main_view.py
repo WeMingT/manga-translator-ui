@@ -189,7 +189,29 @@ class MainView(QWidget):
                 container = QWidget()
                 hbox = QHBoxLayout(container)
                 hbox.setContentsMargins(0, 0, 0, 0)
-                combo = QComboBox()
+                
+                # 创建自定义ComboBox,在下拉时刷新字体列表
+                class RefreshableComboBox(QComboBox):
+                    def showPopup(self):
+                        current_text = self.currentText()
+                        self.clear()
+                        try:
+                            fonts_dir = resource_path('fonts')
+                            if os.path.isdir(fonts_dir):
+                                font_files = sorted([f for f in os.listdir(fonts_dir) if f.lower().endswith(('.ttf', '.otf', '.ttc'))])
+                                self.addItems(font_files)
+                        except Exception as e:
+                            print(f"Error scanning fonts directory: {e}")
+                        # 恢复之前选择的值
+                        if current_text:
+                            index = self.findText(current_text)
+                            if index >= 0:
+                                self.setCurrentIndex(index)
+                            else:
+                                self.setCurrentText(current_text)
+                        super().showPopup()
+                
+                combo = RefreshableComboBox()
                 try:
                     fonts_dir = resource_path('fonts')
                     if os.path.isdir(fonts_dir):

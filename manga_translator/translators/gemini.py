@@ -5,7 +5,6 @@ from google.generativeai import types
 import asyncio
 from typing import List
 from .common import MissingAPIKeyException, InvalidServerResponse
-from .keys import GEMINI_API_KEY, GEMINI_MODEL
 from .common_gpt import CommonGPTTranslator, _CommonGPTTranslator_JSON
 
 
@@ -28,21 +27,35 @@ class GeminiTranslator(CommonGPTTranslator):
     _MAX_TOKENS_IN = _MAX_TOKENS // 2
 
     def __init__(self):
-        _CONFIG_KEY = 'gemini.' + GEMINI_MODEL
+        # 重新加载 .env 文件以获取最新配置 - 必须在任何环境变量读取之前
+        from dotenv import load_dotenv
+        import os
+        load_dotenv(override=True)
+        
+        # 动态读取GEMINI_MODEL，而不是使用模块级常量
+        self.model = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash-002')
+        
+        _CONFIG_KEY = 'gemini.' + self.model
         CommonGPTTranslator.__init__(self, config_key=_CONFIG_KEY)
         initColorama()
 
         self.cached_content = None
         self.templateCache = None
         self.cachedVals={None}
+        
+        # 初始化 attempts，将在 parse_args 中从 UI 配置读取
+        # 默认值 -1 表示无限重试，用于向后兼容
+        self.attempts = -1
+        
+        # 初始化配置
+        self._configure_api()
 
-        # 重新加载 .env 文件以获取最新配置
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
-
-        # 重新读取环境变量
+    def _configure_api(self):
+        """配置或重新配置Gemini API"""
         import os
-        api_key = os.getenv('GEMINI_API_KEY', GEMINI_API_KEY)
+        
+        # 直接从环境变量读取,不使用keys.py中的常量
+        api_key = os.getenv('GEMINI_API_KEY', '')
         api_base = os.getenv('GEMINI_API_BASE')
 
         if not api_key:
@@ -64,11 +77,11 @@ class GeminiTranslator(CommonGPTTranslator):
         is_official_api = not api_base or api_base == 'https://generativelanguage.googleapis.com' or api_base.startswith('https://generativelanguage.googleapis.com')
         if is_official_api:
             try:
-                model_info = genai.get_model(f'models/{GEMINI_MODEL}')
+                model_info = genai.get_model(f'models/{self.model}')
                 self._MAX_TOKENS = model_info.output_token_limit
                 self._MAX_TOKENS_IN = self._MAX_TOKENS // 2
             except Exception as e:
-                self.logger.warning(f"Could not get model info for {GEMINI_MODEL}. Using default token limits. Error: {e}")
+                self.logger.warning(f"Could not get model info for {self.model}. Using default token limits. Error: {e}")
 
         # 只有在使用官方API时才设置safety_settings，第三方API可能不支持
         self.safety_settings = None
@@ -100,7 +113,7 @@ class GeminiTranslator(CommonGPTTranslator):
             "top_p": self.top_p,
         }
 
-        self.client = genai.GenerativeModel(GEMINI_MODEL, generation_config=generation_config, safety_settings=self.safety_settings)
+        self.client = genai.GenerativeModel(self.model, generation_config=generation_config, safety_settings=self.safety_settings)
         
         self.token_count = 0
         self.token_count_last = 0 
@@ -115,6 +128,13 @@ class GeminiTranslator(CommonGPTTranslator):
 
     def parse_args(self, args: CommonGPTTranslator):
         super().parse_args(args)
+        # 从配置中读取重试次数
+        self.attempts = getattr(args, 'attempts', self.attempts)
+        # 从配置中读取RPM限制
+        max_rpm = getattr(args, 'max_requests_per_minute', 0)
+        if max_rpm > 0:
+            self._MAX_REQUESTS_PER_MINUTE = max_rpm
+            self.logger.info(f"Setting Gemini max requests per minute to: {max_rpm}")
         if self.json_mode:
             self._init_json_mode()
         else:
@@ -270,7 +290,7 @@ class GeminiTranslator(CommonGPTTranslator):
 
         if system_instruction:
             model = genai.GenerativeModel(
-                GEMINI_MODEL,
+                self.model,
                 generation_config=generation_config,
                 safety_settings=self.safety_settings,
                 system_instruction=system_instruction
@@ -344,14 +364,14 @@ class _GeminiTranslator_json (_CommonGPTTranslator_JSON):
         # Configure the model with system instruction and JSON config
         if system_instruction:
             model = genai.GenerativeModel(
-                GEMINI_MODEL,
+                self.translator.model,
                 generation_config=json_config,
                 safety_settings=self.translator.safety_settings,
                 system_instruction=system_instruction
             )
         else:
             model = genai.GenerativeModel(
-                GEMINI_MODEL,
+                self.translator.model,
                 generation_config=json_config,
                 safety_settings=self.translator.safety_settings
             )

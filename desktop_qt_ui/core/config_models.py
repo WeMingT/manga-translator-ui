@@ -11,6 +11,7 @@ class TranslatorSettings(BaseModel):
     # 相对路径，后端会用BASE_PATH拼接（打包后=_internal，开发时=项目根目录）
     gpt_config: Optional[str] = "examples/gpt_config-example.yaml"
     high_quality_prompt_path: Optional[str] = "dict/prompt_example.json"
+    max_requests_per_minute: int = 0
     
     @property
     def chatgpt_config(self):

@@ -31,6 +31,9 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
     _RATELIMIT_RETRY_ATTEMPTS = 3# 遇到 429 等限流时的最大尝试次数
     _MAX_SPLIT_ATTEMPTS = 3      # 递归拆分批次的最大层数
     _MAX_TOKENS = 8192           # prompt+completion 的最大 token (可按模型类型调整)
+    
+    # 全局时间戳字典,跨实例共享(key为model名)
+    _GLOBAL_LAST_REQUEST_TS = {}
 
     def __init__(self, check_openai_key=True):
         # 重新加载 .env 文件以获取最新配置 - 必须在任何环境变量读取之前
@@ -73,7 +76,10 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         self.client = openai.AsyncOpenAI(**client_args)
         self.token_count = 0
         self.token_count_last = 0
-        self._last_request_ts = 0
+        # 使用全局时间戳,跨实例共享
+        if self.model not in OpenAITranslator._GLOBAL_LAST_REQUEST_TS:
+            OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self.model] = 0
+        self._last_request_ts_key = self.model
         
         # 初始化术语表相关属性
         self.dict_path = OPENAI_GLOSSARY_PATH
@@ -107,6 +113,11 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         self.config = args.chatgpt_config
         # 从配置中读取重试次数
         self.attempts = getattr(args, 'attempts', self.attempts)
+        # 从配置中读取RPM限制
+        max_rpm = getattr(args, 'max_requests_per_minute', 0)
+        if max_rpm > 0:
+            self._MAX_REQUESTS_PER_MINUTE = max_rpm
+            self.logger.info(f"Setting OpenAI max requests per minute to: {max_rpm}")
 
     async def _ratelimit_sleep(self):
         """
@@ -116,7 +127,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         if self._MAX_REQUESTS_PER_MINUTE > 0:
             now = time.time()
             delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
-            elapsed = now - self._last_request_ts
+            elapsed = now - OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
             
             # 为并发请求添加额外的随机延迟，避免同时请求
             # Add extra random delay for concurrent requests to avoid simultaneous requests
@@ -126,7 +137,8 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
             total_delay = delay + concurrent_jitter
             if elapsed < total_delay:
                 await asyncio.sleep(total_delay - elapsed)
-            self._last_request_ts = time.time()
+            # 在请求前更新时间戳,确保下次计算的是从这次请求开始的间隔
+            OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
 
     def _assemble_prompts(self, from_lang: str, to_lang: str, queries: List[str], ctx=None):
         """
@@ -369,9 +381,9 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         # -1 表示无限重试，否则使用指定的重试次数
         # -1 means infinite retry, otherwise use specified retry count
         is_infinite = self.attempts == -1
-        max_attempts = self.attempts if not is_infinite else -1
+        max_attempts = self.attempts if not is_infinite else 100  # 即使无限重试也设置绝对上限
         attempt = 0
-        while is_infinite or attempt < max_attempts:  
+        while attempt < max_attempts:  # 移除is_infinite判断,统一使用max_attempts  
             try:  
                 # 发起请求  
                 # Send request  
@@ -568,20 +580,21 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
 
                 # 成功  
                 # Success  
-                log_attempt = f"{attempt+1}/{max_attempts}" if not is_infinite else f"Attempt {attempt+1}"
+                log_attempt = f"{attempt+1}/{max_attempts}" if not is_infinite else f"Attempt {attempt+1} (limit: {max_attempts})"
                 self.logger.info(  
                     f"Batch of size {len(batch_queries)} translated OK at {log_attempt} (split_level={split_level})."  
                 )  
                 return True, partial_results  
 
             except Exception as e:  
-                log_attempt = f"{attempt+1}/{max_attempts}" if not is_infinite else f"Attempt {attempt+1}"
+                log_attempt = f"{attempt+1}/{max_attempts}" if not is_infinite else f"Attempt {attempt+1} (limit: {max_attempts})"
                 self.logger.warning(  
                     f"Batch translate {log_attempt} failed with error: {str(e)}"  
                 )  
                 attempt += 1
-                if not is_infinite and attempt >= max_attempts:
-                    self.logger.warning("Max attempts reached.")
+                if attempt >= max_attempts:
+                    limit_msg = f"{max_attempts} (UI configured)" if not is_infinite else f"{max_attempts} (absolute limit)"
+                    self.logger.warning(f"Max attempts reached: {limit_msg}")
                     # 尝试fallback模型
                     success, fallback_results = await self._try_fallback_model(to_lang, prompt, batch_queries)
                     if success:
@@ -594,9 +607,9 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                 else:
                     await asyncio.sleep(1)
 
-        # 循环结束但仍未成功时（只在非无限重试模式下才会到达这里）
+        # 循环结束但仍未成功时
         # 尝试fallback（如果之前没有因异常触发）
-        if not is_infinite and not any(partial_results):
+        if not any(partial_results):
             success, fallback_results = await self._try_fallback_model(to_lang, prompt, batch_queries)
             if success:
                 for i, result in enumerate(fallback_results):
@@ -686,9 +699,9 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         # 使用UI配置的attempts作为总重试次数的上限
         # Use UI configured attempts as the upper limit for total retry count
         is_infinite = self.attempts == -1
-        max_total_attempts = self.attempts if not is_infinite else -1
+        max_total_attempts = self.attempts if not is_infinite else 100  # 即使无限重试也设置绝对上限
 
-        while is_infinite or total_attempt < max_total_attempts:
+        while total_attempt < max_total_attempts:  # 移除is_infinite判断,统一使用max_total_attempts
             total_attempt += 1
             await self._ratelimit_sleep()
             started = time.time()
@@ -705,7 +718,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                             raise TimeoutError(
                                 f"OpenAI request timed out after {self._TIMEOUT_RETRY_ATTEMPTS} attempts."
                             )
-                        self.logger.warning(f"Request timed out, retrying... (attempt={timeout_attempt})")
+                        self.logger.warning(f"Request timed out, retrying... (timeout_attempt={timeout_attempt}, total_attempt={total_attempt})")
                         req_task.cancel()
                         break
                 else:
@@ -717,7 +730,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                 ratelimit_attempt += 1
                 if ratelimit_attempt > self._RATELIMIT_RETRY_ATTEMPTS:
                     raise
-                self.logger.warning(f"Hit RateLimit, retrying... (attempt={ratelimit_attempt})")
+                self.logger.warning(f"Hit RateLimit, retrying... (ratelimit_attempt={ratelimit_attempt}, total_attempt={total_attempt})")
                 await asyncio.sleep(2)
 
             except openai.APIError as e:
@@ -726,7 +739,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                 if server_error_attempt > self._RETRY_ATTEMPTS:
                     self.logger.error("Server error, giving up after several attempts.")
                     raise
-                self.logger.warning(f"Server error: {str(e)}. Retrying... (attempt={server_error_attempt})")
+                self.logger.warning(f"Server error: {str(e)}. Retrying... (server_error_attempt={server_error_attempt}, total_attempt={total_attempt})")
                 await asyncio.sleep(1)
 
             except Exception as e:
@@ -735,7 +748,8 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         
         # 如果退出循环但还没有返回，说明达到了最大重试次数
         # If exited the loop without returning, it means max attempts reached
-        raise RuntimeError(f"OpenAI translation failed after {total_attempt} attempts (UI configured limit: {max_total_attempts})")
+        limit_msg = f"{max_total_attempts} (UI configured)" if not is_infinite else f"{max_total_attempts} (absolute limit)"
+        raise RuntimeError(f"OpenAI translation failed after {total_attempt} attempts (limit: {limit_msg})")
 
     async def _request_translation(self, to_lang: str, prompt: str) -> str:
         """
