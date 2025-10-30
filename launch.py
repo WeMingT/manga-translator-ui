@@ -154,22 +154,48 @@ def prepare_environment(args):
         print('frozen模式: 跳过依赖安装')
         return
 
+    # 确保 packaging 已安装 (需要 < 25.0 版本)
     try:
         import packaging
-    except ModuleNotFoundError:
-        run_pip("install packaging", "packaging")
+        import packaging.version
+        import packaging.utils
+        # 检查是否有 packaging.requirements (在 25.0 中已移除)
+        try:
+            from packaging.requirements import Requirement
+        except (ImportError, AttributeError):
+            # packaging 版本过高,需要降级
+            print('检测到 packaging 版本不兼容,正在安装兼容版本...')
+            run_pip("install 'packaging<25.0'", "packaging")
+            import packaging
+            import packaging.version
+            import packaging.utils
+            print('✓ packaging 安装成功')
+    except (ModuleNotFoundError, ImportError):
+        print('正在安装 packaging 模块...')
+        run_pip("install 'packaging<25.0'", "packaging")
+        try:
+            import packaging
+            import packaging.version
+            import packaging.utils
+            print('✓ packaging 安装成功')
+        except (ModuleNotFoundError, ImportError):
+            print('✗ 警告: packaging 安装失败')
 
+    print('\n正在检查依赖...\n')
+    
     # 导入依赖检查工具
     try:
         from build_utils.package_checker import check_req_file
-    except ImportError:
-        print('警告: 无法导入依赖检查工具,将强制重新安装')
+        print('✓ 依赖检查工具加载成功')
+    except ImportError as e:
+        print(f'✗ 警告: 无法导入依赖检查工具')
+        print(f'   原因: {e}')
+        print('   将跳过增量检查,强制重新安装所有依赖')
         check_req_file = lambda x: False
 
     # 检测GPU并选择对应的依赖文件
     gpu_type = detect_gpu()
-    print(f'检测到的计算设备: {gpu_type}')
-    
+    print(f'\n检测到的计算设备: {gpu_type}\n')
     # 根据GPU类型选择requirements文件
     if args.requirements != 'auto':
         # 用户手动指定,尊重用户选择

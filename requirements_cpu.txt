@@ -59,9 +59,15 @@ transformers
 tqdm
 uvicorn
 websockets
-# xformers==0.0.32.post2  # CPU版本不需要，仅GPU使用
+# xformers==0.0.32.post2  # CPU版本不需要,仅GPU使用
 google-generativeai
-git+https://github.com/lucasb-eyer/pydensecrf.git
+# pydensecrf - 预编译 wheel 文件 (Python 3.12 Windows)
+# 国内用户推荐使用镜像站,下载速度更快
+https://ghfast.top/https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl
+# 如果镜像站失效,可使用官方源:
+# https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl
+# 或从源码安装(需要 C++ 编译工具):
+# git+https://github.com/lucasb-eyer/pydensecrf.git
 deepl
 groq
 torchsummary
