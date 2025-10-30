@@ -104,23 +104,19 @@ echo 正在下载 Git 便携版...
 echo.
 echo 请选择下载源:
 echo [1] GitHub 官方
-echo [2] 淘宝镜像 (国内快)
-echo [3] 腾讯云镜像 (国内快)
+echo [2] gitproxy.click 镜像 (国内快)
 echo.
-set /p source="请选择 (1/2/3, 默认2): "
+set /p git_source="请选择 (1/2, 默认2): "
 
 set GIT_VERSION=2.43.0
 set GIT_ARCH=64-bit
 
-if "%source%"=="1" (
+if "%git_source%"=="1" (
     set GIT_URL=https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
-    echo 使用: GitHub
-) else if "%source%"=="3" (
-    set GIT_URL=https://mirrors.cloud.tencent.com/github-release/git-for-windows/git/LatestRelease/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
-    echo 使用: 腾讯云
+    echo 使用: GitHub 官方源
 ) else (
-    set GIT_URL=https://registry.npmmirror.com/-/binary/git-for-windows/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
-    echo 使用: 淘宝镜像
+    set GIT_URL=https://gitproxy.click/https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
+    echo 使用: gitproxy.click 镜像
 )
 
 echo.
@@ -175,8 +171,8 @@ if exist ".git" (
         REM 标准化仓库地址进行比较
         set CURRENT_CLEAN=!CURRENT_REPO:.git=!
         set TARGET_CLEAN=!REPO_URL:.git=!
-        set CURRENT_CLEAN=!CURRENT_CLEAN:https://ghfast.top/https://github.com/=https://github.com/!
-        set TARGET_CLEAN=!TARGET_CLEAN:https://ghfast.top/https://github.com/=https://github.com/!
+        set CURRENT_CLEAN=!CURRENT_CLEAN:https://gitproxy.click/https://github.com/=https://github.com/!
+        set TARGET_CLEAN=!TARGET_CLEAN:https://gitproxy.click/https://github.com/=https://github.com/!
         
         if "!CURRENT_CLEAN!"=="!TARGET_CLEAN!" (
             echo [OK] 仓库地址匹配,正在强制同步到最新版本...
@@ -230,15 +226,38 @@ if exist ".git" (
         echo [WARNING] 无法读取仓库信息,将重新克隆
     )
     
-    REM 删除现有 .git
-    rmdir /s /q ".git" 2>nul
-    if exist ".git" (
-        echo [ERROR] 无法删除 .git 目录,可能被占用
-        echo 请关闭所有相关程序后重试
-        pause
-        exit /b 1
+    REM 删除现有文件和目录(保留venv和PortableGit)
+    echo 正在清理旧文件...
+    
+    REM 删除目录(保留venv和PortableGit)
+    for /d %%d in (*) do (
+        if /i not "%%d"=="venv" if /i not "%%d"=="PortableGit" (
+            echo 删除目录: %%d
+            rmdir /s /q "%%d" 2>nul
+        )
     )
-    echo [OK] 已清理旧仓库数据
+    
+    REM 删除文件(保留当前运行的脚本)
+    for %%f in (*) do (
+        if /i not "%%~nxf"=="步骤1-首次安装.bat" (
+            echo 删除文件: %%~nxf
+            del /f /q "%%f" 2>nul
+        )
+    )
+    
+    REM 删除隐藏的.git目录
+    if exist ".git" (
+        echo 删除 .git 目录...
+        rmdir /s /q ".git" 2>nul
+        if exist ".git" (
+            echo [ERROR] 无法删除 .git 目录,可能被占用
+            echo 请关闭所有相关程序后重试
+            pause
+            exit /b 1
+        )
+    )
+    
+    echo [OK] 已清理旧数据
     echo.
 )
 
@@ -250,14 +269,14 @@ goto :do_clone
 :get_repo_url
 echo 请选择克隆源:
 echo [1] GitHub 官方
-echo [2] ghfast.top 镜像 (国内快)
+echo [2] gitproxy.click 镜像 (国内快)
 echo [3] 手动输入仓库地址
 echo.
 set /p repo_choice="请选择 (1/2/3, 默认1): "
 
 if "%repo_choice%"=="2" (
-    set REPO_URL=https://ghfast.top/https://github.com/hgmzhn/manga-translator-ui.git
-    echo 使用: ghfast.top镜像
+    set REPO_URL=https://gitproxy.click/https://github.com/hgmzhn/manga-translator-ui.git
+    echo 使用: gitproxy.click镜像
 ) else if "%repo_choice%"=="3" (
     set /p REPO_URL="请输入仓库地址: "
     echo 使用: 自定义地址
@@ -364,6 +383,8 @@ if !ERRORLEVEL! neq 0 (
 
 echo.
 echo [OK] 代码克隆完成
+
+:create_venv
 
 REM ===== 步骤4: 创建虚拟环境并安装依赖 =====
 echo.

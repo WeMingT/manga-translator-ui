@@ -254,6 +254,10 @@ class TranslatorConfig(BaseModel):
     attempts: int = -1
     """Retry attempts on encountered error. -1 means infinite times."""
     
+    # API请求频率限制配置
+    max_requests_per_minute: int = 0
+    """Maximum API requests per minute. 0 means no limit."""
+    
     # 译后检查配置项
     enable_post_translation_check: bool = False
     """Enable post-translation validation check"""

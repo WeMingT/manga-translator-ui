@@ -79,6 +79,9 @@ class GeminiHighQualityTranslator(CommonTranslator):
     """
     _LANGUAGE_CODE_MAP = VALID_LANGUAGES
     
+    # 类变量: 跨实例共享的RPM限制时间戳
+    _GLOBAL_LAST_REQUEST_TS = {}  # {model_name: timestamp}
+    
     def __init__(self):
         super().__init__()
         self.client = None
@@ -91,6 +94,11 @@ class GeminiHighQualityTranslator(CommonTranslator):
         self.model_name = os.getenv('GEMINI_MODEL', "gemini-1.5-flash")
         self.max_tokens = 25000
         self.temperature = 0.1
+        self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
+        # 使用全局时间戳,跨实例共享
+        if self.model_name not in GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
+            GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
+        self._last_request_ts_key = self.model_name
         self.safety_settings = [
             {
                 "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -110,6 +118,14 @@ class GeminiHighQualityTranslator(CommonTranslator):
             },
         ]
         self._setup_client()
+    
+    def parse_args(self, args):
+        """解析配置参数"""
+        # 从配置中读取RPM限制
+        max_rpm = getattr(args, 'max_requests_per_minute', 0)
+        if max_rpm > 0:
+            self._MAX_REQUESTS_PER_MINUTE = max_rpm
+            self.logger.info(f"Setting Gemini HQ max requests per minute to: {max_rpm}")
         
     def _setup_client(self):
         """设置Gemini客户端"""
@@ -314,6 +330,17 @@ class GeminiHighQualityTranslator(CommonTranslator):
 
         while is_infinite or attempt < max_retries:
             try:
+                # RPM限制
+                if self._MAX_REQUESTS_PER_MINUTE > 0:
+                    import time
+                    now = time.time()
+                    delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
+                    elapsed = now - GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
+                    if elapsed < delay:
+                        await asyncio.sleep(delay - elapsed)
+                    # 在请求前更新时间戳,确保下次计算的是从这次请求开始的间隔
+                    GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
+                
                 response = await asyncio.to_thread(
                     generate_content_with_logging,
                     **request_args
@@ -468,6 +495,17 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 self.logger.info(f"--- Gemini Fallback Request Body ---\n{json.dumps(log_kwargs, indent=2, ensure_ascii=False)}\n------------------------------------")
                 return self.client.generate_content(**kwargs)
 
+            # RPM限制
+            if self._MAX_REQUESTS_PER_MINUTE > 0:
+                import time
+                now = time.time()
+                delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
+                elapsed = now - GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
+                if elapsed < delay:
+                    await asyncio.sleep(delay - elapsed)
+                # 在请求前更新时间戳,确保下次计算的是从这次请求开始的间隔
+                GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
+            
             response = await asyncio.to_thread(
                 generate_content_with_logging,
                 **request_args

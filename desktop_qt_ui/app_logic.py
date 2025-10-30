@@ -374,7 +374,7 @@ class MainAppLogic(QObject):
                     "auto_rotate_symbols": "竖排内横排", "rtl": "从右到左", "layout_mode": "排版模式",
                     "upscaler": "超分模型", "revert_upscaling": "还原超分", "colorization_size": "上色大小",
                     "denoise_sigma": "降噪强度", "colorizer": "上色模型", "verbose": "详细日志",
-                    "attempts": "重试次数", "ignore_errors": "忽略错误", "use_gpu": "使用 GPU",
+                    "attempts": "重试次数", "max_requests_per_minute": "每分钟最大请求数", "ignore_errors": "忽略错误", "use_gpu": "使用 GPU",
                     "use_gpu_limited": "使用 GPU（受限）", "context_size": "上下文页数", "format": "输出格式",
                     "overwrite": "覆盖已存在文件", "skip_no_text": "跳过无文本图像", "use_mtpe": "启用后期编辑(MTPE)",
                     "save_text": "图片可编辑", "load_text": "导入翻译", "template": "导出原文",

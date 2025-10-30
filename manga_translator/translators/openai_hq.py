@@ -87,6 +87,9 @@ class OpenAIHighQualityTranslator(CommonTranslator):
     """
     _LANGUAGE_CODE_MAP = VALID_LANGUAGES
     
+    # 类变量: 跨实例共享的RPM限制时间戳
+    _GLOBAL_LAST_REQUEST_TS = {}  # {model_name: timestamp}
+    
     def __init__(self):
         super().__init__()
         self.client = None
@@ -98,7 +101,20 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         self.model = os.getenv('OPENAI_MODEL', "gpt-4o")
         self.max_tokens = 25000
         self.temperature = 0.1
+        self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
+        # 使用全局时间戳,跨实例共享
+        if self.model not in OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
+            OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self.model] = 0
+        self._last_request_ts_key = self.model
         self._setup_client()
+    
+    def parse_args(self, args):
+        """解析配置参数"""
+        # 从配置中读取RPM限制
+        max_rpm = getattr(args, 'max_requests_per_minute', 0)
+        if max_rpm > 0:
+            self._MAX_REQUESTS_PER_MINUTE = max_rpm
+            self.logger.info(f"Setting OpenAI HQ max requests per minute to: {max_rpm}")
         
     def _setup_client(self):
         """设置OpenAI客户端"""
@@ -286,6 +302,17 @@ This is an incorrect response because it includes extra text and explanations.
 
         while is_infinite or attempt < max_retries:
             try:
+                # RPM限制
+                if self._MAX_REQUESTS_PER_MINUTE > 0:
+                    import time
+                    now = time.time()
+                    delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
+                    elapsed = now - OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
+                    if elapsed < delay:
+                        await asyncio.sleep(delay - elapsed)
+                    # 在请求前更新时间戳,确保下次计算的是从这次请求开始的间隔
+                    OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
+                
                 response = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
@@ -403,6 +430,17 @@ This is an incorrect response because it includes extra text and explanations.
         
         try:
             simple_prompt = f"Translate the following {from_lang} text to {to_lang}. Provide only the translation:\n\n" + "\n".join(queries)
+            
+            # RPM限制
+            if self._MAX_REQUESTS_PER_MINUTE > 0:
+                import time
+                now = time.time()
+                delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
+                elapsed = now - OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
+                if elapsed < delay:
+                    await asyncio.sleep(delay - elapsed)
+                # 在请求前更新时间戳,确保下次计算的是从这次请求开始的间隔
+                OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
             
             response = await self.client.chat.completions.create(
                 model=self.model,

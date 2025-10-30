@@ -70,16 +70,56 @@ echo 更新代码 (强制同步)
 echo ========================================
 echo.
 
+REM 获取当前版本
+if exist "VERSION" (
+    set /p CURRENT_VERSION=<VERSION
+    echo 当前版本: !CURRENT_VERSION!
+) else (
+    echo 当前版本: 未知
+    set CURRENT_VERSION=unknown
+)
+
+echo.
+echo 正在检查远程版本...
+%GIT% fetch origin >nul 2>&1
+
+REM 获取远程版本
+%GIT% show origin/main:VERSION > tmp_version.txt 2>nul
+if exist "tmp_version.txt" (
+    set /p REMOTE_VERSION=<tmp_version.txt
+    del tmp_version.txt
+    echo 远程版本: !REMOTE_VERSION!
+) else (
+    echo 远程版本: 无法获取
+    set REMOTE_VERSION=unknown
+)
+
+echo.
+REM 检查是否有更新
+if "!CURRENT_VERSION!"=="!REMOTE_VERSION!" (
+    echo [信息] 当前已是最新版本
+    echo.
+    set /p still_update="是否仍要强制更新? (y/n): "
+    if /i not "!still_update!"=="y" (
+        goto menu
+    )
+) else (
+    echo [发现新版本]
+    echo.
+    echo 正在获取更新说明...
+    echo.
+    echo ----------------------------------------
+    %GIT% log HEAD..origin/main --oneline --decorate --no-color -10
+    echo ----------------------------------------
+    echo.
+)
+
 echo [警告] 将强制同步到远程分支,本地修改将被覆盖
-set /p confirm="是否继续? (y/n): "
+set /p confirm="是否继续更新? (y/n): "
 if /i not "!confirm!"=="y" (
     echo 取消更新
     goto menu
 )
-
-echo.
-echo 获取远程更新...
-%GIT% fetch origin
 
 echo.
 echo 正在强制同步到远程分支...
@@ -87,6 +127,10 @@ echo 正在强制同步到远程分支...
 
 if %ERRORLEVEL% == 0 (
     echo [OK] 代码更新完成
+    if exist "VERSION" (
+        set /p NEW_VERSION=<VERSION
+        echo 更新后版本: !NEW_VERSION!
+    )
 ) else (
     echo [ERROR] 代码更新失败
 )
