@@ -264,11 +264,18 @@ def update_repository(args):
 def launch_ui(args):
     """启动UI界面"""
     if args.ui == 'qt':
+        # 新版 Qt UI (推荐)
         from desktop_qt_ui.main import main as qt_main
         qt_main()
-    else:  # 默认使用 customtkinter UI
-        from desktop-ui.main import main_ui
-        main_ui()
+    elif args.ui == 'customtkinter':
+        # 旧版 CustomTkinter UI
+        import importlib
+        desktop_ui = importlib.import_module('desktop-ui.main')
+        desktop_ui.main_ui()
+    else:
+        # 默认使用新版 Qt UI
+        from desktop_qt_ui.main import main as qt_main
+        qt_main()
 
 
 def launch_cli(args):
@@ -288,6 +295,7 @@ def main():
     parser = argparse.ArgumentParser(description='漫画翻译器启动脚本')
     parser.add_argument("--update", action='store_true', help="启动前检查并自动更新")
     parser.add_argument("--frozen", action='store_true', help="跳过依赖检查(打包版本)")
+    parser.add_argument("--install-deps-only", action='store_true', help="仅安装依赖,不启动UI")
     parser.add_argument("--reinstall-torch", action='store_true', help="重新安装PyTorch")
     parser.add_argument("--requirements", default='auto', help="依赖文件路径 (auto=自动选择, 或指定 requirements_gpu.txt/requirements_cpu.txt)")
     parser.add_argument("--ui", choices=['qt', 'tk'], default='tk', help="选择UI框架: qt(PyQt6) 或 tk(CustomTkinter)")
@@ -319,6 +327,11 @@ def main():
     # 准备环境
     print('\n正在检查依赖...')
     prepare_environment(args)
+
+    # 如果只是安装依赖,则退出
+    if args.install_deps_only:
+        print('\n依赖安装完成!')
+        return
 
     # 启动应用
     print('\n正在启动应用...\n')
