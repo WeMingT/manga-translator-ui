@@ -13,9 +13,12 @@ if exist "venv\Scripts\activate.bat" (
 
 REM 检查是否有便携版 Git
 if exist "PortableGit\cmd\git.exe" (
-    set PATH=%~dp0PortableGit\cmd;%PATH%
+    set "PATH=%CD%\PortableGit\cmd;%PATH%"
 )
 
+REM 切换到项目根目录(确保Python能正确找到模块)
+cd /d "%~dp0"
+
 REM 直接启动 Qt 界面
-python desktop_qt_ui\main.py
+python "%CD%\desktop_qt_ui\main.py"
 pause

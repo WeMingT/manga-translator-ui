@@ -11,7 +11,23 @@ import subprocess
 import sys
 from typing import List, Optional
 
-from packaging.requirements import Requirement
+try:
+    # packaging < 22.0
+    from packaging.requirements import Requirement
+except ImportError:
+    try:
+        # packaging >= 22.0
+        from packaging.requirements import Requirement
+    except (ImportError, ModuleNotFoundError):
+        # Fallback: parse requirements manually
+        import re
+        class Requirement:
+            def __init__(self, requirement_string):
+                self.requirement_string = requirement_string
+                # Simple regex to extract package name
+                match = re.match(r'^([a-zA-Z0-9\-_\.]+)', requirement_string.strip())
+                self.name = match.group(1) if match else requirement_string
+
 from packaging.utils import canonicalize_name
 
 try:

@@ -22,8 +22,8 @@ call venv\Scripts\activate.bat
 
 REM 检查是否有便携版 Git
 if exist "PortableGit\cmd\git.exe" (
-    set GIT=PortableGit\cmd\git.exe
-    set PATH=%~dp0PortableGit\cmd;%PATH%
+    set "GIT=%CD%\PortableGit\cmd\git.exe"
+    set "PATH=%CD%\PortableGit\cmd;%PATH%"
 ) else (
     git --version >nul 2>&1
     if %ERRORLEVEL% == 0 (
@@ -95,7 +95,7 @@ echo 更新/安装依赖
 echo ========================================
 echo.
 
-python launch.py --frozen
+python launch.py --install-deps-only
 
 if %ERRORLEVEL% == 0 (
     echo [OK] 依赖更新完成
@@ -137,7 +137,7 @@ echo [OK] 代码更新完成
 
 echo.
 echo [2/2] 更新依赖...
-python launch.py --frozen
+python launch.py --install-deps-only
 
 if %ERRORLEVEL% == 0 (
     echo.

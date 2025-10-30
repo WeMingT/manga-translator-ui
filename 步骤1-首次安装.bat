@@ -36,14 +36,29 @@ if %ERRORLEVEL% == 0 (
         set PYTHON=python
         echo [OK] 找到 Python 3.12
         goto :check_git
+    ) else (
+        REM 检查是否是更高版本
+        python --version | findstr "3\.1[3-9]\." >nul
+        if %ERRORLEVEL% == 0 (
+            echo.
+            echo [ERROR] 错误: 检测到 Python 3.13+ 版本
+            echo.
+            echo 本项目仅支持 Python 3.12,不支持更高版本
+            echo 请安装 Python 3.12 版本:
+            echo https://www.python.org/downloads/release/python-3120/
+            echo.
+            pause
+            exit /b 1
+        )
     )
 )
 
 echo.
 echo [ERROR] 错误: 未找到 Python 3.12
 echo.
-echo 请先安装 Python 3.12 版本:
-echo https://www.python.org/downloads/
+echo 本项目仅支持 Python 3.12 版本
+echo 请先安装 Python 3.12:
+echo https://www.python.org/downloads/release/python-3120/
 echo.
 echo 安装时请勾选 "Add Python to PATH"
 echo.
@@ -131,7 +146,7 @@ if %ERRORLEVEL% neq 0 (
 
 del tmp\PortableGit.7z.exe >nul 2>&1
 set GIT=PortableGit\cmd\git.exe
-set PATH=%~dp0PortableGit\cmd;%PATH%
+set "PATH=%CD%\PortableGit\cmd;%PATH%"
 echo [OK] Git 安装完成
 PortableGit\cmd\git.exe --version
 
@@ -144,26 +159,30 @@ echo.
 
 REM 检查是否已存在代码仓库
 if exist ".git" (
-    echo [警告] 当前目录已包含Git仓库!
     echo.
-    echo 首次安装应在新目录中运行,或者:
-    echo 1. 如果要更新代码,请使用 "步骤3-更新维护.bat"
-    echo 2. 如果要重新安装,请先删除 .git 目录
+    echo [警告] 检测到现有Git仓库
+    echo 正在清理旧的Git数据...
+    rmdir /s /q ".git" 2>nul
+    if exist ".git" (
+        echo [ERROR] 无法删除 .git 目录,可能被占用
+        echo 请手动删除后重试,或使用 "步骤3-更新维护.bat" 更新代码
+        pause
+        exit /b 1
+    )
+    echo [OK] 清理完成
     echo.
-    pause
-    exit /b 1
 )
 
 echo 请选择克隆源:
 echo [1] GitHub 官方
-echo [2] GHProxy 镜像 (国内快)
+echo [2] ghfast.top 镜像 (国内快)
 echo [3] 手动输入仓库地址
 echo.
 set /p repo_choice="请选择 (1/2/3, 默认1): "
 
 if "%repo_choice%"=="2" (
-    set REPO_URL=https://gh-proxy.com/https://github.com/hgmzhn/manga-translator-ui.git
-    echo 使用: GHProxy镜像
+    set REPO_URL=https://ghfast.top/https://github.com/hgmzhn/manga-translator-ui.git
+    echo 使用: ghfast.top镜像
 ) else if "%repo_choice%"=="3" (
     set /p REPO_URL="请输入仓库地址: "
     echo 使用: 自定义地址
@@ -226,7 +245,7 @@ echo 正在复制目录...
 for /d %%i in ("%TEMP_DIR%\*") do (
     if /i not "%%~nxi"=="PortableGit" (
         echo [DEBUG] 复制目录: %%~nxi
-        xcopy "%%i" "%%~nxi\" /E /H /Y /I /Q
+        xcopy "%%i" "%CD%\%%~nxi\" /E /H /Y /I /Q
         if !ERRORLEVEL! neq 0 echo [ERROR] 复制目录失败: %%~nxi (错误码: !ERRORLEVEL!)
     )
 )
@@ -236,7 +255,7 @@ echo 正在复制文件...
 for %%i in ("%TEMP_DIR%\*") do (
     if /i not "%%~nxi"=="步骤1-首次安装.bat" (
         echo [DEBUG] 复制文件: %%~nxi
-        copy /Y "%%i" .
+        copy /Y "%%i" "%CD%\"
         if !ERRORLEVEL! neq 0 echo [ERROR] 复制文件失败: %%~nxi (错误码: !ERRORLEVEL!)
     )
 )
