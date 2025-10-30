@@ -150,29 +150,104 @@ set "PATH=%CD%\PortableGit\cmd;%PATH%"
 echo [OK] Git 安装完成
 PortableGit\cmd\git.exe --version
 
-REM ===== 步骤3: 克隆仓库 =====
+REM ===== 步骤3: 克隆/更新仓库 =====
 :clone_repo
 echo.
-echo [3/5] 克隆代码仓库...
+echo [3/5] 检查代码仓库...
 echo ========================================
 echo.
 
+REM 先获取目标仓库地址
+call :get_repo_url
+
 REM 检查是否已存在代码仓库
 if exist ".git" (
-    echo.
-    echo [警告] 检测到现有Git仓库
-    echo 正在清理旧的Git数据...
+    echo [INFO] 检测到现有Git仓库
+    
+    REM 获取当前仓库地址
+    for /f "delims=" %%i in ('%GIT% config --get remote.origin.url 2^>nul') do set CURRENT_REPO=%%i
+    
+    if defined CURRENT_REPO (
+        echo 当前仓库: !CURRENT_REPO!
+        echo 目标仓库: !REPO_URL!
+        echo.
+        
+        REM 标准化仓库地址进行比较
+        set CURRENT_CLEAN=!CURRENT_REPO:.git=!
+        set TARGET_CLEAN=!REPO_URL:.git=!
+        set CURRENT_CLEAN=!CURRENT_CLEAN:https://ghfast.top/https://github.com/=https://github.com/!
+        set TARGET_CLEAN=!TARGET_CLEAN:https://ghfast.top/https://github.com/=https://github.com/!
+        
+        if "!CURRENT_CLEAN!"=="!TARGET_CLEAN!" (
+            echo [OK] 仓库地址匹配,正在强制同步到最新版本...
+            echo.
+            
+            echo 获取远程更新...
+            %GIT% fetch origin
+            if !ERRORLEVEL! neq 0 (
+                echo [WARNING] 获取更新失败,可能是网络问题
+            ) else (
+                echo 强制同步到远程主分支...
+                %GIT% reset --hard origin/main
+                if !ERRORLEVEL! == 0 (
+                    echo [OK] 代码已更新到最新版本
+                    echo.
+                    goto :create_venv
+                ) else (
+                    echo [WARNING] 同步失败,尝试使用 main 分支...
+                    %GIT% checkout -f main
+                    %GIT% reset --hard origin/main
+                    if !ERRORLEVEL! == 0 (
+                        echo [OK] 代码已更新到最新版本
+                        echo.
+                        goto :create_venv
+                    )
+                )
+            )
+            
+            echo [WARNING] 自动更新失败,将删除并重新克隆
+            echo.
+        ) else (
+            echo [警告] 仓库地址不匹配
+            echo.
+            echo 请选择:
+            echo [1] 删除现有仓库并克隆新仓库
+            echo [2] 保留现有仓库,跳过克隆
+            echo [3] 退出安装
+            echo.
+            set /p mismatch_choice="请选择 (1/2/3): "
+            
+            if "!mismatch_choice!"=="2" (
+                echo [INFO] 保留现有仓库
+                goto :create_venv
+            ) else if "!mismatch_choice!"=="3" (
+                exit /b 0
+            )
+            
+            echo 正在删除现有仓库...
+        )
+    ) else (
+        echo [WARNING] 无法读取仓库信息,将重新克隆
+    )
+    
+    REM 删除现有 .git
     rmdir /s /q ".git" 2>nul
     if exist ".git" (
         echo [ERROR] 无法删除 .git 目录,可能被占用
-        echo 请手动删除后重试,或使用 "步骤3-更新维护.bat" 更新代码
+        echo 请关闭所有相关程序后重试
         pause
         exit /b 1
     )
-    echo [OK] 清理完成
+    echo [OK] 已清理旧仓库数据
     echo.
 )
 
+echo 仓库地址: !REPO_URL!
+echo 安装目录: %CD%
+echo.
+goto :do_clone
+
+:get_repo_url
 echo 请选择克隆源:
 echo [1] GitHub 官方
 echo [2] ghfast.top 镜像 (国内快)
@@ -190,17 +265,16 @@ if "%repo_choice%"=="2" (
     set REPO_URL=https://github.com/hgmzhn/manga-translator-ui.git
     echo 使用: GitHub官方
 )
+echo.
+goto :eof
 
-echo.
-echo 仓库地址: %REPO_URL%
-echo 安装目录: %CD%
-echo.
+:do_clone
 
 REM 使用临时目录克隆
 set TEMP_DIR=manga_translator_temp_%RANDOM%
 echo 正在克隆代码到临时目录... (可能需要几分钟)
 echo.
-%GIT% clone %REPO_URL% %TEMP_DIR%
+%GIT% clone !REPO_URL! %TEMP_DIR%
 
 echo.
 echo [DEBUG] 检查克隆结果...
@@ -297,10 +371,32 @@ echo [4/5] 创建虚拟环境并安装依赖...
 echo ========================================
 echo.
 
-REM 创建虚拟环境
-if exist "venv" (
-    echo 虚拟环境已存在
-) else (
+REM 检测虚拟环境有效性
+set VENV_VALID=0
+if exist "venv\Scripts\python.exe" (
+    echo 检测到现有虚拟环境,正在验证...
+    venv\Scripts\python.exe -c "import sys; sys.exit(0)" >nul 2>&1
+    if !ERRORLEVEL! == 0 (
+        set VENV_VALID=1
+        echo [OK] 虚拟环境有效
+    ) else (
+        echo [警告] 虚拟环境已损坏或失效
+    )
+)
+
+REM 创建或重建虚拟环境
+if !VENV_VALID! == 0 (
+    if exist "venv" (
+        echo 正在删除无效的虚拟环境...
+        rmdir /s /q "venv" 2>nul
+        if exist "venv" (
+            echo [ERROR] 无法删除旧的虚拟环境
+            echo 请手动删除 venv 文件夹后重试
+            pause
+            exit /b 1
+        )
+    )
+    
     echo 正在创建虚拟环境...
     %PYTHON% -m venv venv
     if %ERRORLEVEL% neq 0 (
@@ -317,6 +413,12 @@ call venv\Scripts\activate.bat
 
 echo 正在升级 pip...
 python -m pip install --upgrade pip >nul 2>&1
+
+echo 正在安装基础依赖...
+python -m pip install packaging setuptools wheel >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo [WARNING] 基础依赖安装失败,继续尝试...
+)
 
 echo 正在检测 GPU 支持...
 echo.
