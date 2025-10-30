@@ -25,7 +25,7 @@ result/
 *.spec
 
 # Batch files and executables
-
+*.bat
 *.exe
 *.sh
 
@@ -127,3 +127,5 @@ tmp/
 # Ignore virtual environment
 venv/
 .venv/
+
+gen_scripts.py
