@@ -1,0 +1,1256 @@
+import os
+import re
+import cv2
+import logging
+import numpy as np
+from typing import List
+from shapely import affinity
+from shapely.geometry import Polygon
+from tqdm import tqdm
+
+from . import text_render
+from .text_render_eng import render_textblock_list_eng
+from .text_render_pillow_eng import render_textblock_list_eng as render_textblock_list_eng_pillow
+from .ballon_extractor import extract_ballon_region
+from ..utils import (
+    BASE_PATH,
+    TextBlock,
+    color_difference,
+    get_logger,
+    rotate_polygons,
+)
+from ..config import Config
+
+logger = get_logger('render')
+
+# Global variable to store default font path for regions without specific fonts
+_global_default_font_path = ''
+
+def find_largest_inscribed_rect(mask: np.ndarray) -> tuple:
+    """
+    Find the largest axis-aligned rectangle that fits inside the mask.
+    Uses distance transform to find a good inscribed rectangle.
+    
+    Returns:
+        (x, y, width, height) of the largest inscribed rectangle
+    """
+    if mask.sum() == 0:
+        return 0, 0, 0, 0
+    
+    # Distance transform to find distances from edges
+    dist_transform = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    
+    # Find the maximum distance (center of largest inscribed circle)
+    _, max_dist, _, max_loc = cv2.minMaxLoc(dist_transform)
+    center_x, center_y = max_loc
+    
+    h, w = mask.shape
+    
+    # Start with a rectangle based on distance transform
+    # Use 85% of max distance as initial radius for conservative estimate
+    radius = int(max_dist * 0.85)
+    
+    x1 = max(0, center_x - radius)
+    y1 = max(0, center_y - radius)
+    x2 = min(w, center_x + radius)
+    y2 = min(h, center_y + radius)
+    
+    # Expand rectangle while it stays inside the mask
+    # Try to expand in all four directions
+    max_iterations = 100
+    improved = True
+    iteration = 0
+    
+    while improved and iteration < max_iterations:
+        improved = False
+        iteration += 1
+        
+        # Try expanding left
+        if x1 > 0 and np.all(mask[y1:y2, x1-1] > 0):
+            x1 -= 1
+            improved = True
+        
+        # Try expanding right
+        if x2 < w and np.all(mask[y1:y2, x2] > 0):
+            x2 += 1
+            improved = True
+        
+        # Try expanding up
+        if y1 > 0 and np.all(mask[y1-1, x1:x2] > 0):
+            y1 -= 1
+            improved = True
+        
+        # Try expanding down
+        if y2 < h and np.all(mask[y2, x1:x2] > 0):
+            y2 += 1
+            improved = True
+    
+    rect_width = x2 - x1
+    rect_height = y2 - y1
+    
+    if rect_width <= 0 or rect_height <= 0:
+        # Fallback to a small rectangle at center
+        return max(0, center_x - 5), max(0, center_y - 5), 10, 10
+    
+    return x1, y1, rect_width, rect_height
+
+def parse_font_paths(path: str, default: List[str] = None) -> List[str]:
+    if path:
+        parsed = path.split(',')
+        parsed = list(filter(lambda p: os.path.isfile(p), parsed))
+    else:
+        parsed = default or []
+    return parsed
+
+def fg_bg_compare(fg, bg):
+    fg_avg = np.mean(fg)
+    if color_difference(fg, bg) < 30:
+        bg = (255, 255, 255) if fg_avg <= 127 else (0, 0, 0)
+    return fg, bg
+
+def count_text_length(text: str) -> float:
+    """Calculate text length, treating っッぁぃぅぇぉ as 0.5 characters"""
+    half_width_chars = 'っッぁぃぅぇぉ'  
+    length = 0.0
+    for char in text.strip():
+        if char in half_width_chars:
+            length += 0.5
+        else:
+            length += 1.0
+    return length
+
+def generate_line_break_combinations(text: str):
+    """
+    Generate all possible line break combinations from a text with [BR] markers.
+    Returns a list of tuples: (modified_text, combination_description, skip_reason or None)
+    """
+    import itertools
+    
+    # Standardize all break markers to [BR] (including full-width brackets)
+    text = re.sub(r'\s*(<br>|【BR】)\s*', '[BR]', text, flags=re.IGNORECASE)
+    
+    # Find all [BR] positions
+    breaks = []
+    pattern = r'\[BR\]'
+    for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+        breaks.append((match.start(), match.end()))
+    
+    if not breaks:
+        # No breaks, return original text
+        return [(text, "no_breaks", None)]
+    
+    combinations = []
+    
+    # Add original (keep all breaks)
+    combinations.append((text, "all_breaks", None))
+    
+    # Generate all possible combinations (remove 1, 2, 3, ... n breaks)
+    n_breaks = len(breaks)
+    for r in range(1, n_breaks + 1):
+        for combo in itertools.combinations(range(n_breaks), r):
+            # Create a version with selected breaks removed
+            # Split first to check first segment length
+            segments = re.split(pattern, text, flags=re.IGNORECASE)
+            
+            # Check skip condition: if first segment has <= 2 chars and we're removing break 0
+            if 0 in combo and len(segments[0].strip()) <= 2:
+                skip_reason = "first_segment_too_short"
+                combinations.append((None, f"remove_{combo}", skip_reason))
+                continue
+            
+            # Build modified text
+            # 从右到左删除，这样删除右边的BR不会影响左边BR的位置
+            modified_text = text
+            for idx in sorted(combo, reverse=True):  # Remove from right to left
+                start, end = breaks[idx]
+                # 从右到左删除时不需要offset调整，因为右边的删除不影响左边的位置
+                modified_text = modified_text[:start] + modified_text[end:]
+            
+            combinations.append((modified_text, f"remove_{combo}", None))
+    
+    return combinations
+
+def calculate_uniformity(lines: List[str]) -> float:
+    """
+    Calculate uniformity score for line lengths.
+    Lower score = more uniform (better).
+    Uses coefficient of variation (std/mean).
+    """
+    if not lines or len(lines) <= 1:
+        return 0.0
+    
+    lengths = [len(line.strip()) for line in lines]
+    if not lengths or sum(lengths) == 0:
+        return float('inf')
+    
+    mean_length = np.mean(lengths)
+    std_length = np.std(lengths)
+    
+    # Coefficient of variation
+    cv = std_length / mean_length if mean_length > 0 else float('inf')
+    return cv
+
+def optimize_line_breaks_for_region(region: TextBlock, config: Config, target_font_size: int, bubble_width: float, bubble_height: float):
+    """
+    Optimize line breaks for a single region by testing all combinations.
+    Returns the best text variant and the font size it achieves.
+    """
+    original_translation = region.translation
+    combinations = generate_line_break_combinations(original_translation)
+    
+    best_text = original_translation
+    best_font_size = 0
+    best_uniformity = float('inf')
+    
+    layout_mode = config.render.layout_mode if config and hasattr(config.render, 'layout_mode') else 'default'
+    logger.debug(f"[OPTIMIZE_LINE_BREAKS] Testing {len(combinations)} combinations, layout_mode={layout_mode}")
+    
+    for text_variant, combo_desc, skip_reason in combinations:
+        if skip_reason:
+            logger.debug(f"[OPTIMIZE_LINE_BREAKS] Skipping {combo_desc}: {skip_reason}")
+            continue
+        
+        # Convert [BR] to \n for calculation
+        text_for_calc = re.sub(r'\s*\[BR\]\s*', '\n', text_variant, flags=re.IGNORECASE)
+        
+        # 严格智能缩放模式：如果去掉所有断句（无\n），会导致文本框扩大，淘汰此方案
+        strict_smart_scaling = getattr(config.render, 'strict_smart_scaling', False) if config and hasattr(config, 'render') else False
+        if layout_mode == 'smart_scaling' and strict_smart_scaling:
+            if '\n' not in text_for_calc:
+                logger.debug(f"[OPTIMIZE_LINE_BREAKS] Skipping {combo_desc}: 严格智能缩放模式下无断句会扩大文本框")
+                continue
+        
+        try:
+            # Calculate required dimensions
+            if region.horizontal:
+                lines, widths = text_render.calc_horizontal(
+                    target_font_size, text_for_calc, 
+                    max_width=99999, max_height=99999, 
+                    language=region.target_lang
+                )
+                if widths:
+                    spacing_y = int(target_font_size * (config.render.line_spacing or 0.01))
+                    required_width = max(widths)
+                    required_height = target_font_size * len(lines) + spacing_y * max(0, len(lines) - 1)
+                else:
+                    continue
+            else:  # Vertical
+                if config.render.auto_rotate_symbols:
+                    text_for_calc = text_render.auto_add_horizontal_tags(text_for_calc)
+                
+                lines, heights = text_render.calc_vertical(target_font_size, text_for_calc, max_height=99999)
+                if heights:
+                    spacing_x = int(target_font_size * (config.render.line_spacing or 0.2))
+                    required_height = max(heights)
+                    required_width = target_font_size * len(lines) + spacing_x * max(0, len(lines) - 1)
+                else:
+                    continue
+            
+            # Calculate how much the text fits in the bubble
+            # Larger font size is better
+            width_ratio = bubble_width / required_width if required_width > 0 else 1.0
+            height_ratio = bubble_height / required_height if required_height > 0 else 1.0
+            fit_ratio = min(width_ratio, height_ratio)
+            
+            # Calculate effective font size for this combination
+            effective_font_size = target_font_size * fit_ratio
+            
+            # Calculate uniformity
+            uniformity = calculate_uniformity(lines)
+            
+            logger.debug(f"[OPTIMIZE_LINE_BREAKS] {combo_desc}: font_size={effective_font_size:.1f}, uniformity={uniformity:.3f}")
+            
+            # Choose the best: prioritize font size, then uniformity
+            is_better = False
+            if effective_font_size > best_font_size + 0.5:  # Significantly larger font
+                is_better = True
+            elif abs(effective_font_size - best_font_size) <= 0.5:  # Similar font size
+                if uniformity < best_uniformity:  # Better uniformity
+                    is_better = True
+            
+            if is_better:
+                best_text = text_variant
+                best_font_size = effective_font_size
+                best_uniformity = uniformity
+                logger.debug(f"[OPTIMIZE_LINE_BREAKS] New best: {combo_desc}")
+        
+        except Exception as e:
+            logger.warning(f"[OPTIMIZE_LINE_BREAKS] Error evaluating {combo_desc}: {e}")
+            continue
+    
+    # Compare and log optimization results
+    original_br_count = len(re.findall(r'\[BR\]', original_translation, flags=re.IGNORECASE))
+    optimized_br_count = len(re.findall(r'\[BR\]', best_text, flags=re.IGNORECASE))
+    
+    # 只有在BR数量减少时才应用优化
+    if optimized_br_count < original_br_count:
+        removed_count = original_br_count - optimized_br_count
+        logger.info(f"[AI断句自动扩大文字] 优化完成：去掉了 {removed_count} 个换行符，字体大小提升至 {best_font_size:.1f}px")
+        logger.info(f"[AI断句自动扩大文字] 原文: {original_translation}")
+        logger.info(f"[AI断句自动扩大文字] 优化后: {best_text}")
+        return best_text, best_font_size
+    elif best_text != original_translation and optimized_br_count == original_br_count:
+        # BR数量未变但文本改变，说明有bug
+        logger.warning(f"[AI断句自动扩大文字] 警告：文本被修改但BR数量未变，保持原文本")
+        logger.warning(f"[AI断句自动扩大文字] 原文: {original_translation}")
+        logger.warning(f"[AI断句自动扩大文字] 错误结果: {best_text}")
+        return original_translation, best_font_size
+    else:
+        logger.info(f"[AI断句自动扩大文字] 未进行优化：保持原断句方案最佳，字体大小 {best_font_size:.1f}px")
+        return original_translation, best_font_size
+
+def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], config: Config, original_img: np.ndarray = None, return_debug_img: bool = False):
+    """
+    Resize text regions based on layout mode.
+    
+    Args:
+        return_debug_img: If True, returns (dst_points_list, debug_img) for balloon_fill mode
+    """
+    mode = config.render.layout_mode
+    logger.info(f"=== resize_regions_to_font_size called with mode='{mode}' ===")
+    logger.info(f"Total regions: {len(text_regions)}, original_img provided: {original_img is not None}")
+
+    # Prepare debug image for balloon_fill mode (only when requested)
+    debug_img = None
+    if mode == 'balloon_fill' and original_img is not None and return_debug_img:
+        debug_img = original_img.copy()
+        logger.debug("Created debug image for balloon_fill visualization")
+
+    dst_points_list = []
+    for region_idx, region in enumerate(text_regions):
+        if region is None:
+            dst_points_list.append(None)
+            continue
+
+        # 如果 translation 为空,直接返回 min_rect,避免触发复杂的布局计算
+        if not region.translation or not region.translation.strip():
+            dst_points_list.append(region.min_rect)
+            continue
+
+        original_region_font_size = region.font_size if region.font_size > 0 else round((img.shape[0] + img.shape[1]) / 200)
+
+        # 保存原始字体大小到region对象，用于JSON导出
+        if not hasattr(region, 'original_font_size'):
+            region.original_font_size = original_region_font_size
+
+
+        font_size_offset = config.render.font_size_offset
+        min_font_size = max(config.render.font_size_minimum if config.render.font_size_minimum > 0 else 1, 1)
+        target_font_size = max(original_region_font_size + font_size_offset, min_font_size)
+
+        # 保存应用偏移量后的字体大小，用于JSON导出
+        region.offset_applied_font_size = int(target_font_size)
+
+        # --- Mode 5: balloon_fill (MUST BE FIRST to override other modes) ---
+        if mode == 'balloon_fill':
+            logger.info(f"=== balloon_fill mode activated for region {region_idx} ===")
+            logger.info(f"OCR box (xywh): {region.xywh}")
+            
+            if original_img is None:
+                # Fallback to default if no original image
+                logger.warning("balloon_fill mode requires original_img, falling back to OCR box")
+                dst_points_list.append(region.min_rect)
+                region.font_size = target_font_size
+                continue
+            
+            try:
+                # Step 1: Extract balloon region
+                enlarge_ratio = min(max(region.xywh[2] / region.xywh[3], region.xywh[3] / region.xywh[2]) * 1.5, 3)
+                logger.info(f"Enlarge ratio: {enlarge_ratio}")
+                
+                ballon_mask, xyxy = extract_ballon_region(original_img, region.xywh, enlarge_ratio=enlarge_ratio)
+                ballon_area = (ballon_mask > 0).sum()
+                
+                if ballon_area == 0:
+                    # Balloon detection failed, use original OCR box
+                    logger.warning(f"Balloon detection failed for region {region_idx}, using OCR box")
+                    dst_points_list.append(region.min_rect)
+                    region.font_size = target_font_size
+                    continue
+                
+                # Calculate balloon bounding rect (minimum bounding rectangle)
+                region_x, region_y, region_w, region_h = cv2.boundingRect(cv2.findNonZero(ballon_mask))
+                
+                # Convert to absolute coordinates
+                balloon_x1 = xyxy[0] + region_x
+                balloon_y1 = xyxy[1] + region_y
+                balloon_width = region_w
+                balloon_height = region_h
+                
+                logger.info(f"Balloon size: {balloon_width}x{balloon_height} at ({balloon_x1}, {balloon_y1})")
+                
+                # Optimize line breaks if enabled
+                has_br = bool(re.search(r'(\[BR\]|【BR】|<br>)', region.translation, flags=re.IGNORECASE))
+                if config.render.optimize_line_breaks and config.render.disable_auto_wrap and has_br:
+                    logger.info(f"[OPTIMIZE] Optimizing line breaks for balloon_fill mode")
+                    optimized_text, _ = optimize_line_breaks_for_region(
+                        region, config, target_font_size, balloon_width, balloon_height
+                    )
+                    region.translation = optimized_text
+                    logger.info(f"[OPTIMIZE] Optimized text: {region.translation}")
+                
+                # Step 2: Calculate required text dimensions
+                required_width = 0
+                required_height = 0
+                
+                # Determine max dimensions for text calculation (following smart_scaling logic)
+                text_for_calc = region.translation
+                if config.render.disable_auto_wrap:
+                    # AI line breaking enabled
+                    text_for_calc = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text_for_calc, flags=re.IGNORECASE)
+                    use_unlimited_dimension = True
+                elif '\n' not in text_for_calc and len(text_regions) <= 1:
+                    # Smart scaling: no manual breaks and single region
+                    use_unlimited_dimension = True
+                else:
+                    use_unlimited_dimension = False
+                
+                logger.info(f"Use unlimited dimension: {use_unlimited_dimension}")
+                
+                if region.horizontal:
+                    # Horizontal text
+                    max_width_for_calc = 99999 if use_unlimited_dimension else balloon_width
+                    max_height_for_calc = 99999  # Height is always unlimited for horizontal
+                    
+                    lines, widths = text_render.calc_horizontal(
+                        target_font_size, 
+                        text_for_calc, 
+                        max_width=max_width_for_calc, 
+                        max_height=max_height_for_calc, 
+                        language=region.target_lang
+                    )
+                    if widths:
+                        spacing_y = int(target_font_size * (config.render.line_spacing or 0.01))
+                        required_width = max(widths)
+                        required_height = target_font_size * len(lines) + spacing_y * max(0, len(lines) - 1)
+                else:
+                    # Vertical text
+                    text_for_calc = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text_for_calc, flags=re.IGNORECASE)
+                    if config.render.auto_rotate_symbols:
+                        text_for_calc = text_render.auto_add_horizontal_tags(text_for_calc)
+                    
+                    max_height_for_calc = 99999 if use_unlimited_dimension else balloon_height
+                    
+                    lines, heights = text_render.calc_vertical(
+                        target_font_size, 
+                        text_for_calc, 
+                        max_height=max_height_for_calc
+                    )
+                    if heights:
+                        spacing_x = int(target_font_size * (config.render.line_spacing or 0.2))
+                        required_height = max(heights)
+                        required_width = target_font_size * len(lines) + spacing_x * max(0, len(lines) - 1)
+                
+                logger.info(f"Required text size: {required_width}x{required_height}")
+                
+                # Step 3: Calculate font scale factor
+                if required_width > 0 and required_height > 0:
+                    width_scale = balloon_width / required_width
+                    height_scale = balloon_height / required_height
+                    font_scale_factor = min(width_scale, height_scale)
+                    
+                    # Clamp to reasonable range
+                    font_scale_factor = max(min(font_scale_factor, 2.0), 0.3)
+                    
+                    logger.info(f"Font scale factor: {font_scale_factor} (width_scale={width_scale:.2f}, height_scale={height_scale:.2f})")
+                    
+                    # Apply font scaling
+                    target_font_size = int(target_font_size * font_scale_factor)
+                else:
+                    logger.warning(f"Invalid required dimensions, keeping original font size")
+                
+                # Step 4: Create dst_points based on balloon rectangle
+                new_dst_points = np.array([
+                    [balloon_x1, balloon_y1],
+                    [balloon_x1 + balloon_width, balloon_y1],
+                    [balloon_x1 + balloon_width, balloon_y1 + balloon_height],
+                    [balloon_x1, balloon_y1 + balloon_height]
+                ], dtype=np.float32).reshape(1, 4, 2)
+                
+                # Apply final font size adjustments
+                final_font_size = int(max(target_font_size, min_font_size) * config.render.font_scale_ratio)
+                if config.render.max_font_size > 0:
+                    final_font_size = min(final_font_size, config.render.max_font_size)
+                
+                region.font_size = final_font_size
+                dst_points_list.append(new_dst_points)
+                
+                logger.info(f"Final font size: {final_font_size}, dst_points: {new_dst_points[0]}")
+                
+                # === DEBUG: Draw rectangles on shared debug image ===
+                if debug_img is not None:
+                    # Draw OCR box (red) - convert to int
+                    ocr_x1, ocr_y1, ocr_w, ocr_h = map(int, region.xywh)
+                    cv2.rectangle(debug_img, (ocr_x1, ocr_y1), (ocr_x1 + ocr_w, ocr_y1 + ocr_h), (0, 0, 255), 2)
+                    cv2.putText(debug_img, f'OCR{region_idx}', (ocr_x1, ocr_y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                    
+                    # Draw enlarged search area (yellow) - convert to int
+                    search_x1, search_y1, search_x2, search_y2 = map(int, xyxy)
+                    cv2.rectangle(debug_img, (search_x1, search_y1), (search_x2, search_y2), (0, 255, 255), 2)
+                    
+                    # Draw balloon mask contour (blue) - actual detected balloon shape
+                    contours, _ = cv2.findContours(ballon_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    if contours:
+                        # Offset contours to original image coordinates
+                        offset_contours = [cnt + np.array([[[xyxy[0], xyxy[1]]]]) for cnt in contours]
+                        cv2.drawContours(debug_img, offset_contours, -1, (255, 0, 0), 2)
+                    
+                    # Draw balloon bounding box (green) - the rectangle used for text rendering
+                    cv2.rectangle(debug_img, (int(balloon_x1), int(balloon_y1)), (int(balloon_x1 + balloon_width), int(balloon_y1 + balloon_height)), (0, 255, 0), 3)
+                    cv2.putText(debug_img, f'B{region_idx}', (int(balloon_x1), int(balloon_y1) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                
+            except Exception as e:
+                logger.error(f"Error in balloon_fill mode: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # Fallback to OCR box
+                dst_points_list.append(region.min_rect)
+                region.font_size = target_font_size
+            
+            continue
+
+        # --- Mode 1: disable_all (unchanged) ---
+        if mode == 'disable_all':
+            # Calculate total font scale (font_scale_ratio + max_font_size limit)
+            final_font_size = int(target_font_size * config.render.font_scale_ratio)
+            total_font_scale = config.render.font_scale_ratio
+
+            if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
+                total_font_scale *= config.render.max_font_size / final_font_size
+                final_font_size = config.render.max_font_size
+
+            # Scale region to match final font size
+            dst_points = region.min_rect
+            if total_font_scale != 1.0:
+                try:
+                    poly = Polygon(region.unrotated_min_rect[0])
+                    scaled_poly = affinity.scale(poly, xfact=total_font_scale, yfact=total_font_scale, origin='center')
+                    scaled_points = np.array(scaled_poly.exterior.coords[:4])
+                    dst_points = rotate_polygons(region.center, scaled_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                except Exception as e:
+                    logger.warning(f"Failed to scale region for font_scale_ratio: {e}")
+
+            region.font_size = final_font_size
+            dst_points_list.append(dst_points)
+            continue
+
+        # --- Mode 2: strict ---
+        elif mode == 'strict':
+            # Optimize line breaks if enabled
+            has_br = bool(re.search(r'(\[BR\]|【BR】|<br>)', region.translation, flags=re.IGNORECASE))
+            if config.render.optimize_line_breaks and config.render.disable_auto_wrap and has_br:
+                bubble_width, bubble_height = region.unrotated_size
+                logger.info(f"[OPTIMIZE] Optimizing line breaks for strict mode")
+                optimized_text, _ = optimize_line_breaks_for_region(
+                    region, config, target_font_size, bubble_width, bubble_height
+                )
+                region.translation = optimized_text
+                logger.info(f"[OPTIMIZE] Optimized text: {region.translation}")
+            
+            font_size = target_font_size
+            min_shrink_font_size = max(min_font_size, 8)
+
+            # Step 1: 先缩小字体直到文本能放进文本框
+            iteration_count = 0
+            while font_size >= min_shrink_font_size:
+                iteration_count += 1
+                if region.horizontal:
+                    lines, _ = text_render.calc_horizontal(font_size, region.translation, max_width=region.unrotated_size[0], max_height=region.unrotated_size[1], language=region.target_lang)
+                    if len(lines) <= len(region.texts):
+                        break
+                else:
+                    lines, _ = text_render.calc_vertical(font_size, region.translation, max_height=region.unrotated_size[1])
+                    if len(lines) <= len(region.texts):
+                        break
+                font_size -= 1
+
+            # Step 2: 尝试扩大字体以更好地填充空间（但不超过初始大小）
+            # 从当前能放下的字体大小开始，逐步增加
+            max_fitting_font_size = font_size
+            test_font_size = font_size + 1
+
+            while test_font_size <= target_font_size:
+                if region.horizontal:
+                    test_lines, _ = text_render.calc_horizontal(test_font_size, region.translation, max_width=region.unrotated_size[0], max_height=region.unrotated_size[1], language=region.target_lang)
+                    if len(test_lines) <= len(region.texts):
+                        max_fitting_font_size = test_font_size
+                        test_font_size += 1
+                    else:
+                        break
+                else:
+                    test_lines, _ = text_render.calc_vertical(test_font_size, region.translation, max_height=region.unrotated_size[1])
+                    if len(test_lines) <= len(region.texts):
+                        max_fitting_font_size = test_font_size
+                        test_font_size += 1
+                    else:
+                        break
+
+            # Calculate total font scale (font_scale_ratio + max_font_size limit)
+            final_font_size = int(max(max_fitting_font_size, min_shrink_font_size) * config.render.font_scale_ratio)
+            total_font_scale = config.render.font_scale_ratio
+
+            if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
+                total_font_scale *= config.render.max_font_size / final_font_size
+                final_font_size = config.render.max_font_size
+
+            # Scale region to match final font size
+            dst_points = region.min_rect
+            if total_font_scale != 1.0:
+                try:
+                    poly = Polygon(region.unrotated_min_rect[0])
+                    scaled_poly = affinity.scale(poly, xfact=total_font_scale, yfact=total_font_scale, origin='center')
+                    scaled_points = np.array(scaled_poly.exterior.coords[:4])
+                    dst_points = rotate_polygons(region.center, scaled_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                except Exception as e:
+                    logger.warning(f"Failed to scale region for font_scale_ratio: {e}")
+
+            region.font_size = final_font_size
+            dst_points_list.append(dst_points)
+            continue
+
+        # --- Mode 3: default (uses old logic, unchanged) ---
+        elif mode == 'default':
+            # Optimize line breaks if enabled
+            has_br = bool(re.search(r'(\[BR\]|【BR】|<br>)', region.translation, flags=re.IGNORECASE))
+            if config.render.optimize_line_breaks and config.render.disable_auto_wrap and has_br:
+                bubble_width, bubble_height = region.unrotated_size
+                logger.info(f"[OPTIMIZE] Optimizing line breaks for default mode")
+                optimized_text, _ = optimize_line_breaks_for_region(
+                    region, config, target_font_size, bubble_width, bubble_height
+                )
+                region.translation = optimized_text
+                logger.info(f"[OPTIMIZE] Optimized text: {region.translation}")
+
+            font_size_fixed = config.render.font_size
+            font_size_offset = config.render.font_size_offset
+            font_size_minimum = config.render.font_size_minimum
+
+
+            if font_size_minimum == -1:
+                font_size_minimum = round((img.shape[0] + img.shape[1]) / 200)
+            font_size_minimum = max(1, font_size_minimum)
+
+            original_region_font_size = region.font_size
+            if original_region_font_size <= 0:
+                original_region_font_size = font_size_minimum
+
+            if font_size_fixed is not None:
+                target_font_size = font_size_fixed
+            else:
+                target_font_size = original_region_font_size + font_size_offset
+
+            target_font_size = max(target_font_size, font_size_minimum, 1)
+
+            orig_text = getattr(region, "text_raw", region.text)
+            char_count_orig = count_text_length(orig_text)
+            char_count_trans = count_text_length(region.translation.strip())
+
+            if char_count_orig > 0 and char_count_trans > char_count_orig:
+                increase_percentage = (char_count_trans - char_count_orig) / char_count_orig
+                font_increase_ratio = 1 + (increase_percentage * 0.3)
+                font_increase_ratio = min(1.5, max(1.0, font_increase_ratio))
+                target_font_size = int(target_font_size * font_increase_ratio)
+                target_scale = max(1, min(1 + increase_percentage * 0.3, 2))
+            else:
+                target_scale = 1
+
+            font_size_scale = (((target_font_size - original_region_font_size) / original_region_font_size) * 0.4 + 1) if original_region_font_size > 0 else 1.0
+            final_scale = max(font_size_scale, target_scale)
+            final_scale = max(1, min(final_scale, 1.1))
+
+            if final_scale > 1.001:
+                try:
+                    poly = Polygon(region.unrotated_min_rect[0])
+                    poly = affinity.scale(poly, xfact=final_scale, yfact=final_scale, origin='center')
+                    scaled_unrotated_points = np.array(poly.exterior.coords[:4])
+                    dst_points = rotate_polygons(region.center, scaled_unrotated_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                    dst_points = dst_points.reshape((-1, 4, 2))
+                except Exception as e:
+                    dst_points = region.min_rect
+            else:
+                dst_points = region.min_rect
+
+            # Calculate total font scale (font_scale_ratio + max_font_size limit)
+            final_font_size = int(target_font_size * config.render.font_scale_ratio)
+            total_font_scale = config.render.font_scale_ratio
+
+            if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
+                total_font_scale *= config.render.max_font_size / final_font_size
+                final_font_size = config.render.max_font_size
+
+            # Scale dst_points to match final font size
+            if total_font_scale != 1.0:
+                try:
+                    poly = Polygon(dst_points.reshape(-1, 2))
+                    scaled_poly = affinity.scale(poly, xfact=total_font_scale, yfact=total_font_scale, origin='center')
+                    dst_points = np.array(scaled_poly.exterior.coords[:4]).reshape(-1, 4, 2)
+                except Exception as e:
+                    logger.warning(f"Failed to scale region for font_scale_ratio: {e}")
+
+            region.font_size = final_font_size
+            dst_points_list.append(dst_points)
+            continue
+
+        # --- Mode 4: smart_scaling ---
+        elif mode == 'smart_scaling':
+            # Check if AI line breaking is enabled.
+            if config.render.disable_auto_wrap:
+                # --- FINAL UNIFIED ALGORITHM for AI ON ---
+                try:
+                    # Calculate required dimensions using current font size (fixed layout)
+                    bubble_width, bubble_height = region.unrotated_size
+
+                    # Defensive check for invalid bubble sizes
+                    if not (isinstance(bubble_width, (int, float)) and np.isfinite(bubble_width) and bubble_width > 0 and
+                            isinstance(bubble_height, (int, float)) and np.isfinite(bubble_height) and bubble_height > 0):
+                        logger.warning(f"Invalid bubble size for region: w={bubble_width}, h={bubble_height}. Skipping smart scaling for this region.")
+                        dst_points_list.append(region.min_rect)
+                        final_font_size = int(max(target_font_size, min_font_size) * config.render.font_scale_ratio)
+                        if config.render.max_font_size > 0:
+                            final_font_size = min(final_font_size, config.render.max_font_size)
+                        region.font_size = final_font_size
+                        continue
+
+                    # Create base polygon for scaling
+                    try:
+                        unrotated_base_poly = Polygon(region.unrotated_min_rect[0])
+                    except Exception:
+                        unrotated_base_poly = Polygon([(0, 0), (bubble_width, 0), (bubble_width, bubble_height), (0, bubble_height)])
+
+                    # Optimize line breaks if enabled
+                    has_br = bool(re.search(r'(\[BR\]|【BR】|<br>)', region.translation, flags=re.IGNORECASE))
+                    if config.render.optimize_line_breaks and config.render.disable_auto_wrap and has_br:
+                        optimized_text, _ = optimize_line_breaks_for_region(
+                            region, config, target_font_size, bubble_width, bubble_height
+                        )
+                        region.translation = optimized_text
+
+                    # Calculate required width and height (no auto wrap)
+                    required_width = 0
+                    required_height = 0
+
+                    if region.horizontal:
+                        lines, widths = text_render.calc_horizontal(target_font_size, region.translation, max_width=99999, max_height=99999, language=region.target_lang)
+                        if widths:
+                            spacing_y = int(target_font_size * (config.render.line_spacing or 0.01))
+                            required_width = max(widths)
+                            required_height = target_font_size * len(lines) + spacing_y * max(0, len(lines) - 1)
+                    else: # Vertical
+                        # Convert [BR] tags to \n for vertical text
+                        text_for_calc = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', region.translation, flags=re.IGNORECASE)
+                        
+                        # Apply auto_add_horizontal_tags if enabled
+                        if config.render.auto_rotate_symbols:
+                            text_for_calc = text_render.auto_add_horizontal_tags(text_for_calc)
+                        
+                        lines, heights = text_render.calc_vertical(target_font_size, text_for_calc, max_height=99999)
+                        if heights:
+                            spacing_x = int(target_font_size * (config.render.line_spacing or 0.2))
+                            required_height = max(heights)
+                            required_width = target_font_size * len(lines) + spacing_x * max(0, len(lines) - 1)
+
+                    # Check for overflow in either dimension
+                    width_overflow = max(0, required_width - bubble_width)
+                    height_overflow = max(0, required_height - bubble_height)
+
+                    dst_points = region.min_rect
+
+                    if width_overflow > 0 or height_overflow > 0:
+                        # 独立缩放宽度和高度（单列/单行和多列/多行都使用相同逻辑）
+                        width_scale_factor = 1.0
+                        height_scale_factor = 1.0
+
+                        if width_overflow > 0:
+                            width_scale_needed = required_width / bubble_width if bubble_width > 0 else 1.0
+                            diff_ratio_w = width_scale_needed - 1.0
+                            box_expansion_ratio_w = diff_ratio_w / 2
+                            width_scale_factor = 1 + min(box_expansion_ratio_w, 1.0)
+
+                        if height_overflow > 0:
+                            height_scale_needed = required_height / bubble_height if bubble_height > 0 else 1.0
+                            diff_ratio_h = height_scale_needed - 1.0
+                            box_expansion_ratio_h = diff_ratio_h / 2
+                            height_scale_factor = 1 + min(box_expansion_ratio_h, 1.0)
+
+                        try:
+                            scaled_unrotated_poly = affinity.scale(unrotated_base_poly, xfact=width_scale_factor, yfact=height_scale_factor, origin='center')
+                            scaled_unrotated_points = np.array(scaled_unrotated_poly.exterior.coords[:4])
+                            dst_points = rotate_polygons(region.center, scaled_unrotated_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                        except Exception as e:
+                            logger.warning(f"Failed to apply independent scaling: {e}")
+
+                        # 字体缩放基于最大的溢出维度
+                        scale_needed = max(required_width / bubble_width if bubble_width > 0 else 1.0,
+                                         required_height / bubble_height if bubble_height > 0 else 1.0)
+                        diff_ratio = scale_needed - 1.0
+                        font_shrink_ratio = diff_ratio / 2 / (1 + diff_ratio)
+                        font_scale_factor = 1 - min(font_shrink_ratio, 0.5)
+                        target_font_size = int(target_font_size * font_scale_factor)
+                    else:
+                        # No overflow, can enlarge font to fit better
+                        if required_width > 0 and required_height > 0:
+                            width_scale_factor = bubble_width / required_width
+                            height_scale_factor = bubble_height / required_height
+                            font_scale_factor = min(width_scale_factor, height_scale_factor)
+                            target_font_size = int(target_font_size * font_scale_factor)
+
+                        try:
+                            unrotated_points = np.array(unrotated_base_poly.exterior.coords[:4])
+                            dst_points = rotate_polygons(region.center, unrotated_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                        except Exception as e:
+                            logger.warning(f"Failed to use base polygon: {e}")
+
+                except Exception as e:
+                    logger.error(f"Error in new smart_scaling algorithm: {e}")
+                    # Fallback to a safe state
+                    target_font_size = region.offset_applied_font_size
+                    dst_points = region.min_rect
+
+                # Calculate total font scale (font_scale_ratio + max_font_size limit)
+                final_font_size = int(max(target_font_size, min_font_size) * config.render.font_scale_ratio)
+                total_font_scale = config.render.font_scale_ratio
+
+                if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
+                    total_font_scale *= config.render.max_font_size / final_font_size
+                    final_font_size = config.render.max_font_size
+
+                # Scale dst_points to match final font size
+                if total_font_scale != 1.0:
+                    try:
+                        poly = Polygon(dst_points.reshape(-1, 2))
+                        scaled_poly = affinity.scale(poly, xfact=total_font_scale, yfact=total_font_scale, origin='center')
+                        dst_points = np.array(scaled_poly.exterior.coords[:4]).reshape(-1, 4, 2)
+                    except Exception as e:
+                        logger.warning(f"Failed to scale region for font_scale_ratio: {e}")
+                region.font_size = final_font_size
+                dst_points_list.append(dst_points)
+                continue
+
+            else:
+                # --- ORIGINAL smart_scaling LOGIC for AI OFF ---
+                # This is the old logic based on diff_ratio, preserved for when AI splitting is off.
+                if len(region.lines) > 1:
+                    from shapely.ops import unary_union
+                    try:
+                        unrotated_polygons = []
+                        for i, p in enumerate(region.lines):
+                            unrotated_p = rotate_polygons(region.center, p.reshape(1, -1, 2), region.angle, to_int=False)
+                            unrotated_polygons.append(Polygon(unrotated_p.reshape(-1, 2)))
+                        union_poly = unary_union(unrotated_polygons)
+                        original_area = union_poly.area
+                        unrotated_base_poly = union_poly.envelope
+                    except Exception as e:
+                        logger.warning(f"Failed to compute union of polygons: {e}")
+                        original_area = region.unrotated_size[0] * region.unrotated_size[1]
+                        unrotated_base_poly = Polygon(region.unrotated_min_rect[0])
+                else:
+                    original_area = region.unrotated_size[0] * region.unrotated_size[1]
+                    unrotated_base_poly = Polygon(region.unrotated_min_rect[0])
+
+                required_area = 0
+                if region.horizontal:
+                    lines, widths = text_render.calc_horizontal(target_font_size, region.translation, max_width=99999, max_height=99999, language=region.target_lang)
+                    if widths:
+                        required_width = max(widths)
+                        required_height = len(lines) * (target_font_size * (1 + (config.render.line_spacing or 0.01)))
+                        required_area = required_width * required_height
+                else: # Vertical
+                    lines, heights = text_render.calc_vertical(target_font_size, region.translation, max_height=99999)
+                    if heights:
+                        required_height = max(heights)
+                        required_width = len(lines) * (target_font_size * (1 + (config.render.line_spacing or 0.2)))
+                        required_area = required_width * required_height
+
+                dst_points = region.min_rect
+                diff_ratio = 0
+                if original_area > 0 and required_area > 0:
+                    diff_ratio = (required_area - original_area) / original_area
+
+                if diff_ratio > 0:
+                    box_expansion_ratio = diff_ratio / 2
+                    box_scale_factor = 1 + min(box_expansion_ratio, 1.0)
+                    font_shrink_ratio = diff_ratio / 2 / (1 + diff_ratio)
+                    font_scale_factor = 1 - min(font_shrink_ratio, 0.5)
+                    try:
+                        scaled_unrotated_poly = affinity.scale(unrotated_base_poly, xfact=box_scale_factor, yfact=box_scale_factor, origin='center')
+                        scaled_unrotated_points = np.array(scaled_unrotated_poly.exterior.coords[:4])
+                        dst_points = rotate_polygons(region.center, scaled_unrotated_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                    except Exception as e:
+                        logger.warning(f"Failed to apply dynamic scaling: {e}")
+                    target_font_size = int(target_font_size * font_scale_factor)
+                elif diff_ratio < 0:
+                    try:
+                        area_ratio = original_area / required_area
+                        font_scale_factor = np.sqrt(area_ratio)
+                        target_font_size = int(target_font_size * font_scale_factor)
+                        unrotated_points = np.array(unrotated_base_poly.exterior.coords[:4])
+                        dst_points = rotate_polygons(region.center, unrotated_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                    except Exception as e:
+                        logger.warning(f"Failed to apply font enlargement: {e}")
+                else:
+                    try:
+                        unrotated_points = np.array(unrotated_base_poly.exterior.coords[:4])
+                        dst_points = rotate_polygons(region.center, unrotated_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                    except Exception as e:
+                        logger.warning(f"Failed to use base polygon: {e}")
+
+                # Calculate total font scale (font_scale_ratio + max_font_size limit)
+                final_font_size = int(target_font_size * config.render.font_scale_ratio)
+                total_font_scale = config.render.font_scale_ratio
+
+                if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
+                    total_font_scale *= config.render.max_font_size / final_font_size
+                    final_font_size = config.render.max_font_size
+
+                # Scale dst_points to match final font size
+                if total_font_scale != 1.0:
+                    try:
+                        poly = Polygon(dst_points.reshape(-1, 2))
+                        scaled_poly = affinity.scale(poly, xfact=total_font_scale, yfact=total_font_scale, origin='center')
+                        dst_points = np.array(scaled_poly.exterior.coords[:4]).reshape(-1, 4, 2)
+                    except Exception as e:
+                        logger.warning(f"Failed to scale region for font_scale_ratio: {e}")
+
+                region.font_size = final_font_size
+                dst_points_list.append(dst_points)
+                continue
+
+        # --- Fallback for any other modes (e.g., 'fixed_font') ---
+        else:
+            # Calculate total font scale (font_scale_ratio + max_font_size limit)
+            final_font_size = int(min(target_font_size, 512) * config.render.font_scale_ratio)
+            total_font_scale = config.render.font_scale_ratio
+
+            if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
+                total_font_scale *= config.render.max_font_size / final_font_size
+                final_font_size = config.render.max_font_size
+
+            # Scale region to match final font size
+            dst_points = region.min_rect
+            if total_font_scale != 1.0:
+                try:
+                    poly = Polygon(region.unrotated_min_rect[0])
+                    scaled_poly = affinity.scale(poly, xfact=total_font_scale, yfact=total_font_scale, origin='center')
+                    scaled_points = np.array(scaled_poly.exterior.coords[:4])
+                    dst_points = rotate_polygons(region.center, scaled_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                except Exception as e:
+                    logger.warning(f"Failed to scale region for font_scale_ratio: {e}")
+
+            region.font_size = final_font_size
+            dst_points_list.append(dst_points)
+            continue
+        
+    # Add legend to debug image
+    if return_debug_img and debug_img is not None:
+        # Add legend in top-left corner
+        legend_y = 30
+        cv2.putText(debug_img, 'Balloon Fill Debug:', (10, legend_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(debug_img, 'Red = OCR Box', (10, legend_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        cv2.putText(debug_img, 'Yellow = Search Area', (10, legend_y + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        cv2.putText(debug_img, 'Blue = Balloon Mask', (10, legend_y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        cv2.putText(debug_img, 'Green = Render Box', (10, legend_y + 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        return dst_points_list, debug_img
+    
+    return dst_points_list
+
+
+async def dispatch(
+    img: np.ndarray,
+    text_regions: List[TextBlock],
+    font_path: str = '',
+    config: Config = None,
+    original_img: np.ndarray = None,
+    return_debug_img: bool = False
+    ):
+
+    if config is None:
+        from ..config import Config
+        config = Config()
+
+    # Save global default font path for regions without specific fonts
+    global _global_default_font_path
+    _global_default_font_path = font_path
+    
+    text_render.set_font(font_path)
+    text_regions = list(filter(lambda region: region.translation, text_regions))
+
+    result = resize_regions_to_font_size(img, text_regions, config, original_img, return_debug_img)
+    
+    # Handle return value (may be tuple if debug image is included)
+    if return_debug_img and isinstance(result, tuple):
+        dst_points_list, debug_img = result
+    else:
+        dst_points_list = result
+        debug_img = None
+
+    for region, dst_points in tqdm(zip(text_regions, dst_points_list), '[render]', total=len(text_regions)):
+        img = render(img, region, dst_points, not config.render.no_hyphenation, config.render.line_spacing, config.render.disable_font_border, config)
+    
+    if return_debug_img and debug_img is not None:
+        return img, debug_img
+    return img
+
+def render(
+    img,
+    region: TextBlock,
+    dst_points,
+    hyphenate,
+    line_spacing,
+    disable_font_border,
+    config: Config
+):
+    global _global_default_font_path
+    
+    # Set region-specific font if specified, otherwise use global default
+    if hasattr(region, 'font_path') and region.font_path:
+        if os.path.exists(region.font_path):
+            text_render.set_font(region.font_path)
+        else:
+            logger.warning(f"Font path not found for region: {region.font_path}, using default font")
+            # Fall back to global default font
+            text_render.set_font(_global_default_font_path)
+    else:
+        # No region-specific font, use global default font (from UI config)
+        text_render.set_font(_global_default_font_path)
+    
+    # --- START BRUTEFORCE COLOR FIX ---
+    fg = (0, 0, 0) # Default to black
+    try:
+        # Priority 1: Check for the original hex string from the UI
+        if hasattr(region, 'font_color') and isinstance(region.font_color, str) and region.font_color.startswith('#'):
+            hex_c = region.font_color
+            if len(hex_c) == 7:
+                r = int(hex_c[1:3], 16)
+                g = int(hex_c[3:5], 16)
+                b = int(hex_c[5:7], 16)
+                fg = (r, g, b)
+        # Priority 2: Check for a pre-converted tuple
+        elif hasattr(region, 'fg_colors') and isinstance(region.fg_colors, (tuple, list)) and len(region.fg_colors) == 3:
+            fg = tuple(region.fg_colors)
+        # Last resort: Use the method2
+        else:
+            fg, _ = region.get_font_colors()
+    except Exception as e:
+        # If anything fails, fg remains black
+        pass
+
+    # Get background color separately
+    _, bg = region.get_font_colors()
+    # --- END BRUTEFORCE COLOR FIX ---
+
+    # Convert hex color string to RGB tuple, if necessary
+    if isinstance(fg, str) and fg.startswith('#') and len(fg) == 7:
+        try:
+            r = int(fg[1:3], 16)
+            g = int(fg[3:5], 16)
+            b = int(fg[5:7], 16)
+            fg = (r, g, b)
+        except ValueError:
+            fg = (0, 0, 0)  # Default to black on error
+    elif not isinstance(fg, (tuple, list)):
+        fg = (0, 0, 0) # Default to black if format is unexpected
+
+    fg, bg = fg_bg_compare(fg, bg)
+
+    # Centralized text preprocessing
+    text_to_render = region.get_translation_for_rendering()
+    # If AI line breaking is enabled, standardize all break tags ([BR], <br>, and 【BR】) to \n
+    if config and config.render.disable_auto_wrap:
+        text_to_render = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text_to_render, flags=re.IGNORECASE)
+
+    # Automatically add horizontal tags for vertical text
+    if region.vertical and config.render.auto_rotate_symbols:
+        text_to_render = text_render.auto_add_horizontal_tags(text_to_render)
+
+    if disable_font_border :
+        bg = None
+
+    middle_pts = (dst_points[:, [1, 2, 3, 0]] + dst_points) / 2
+    norm_h = np.linalg.norm(middle_pts[:, 1] - middle_pts[:, 3], axis=1)
+    norm_v = np.linalg.norm(middle_pts[:, 2] - middle_pts[:, 0], axis=1)
+    r_orig = np.mean(norm_h / norm_v)
+
+    forced_direction = region._direction if hasattr(region, "_direction") else region.direction
+    if forced_direction != "auto":
+        if forced_direction in ["horizontal", "h"]:
+            render_horizontally = True
+        elif forced_direction in ["vertical", "v"]:
+            render_horizontally = False
+        else:
+            render_horizontally = region.horizontal
+    else:
+        render_horizontally = region.horizontal
+
+    # 如果最终判断为横排,删除所有 <H> 标签,防止打印出来
+    if render_horizontally:
+        text_to_render = re.sub(r'<H>(.*?)</H>', r'\1', text_to_render, flags=re.IGNORECASE | re.DOTALL)
+
+    if render_horizontally:
+        temp_box = text_render.put_text_horizontal(
+            region.font_size,
+            text_to_render,
+            round(norm_h[0]),
+            round(norm_v[0]),
+            region.alignment,
+            region.direction == 'hl',
+            fg,
+            bg,
+            region.target_lang,
+            hyphenate,
+            line_spacing,
+            config,
+            len(region.lines)  # Pass region count
+        )
+    else:
+        temp_box = text_render.put_text_vertical(
+            region.font_size,
+            text_to_render,
+            round(norm_v[0]),
+            region.alignment,
+            fg,
+            bg,
+            line_spacing,
+            config,
+            len(region.lines)  # Pass region count
+        )
+    
+    if temp_box is None:
+        logger.warning(f"[RENDER SKIPPED] Text rendering returned None. Text: '{region.translation[:100]}...'")
+        return img
+    
+    h, w, _ = temp_box.shape
+    if h == 0 or w == 0:
+        logger.warning(f"Skipping rendering for region with invalid dimensions (w={w}, h={h}). Text: '{region.translation}'")
+        return img
+    r_temp = w / h
+
+    box = None
+    if region.horizontal:
+        if r_temp > r_orig:
+            h_ext = int((w / r_orig - h) // 2) if r_orig > 0 else 0
+            if h_ext >= 0:
+                box = np.zeros((h + h_ext * 2, w, 4), dtype=np.uint8)
+                # Center vertically when enabled
+                if config and config.render.center_text_in_bubble and config.render.disable_auto_wrap:
+                    box[h_ext:h_ext+h, 0:w] = temp_box
+                else:
+                    box[0:h, 0:w] = temp_box
+            else:
+                box = temp_box.copy()
+        else:
+            w_ext = int((h * r_orig - w) // 2)
+            if w_ext >= 0:
+                box = np.zeros((h, w + w_ext * 2, 4), dtype=np.uint8)
+                # Center horizontally when enabled
+                if config and config.render.center_text_in_bubble and config.render.disable_auto_wrap:
+                    box[0:h, w_ext:w_ext+w] = temp_box
+                else:
+                    box[0:h, 0:w] = temp_box
+            else:
+                box = temp_box.copy()
+    else:
+        if r_temp > r_orig:
+            h_ext = int(w / (2 * r_orig) - h / 2) if r_orig > 0 else 0
+            if h_ext >= 0:
+                box = np.zeros((h + h_ext * 2, w, 4), dtype=np.uint8)
+                # Center vertically when enabled
+                if config and config.render.center_text_in_bubble and config.render.disable_auto_wrap:
+                    box[h_ext:h_ext+h, 0:w] = temp_box
+                else:
+                    box[0:h, 0:w] = temp_box
+            else:
+                box = temp_box.copy()
+        else:
+            w_ext = int((h * r_orig - w) / 2)
+            if w_ext >= 0:
+                box = np.zeros((h, w + w_ext * 2, 4), dtype=np.uint8)
+                # Center horizontally (always active for vertical text)
+                box[0:h, w_ext:w_ext+w] = temp_box
+            else:
+                box = temp_box.copy()
+
+    src_points = np.array([[0, 0], [box.shape[1], 0], [box.shape[1], box.shape[0]], [0, box.shape[0]]]).astype(np.float32)
+
+    # 智能边界调整：检查文本是否超出图片边界，如果超出则平移到图片内
+    img_h, img_w = img.shape[:2]
+    x, y, w, h = cv2.boundingRect(np.round(dst_points[0]).astype(np.int32))
+    
+    adjusted = False
+    offset_x, offset_y = 0, 0
+    
+    # 检查并计算需要的偏移
+    if y < 0:
+        offset_y = -y
+        adjusted = True
+    elif y + h > img_h:
+        offset_y = img_h - (y + h)
+        adjusted = True
+    
+    if x < 0:
+        offset_x = -x
+        adjusted = True
+    elif x + w > img_w:
+        offset_x = img_w - (x + w)
+        adjusted = True
+    
+    # 应用偏移到目标点
+    adjusted_dst_points = dst_points.copy()
+    if adjusted:
+        adjusted_dst_points[0, :, 0] += offset_x
+        adjusted_dst_points[0, :, 1] += offset_y
+        logger.info(f"Adjusted text position to fit within image: offset=({offset_x}, {offset_y}), original_bbox=({x}, {y}, {w}, {h})")
+
+    M, _ = cv2.findHomography(src_points, adjusted_dst_points[0], cv2.RANSAC, 5.0)
+    # 使用INTER_LANCZOS4获得最高质量的插值,避免字体模糊
+    rgba_region = cv2.warpPerspective(box, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    x_adj, y_adj, w_adj, h_adj = cv2.boundingRect(np.round(adjusted_dst_points[0]).astype(np.int32))
+    
+    # 边界检查：确保调整后仍在图片内
+    valid_y1 = max(0, y_adj)
+    valid_y2 = min(img_h, y_adj + h_adj)
+    valid_x1 = max(0, x_adj)
+    valid_x2 = min(img_w, x_adj + w_adj)
+    
+    # 计算rgba_region中对应的区域
+    region_y1 = valid_y1
+    region_y2 = region_y1 + (valid_y2 - valid_y1)
+    region_x1 = valid_x1
+    region_x2 = region_x1 + (valid_x2 - valid_x1)
+    
+    # 检查是否有有效区域
+    if valid_y2 > valid_y1 and valid_x2 > valid_x1:
+        canvas_region = rgba_region[region_y1:region_y2, region_x1:region_x2, :3]
+        mask_region = rgba_region[region_y1:region_y2, region_x1:region_x2, 3:4].astype(np.float32) / 255.0
+        
+        # 确保尺寸匹配
+        target_region = img[valid_y1:valid_y2, valid_x1:valid_x2]
+        if canvas_region.shape[:2] == target_region.shape[:2]:
+            img[valid_y1:valid_y2, valid_x1:valid_x2] = np.clip(
+                (target_region.astype(np.float32) * (1 - mask_region) + canvas_region.astype(np.float32) * mask_region), 
+                0, 255
+            ).astype(np.uint8)
+        else:
+            logger.warning(f"Text region size mismatch: canvas={canvas_region.shape[:2]}, target={target_region.shape[:2]}, skipping region")
+    else:
+        logger.warning(f"Text region completely outside image bounds after adjustment: x={x_adj}, y={y_adj}, w={w_adj}, h={h_adj}, image_size=({img_w}, {img_h}). Text: '{region.translation[:50] if hasattr(region, 'translation') else 'N/A'}...'")
+    return img
+
+async def dispatch_eng_render(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '', line_spacing: int = 0, disable_font_border: bool = False) -> np.ndarray:
+    if len(text_regions) == 0:
+        return img_canvas
+
+    if not font_path:
+        font_path = os.path.join(BASE_PATH, 'fonts/comic shanns 2.ttf')
+    text_render.set_font(font_path)
+
+    return render_textblock_list_eng(img_canvas, text_regions, line_spacing=line_spacing, size_tol=1.2, original_img=original_img, downscale_constraint=0.8,disable_font_border=disable_font_border)
+
+async def dispatch_eng_render_pillow(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '', line_spacing: int = 0, disable_font_border: bool = False) -> np.ndarray:
+    if len(text_regions) == 0:
+        return img_canvas
+
+    if not font_path:
+        font_path = os.path.join(BASE_PATH, 'fonts/NotoSansMonoCJK-VF.ttf.ttc')
+    text_render.set_font(font_path)
+
+    return render_textblock_list_eng_pillow(font_path, img_canvas, text_regions, original_img=original_img, downscale_constraint=0.95)

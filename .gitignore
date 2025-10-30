@@ -1,0 +1,132 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+.venv_cpu/
+.venv_gpu/
+
+# Environment files (contain sensitive information)
+.env
+.env.*
+
+# Claude settings
+.claude/
+
+# Build output
+dist/
+
+# Build artifacts
+build/
+result/
+
+# PyInstaller
+*.spec
+
+# Batch files and executables
+*.bat
+*.exe
+*.sh
+
+# Wheel files
+*.whl
+
+# Archive files
+*.7z
+
+# Model files
+models/ocr/*.onnx
+models/ocr/*.txt
+
+# Backup files
+*.bak
+*.backup
+
+# Tufup auto-update
+.tufup-repo-config
+keys/
+
+# Vendored projects
+Saber-Translator-2.5.1/
+
+# Temp files
+desktop-ui/temp/
+
+# User-specified ignores
+14_translations.json
+19_translations.json
+desktop-ui/user_data/
+manga-image-translator-main/
+PaddleOCR-main/
+X-AnyLabeling-main/
+
+# Ignore temporary clone check directory
+temp_clone_check/
+
+# User-requested ignores
+.gitignore11
+.qoderignore
+.vscode/
+models/ocr/ocr-ctc.ckpt
+高质量翻译实现文档.md
+dict/high_quality_translation_prompt.txt
+dict/wyxxl.json
+03.png
+03_translations.json
+123.txt
+gemini_key_validator.py
+gemini_key_validator_ui.py30cadb668d2efc5c432fd2939130df0d_translations.json 
+新建文件夹/
+manga-translator-ui-1.5.1/
+manga-translator-ui-1.7.6/
+BallonsTranslator-dev/*
+# Added by Gemini to ignore untracked files
+.cunzhi-memory/
+logs/
+*_translations.json
+*.png
+temp_requirements.txt
+desktop_qt_ui/mypy.ini
+# Ignore tool-specific caches in desktop_qt_ui
+desktop_qt_ui/.ruff_cache/
+desktop_qt_ui/.claude/
+desktop_qt_ui/.mypy_cache/
+desktop_qt_ui/logs/
+.qoder/
+
+# Ignore user-added images
+4535423.jpg
+profile.svg
+
+# Ignore model files
+models/
+
+# Ignore test files
+test_colorize_only_mode.py
+
+# Ignore temporary files
+123.jpg
+
+# Ignore .kiro directory
+.kiro/
+
+# Ignore .cursor directory
+.cursor/
+
+# Ignore specific font file
+/fonts/字魂白鸽天行体(商用需授权).ttf
+
+# Ignore portable Git (users will download it)
+PortableGit/
+!PortableGit/.gitkeep
+!PortableGit/README.md
+
+# Ignore launch script temp files
+tmp/
+
+# Ignore virtual environment
+venv/
+.venv/
+
+gen_scripts.py
