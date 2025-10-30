@@ -16,6 +16,6 @@ if exist "PortableGit\cmd\git.exe" (
     set PATH=%~dp0PortableGit\cmd;%PATH%
 )
 
-REM 启动 Qt 版本
-python launch.py --ui qt --frozen
+REM 直接启动 Qt 界面
+python desktop_qt_ui\main.py
 pause
