@@ -162,7 +162,7 @@ echo.
 set /p repo_choice="请选择 (1/2/3, 默认1): "
 
 if "%repo_choice%"=="2" (
-    set REPO_URL=https://mirror.ghproxy.com/https://github.com/hgmzhn/manga-translator-ui.git
+    set REPO_URL=https://gh-proxy.com/https://github.com/hgmzhn/manga-translator-ui.git
     echo 使用: GHProxy镜像
 ) else if "%repo_choice%"=="3" (
     set /p REPO_URL="请输入仓库地址: "
@@ -201,23 +201,23 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo 正在复制文件到当前目录...
-REM 复制所有文件和文件夹(除了bat脚本自身和PortableGit)
-xcopy "%TEMP_DIR%\*" . /E /H /Y /EXCLUDE:bat_exclude.txt >nul 2>&1
-if not %ERRORLEVEL%==0 (
-    REM 如果exclude文件不存在,直接复制所有
-    for /d %%i in ("%TEMP_DIR%\*") do (
-        if /i not "%%~nxi"=="PortableGit" xcopy "%%i" "%%~nxi\" /E /H /Y >nul
-    )
-    for %%i in ("%TEMP_DIR%\*") do (
-        if /i not "%%~nxi"=="步骤1-首次安装.bat" (
-            if /i not "%%~nxi"=="步骤2-启动Qt界面.bat" (
-                if /i not "%%~nxi"=="步骤3-更新维护.bat" (
-                    copy "%%i" . >nul
-                )
-            )
-        )
+REM 先复制所有文件夹
+for /d %%i in ("%TEMP_DIR%\*") do (
+    if /i not "%%~nxi"=="PortableGit" (
+        xcopy "%%i" "%%~nxi\" /E /H /Y /I /Q >nul 2>&1
     )
 )
+
+REM 再复制所有文件(只跳过当前安装脚本)
+for %%i in ("%TEMP_DIR%\*") do (
+    if /i not "%%~nxi"=="步骤1-首次安装.bat" (
+        copy /Y "%%i" . >nul 2>&1
+    )
+)
+
+REM 复制隐藏文件(.git等)
+if exist "%TEMP_DIR%\.git\" xcopy "%TEMP_DIR%\.git" ".git\" /E /H /Y /I /Q >nul 2>&1
+if exist "%TEMP_DIR%\.gitignore" copy /Y "%TEMP_DIR%\.gitignore" . >nul 2>&1
 
 echo 正在清理临时目录...
 rmdir /s /q "%TEMP_DIR%"
