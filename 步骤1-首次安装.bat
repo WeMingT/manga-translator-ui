@@ -183,44 +183,91 @@ echo 正在克隆代码到临时目录... (可能需要几分钟)
 echo.
 %GIT% clone %REPO_URL% %TEMP_DIR%
 
-if %ERRORLEVEL% neq 0 (
-    echo.
-    echo [ERROR] 克隆失败
-    echo.
-    echo 可能原因:
-    echo 1. 网络连接问题
-    echo 2. 仓库地址错误
-    echo 3. GitHub访问受限 (请选择GHProxy镜像重试)
-    echo.
-    if exist "%TEMP_DIR%" rmdir /s /q "%TEMP_DIR%"
-    set /p retry="是否重试? (y/n): "
-    if /i "!retry!"=="y" goto :clone_repo
-    pause
-    exit /b 1
+echo.
+echo [DEBUG] 检查克隆结果...
+echo [DEBUG] 临时目录: %TEMP_DIR%
+echo [DEBUG] 完整路径: %CD%\%TEMP_DIR%
+if exist "%TEMP_DIR%" (
+    echo [DEBUG] 临时目录存在
+    if exist "%TEMP_DIR%\.git" (
+        echo [DEBUG] .git 目录存在 - 克隆成功!
+        goto :copy_files
+    ) else (
+        echo [DEBUG] .git 目录不存在 - 克隆失败!
+    )
+) else (
+    echo [DEBUG] 临时目录不存在 - 克隆失败!
+)
+
+REM 如果到这里说明克隆失败
+echo.
+echo [ERROR] 克隆失败
+echo.
+echo 可能原因:
+echo 1. 网络连接问题
+echo 2. 仓库地址错误
+echo 3. GitHub访问受限 (请选择GHProxy镜像重试)
+echo.
+if exist "%TEMP_DIR%" rmdir /s /q "%TEMP_DIR%"
+set /p retry="是否重试? (y/n): "
+if /i "!retry!"=="y" goto :clone_repo
+pause
+exit /b 1
+
+:copy_files
+
+echo.
+echo [DEBUG] 开始复制文件...
+echo [DEBUG] 临时目录: %TEMP_DIR%
+echo [DEBUG] 当前目录: %CD%
+echo.
+
+echo 正在复制目录...
+for /d %%i in ("%TEMP_DIR%\*") do (
+    if /i not "%%~nxi"=="PortableGit" (
+        echo [DEBUG] 复制目录: %%~nxi
+        xcopy "%%i" "%%~nxi\" /E /H /Y /I /Q
+        if !ERRORLEVEL! neq 0 echo [ERROR] 复制目录失败: %%~nxi (错误码: !ERRORLEVEL!)
+    )
 )
 
 echo.
-echo 正在复制文件到当前目录...
-REM 先复制所有文件夹
-for /d %%i in ("%TEMP_DIR%\*") do (
-    if /i not "%%~nxi"=="PortableGit" (
-        xcopy "%%i" "%%~nxi\" /E /H /Y /I /Q >nul 2>&1
-    )
-)
-
-REM 再复制所有文件(只跳过当前安装脚本)
+echo 正在复制文件...
 for %%i in ("%TEMP_DIR%\*") do (
     if /i not "%%~nxi"=="步骤1-首次安装.bat" (
-        copy /Y "%%i" . >nul 2>&1
+        echo [DEBUG] 复制文件: %%~nxi
+        copy /Y "%%i" .
+        if !ERRORLEVEL! neq 0 echo [ERROR] 复制文件失败: %%~nxi (错误码: !ERRORLEVEL!)
     )
 )
 
-REM 复制隐藏文件(.git等)
-if exist "%TEMP_DIR%\.git\" xcopy "%TEMP_DIR%\.git" ".git\" /E /H /Y /I /Q >nul 2>&1
-if exist "%TEMP_DIR%\.gitignore" copy /Y "%TEMP_DIR%\.gitignore" . >nul 2>&1
+echo.
+echo 正在复制隐藏文件...
+if exist "%TEMP_DIR%\.git\" (
+    echo [DEBUG] 复制 .git 目录...
+    xcopy "%TEMP_DIR%\.git" ".git\" /E /H /Y /I /Q
+    if !ERRORLEVEL! neq 0 echo [ERROR] 复制.git失败 (错误码: !ERRORLEVEL!)
+) else (
+    echo [DEBUG] .git 目录不存在
+)
 
+if exist "%TEMP_DIR%\.gitignore" (
+    echo [DEBUG] 复制 .gitignore 文件...
+    copy /Y "%TEMP_DIR%\.gitignore" .
+    if !ERRORLEVEL! neq 0 echo [ERROR] 复制.gitignore失败 (错误码: !ERRORLEVEL!)
+) else (
+    echo [DEBUG] .gitignore 文件不存在
+)
+
+echo.
+echo [DEBUG] 复制完成，准备清理临时目录...
 echo 正在清理临时目录...
 rmdir /s /q "%TEMP_DIR%"
+if !ERRORLEVEL! neq 0 (
+    echo [ERROR] 清理临时目录失败 (错误码: !ERRORLEVEL!)
+) else (
+    echo [DEBUG] 临时目录已清理
+)
 
 echo.
 echo [OK] 代码克隆完成
@@ -256,7 +303,7 @@ echo 正在检测 GPU 支持...
 echo.
 
 REM 调用项目的 launch.py 进行依赖安装
-python launch.py --frozen
+python launch.py --install-deps-only
 
 if %ERRORLEVEL% neq 0 (
     echo.
