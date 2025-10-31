@@ -44,52 +44,14 @@ if exist "PortableGit\cmd\git.exe" (
     )
 )
 
-REM 检查版本信息 (在菜单显示前)
+REM 检查版本信息 (在菜单显示前) - 使用Python脚本
 :check_version
 echo.
 echo 正在检查版本...
 echo ========================================
 
-REM 获取当前版本
-if exist "packaging\VERSION" (
-    set /p CURRENT_VERSION=<packaging\VERSION
-    echo 当前版本: !CURRENT_VERSION!
-) else (
-    echo 当前版本: 未知
-    set CURRENT_VERSION=unknown
-)
-
-echo.
-echo 正在检查远程版本...
-%GIT% fetch origin >nul 2>&1
-
-REM 获取远程版本
-%GIT% show origin/main:packaging/VERSION > tmp_version.txt 2>nul
-if exist "tmp_version.txt" (
-    set /p REMOTE_VERSION=<tmp_version.txt
-    del tmp_version.txt
-    echo 远程版本: !REMOTE_VERSION!
-) else (
-    echo 远程版本: 无法获取
-    set REMOTE_VERSION=unknown
-)
-
-echo.
-REM 检查是否有更新
-if "!CURRENT_VERSION!"=="!REMOTE_VERSION!" (
-    echo [信息] 当前已是最新版本
-) else (
-    if "!REMOTE_VERSION!"=="unknown" (
-        echo [警告] 无法获取远程版本信息,可能网络问题
-    ) else (
-        echo [发现新版本]
-        echo.
-        echo 最新更新内容 (最近10条):
-        echo ----------------------------------------
-        %GIT% log HEAD..origin/main --oneline --decorate --no-color -10 2>nul
-        echo ----------------------------------------
-    )
-)
+REM 使用Python脚本检查版本（避免批处理冒号问题）
+python packaging\check_version.py
 
 echo.
 echo ========================================
@@ -143,8 +105,8 @@ if not defined REMOTE_VERSION (
     set REMOTE_VERSION=unknown
 )
 
-echo 当前版本: !CURRENT_VERSION!
-echo 远程版本: !REMOTE_VERSION!
+echo 当前版本 - !CURRENT_VERSION!
+echo 远程版本 - !REMOTE_VERSION!
 echo.
 
 if "!CURRENT_VERSION!"=="!REMOTE_VERSION!" (
@@ -171,7 +133,7 @@ if %ERRORLEVEL% == 0 (
     echo [OK] 代码更新完成
     if exist "packaging\VERSION" (
         set /p NEW_VERSION=<packaging\VERSION
-        echo 更新后版本: !NEW_VERSION!
+        echo 更新后版本 - !NEW_VERSION!
     )
 ) else (
     echo [ERROR] 代码更新失败
@@ -186,7 +148,7 @@ echo 更新/安装依赖
 echo ========================================
 echo.
 
-python launch.py --install-deps-only
+python packaging\launch.py --install-deps-only
 
 if %ERRORLEVEL% == 0 (
     echo [OK] 依赖更新完成
@@ -228,7 +190,7 @@ echo [OK] 代码更新完成
 
 echo.
 echo [2/2] 更新依赖...
-python launch.py --install-deps-only
+python packaging\launch.py --install-deps-only
 
 if %ERRORLEVEL% == 0 (
     echo.

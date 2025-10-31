@@ -19,7 +19,7 @@ PYTHON_VERSION_MIN = (3, 12)
 PYTHON_VERSION_MAX = (3, 12)  # 仅支持Python 3.12,不支持3.13+
 
 # 路径配置
-PATH_ROOT = Path(__file__).parent
+PATH_ROOT = Path(__file__).parent.parent
 stored_commit_hash = None
 
 # 获取环境变量
@@ -348,8 +348,8 @@ def main():
     print(f'Python路径: {sys.executable}')
     print('=' * 60)
 
-    # 切换到脚本目录
-    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+    # 切换到项目根目录 (launch.py 在 packaging/ 下,需要切换到父目录)
+    APP_DIR = PATH_ROOT
     os.chdir(APP_DIR)
 
     # 更新检查

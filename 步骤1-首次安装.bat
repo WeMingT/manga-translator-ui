@@ -115,8 +115,8 @@ if "%git_source%"=="1" (
     set GIT_URL=https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
     echo 使用: GitHub 官方源
 ) else (
-    set GIT_URL=https://gitproxy.click/https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
-    echo 使用: gitproxy.click 镜像
+    set GIT_URL=https://cdn.gh-proxy.com/https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
+    echo 使用: cdn.gh-proxy.com 镜像
 )
 
 echo.
@@ -152,6 +152,60 @@ echo.
 echo [3/5] 检查代码仓库...
 echo ========================================
 echo.
+
+REM 检查是否从压缩包解压（有代码但没有.git）
+if not exist ".git" (
+    if exist "manga_translator" if exist "desktop_qt_ui" if exist "packaging\VERSION" (
+        echo [INFO] 检测到从压缩包解压的代码文件
+        echo.
+        echo 请选择:
+        echo [1] 跳过Git配置,直接安装依赖（无法使用步骤4更新）
+        echo [2] 初始化Git仓库并关联远程（可使用步骤4更新）
+        echo [3] 退出
+        echo.
+        set /p zip_choice="请选择 (1/2/3, 默认2): "
+        
+        if "!zip_choice!"=="3" (
+            exit /b 0
+        ) else if "!zip_choice!"=="1" (
+            echo [OK] 跳过Git配置,直接使用现有代码
+            echo.
+            goto :create_venv
+        ) else (
+            echo [INFO] 正在初始化Git仓库...
+            git init
+            if !ERRORLEVEL! neq 0 (
+                echo [ERROR] Git初始化失败
+                pause
+                exit /b 1
+            )
+            REM 获取目标仓库地址
+            call :get_repo_url
+            echo.
+            echo 正在添加远程仓库...
+            git remote add origin !REPO_URL!
+            if !ERRORLEVEL! neq 0 (
+                echo [ERROR] 添加远程仓库失败
+                pause
+                exit /b 1
+            )
+            echo.
+            echo 正在获取远程分支...
+            git fetch origin
+            if !ERRORLEVEL! neq 0 (
+                echo [WARNING] 获取远程分支失败，可能是网络问题
+                echo [INFO] 将跳过Git配置，直接使用现有代码
+                echo.
+                goto :create_venv
+            )
+            echo.
+            echo [OK] Git仓库初始化完成
+            echo [INFO] 可以使用步骤4进行更新
+            echo.
+            goto :create_venv
+        )
+    )
+)
 
 REM 先获取目标仓库地址
 call :get_repo_url
@@ -268,21 +322,21 @@ goto :do_clone
 
 :get_repo_url
 echo 请选择克隆源:
-echo [1] GitHub 官方
-echo [2] gitproxy.click 镜像 (国内快)
+echo [1] GitHub 官方 (国外推荐)
+echo [2] cdn.gh-proxy.com 镜像 (国内推荐)
 echo [3] 手动输入仓库地址
 echo.
-set /p repo_choice="请选择 (1/2/3, 默认1): "
+set /p repo_choice="请选择 (1/2/3, 默认2): "
 
-if "%repo_choice%"=="2" (
-    set REPO_URL=https://gitproxy.click/https://github.com/hgmzhn/manga-translator-ui.git
-    echo 使用: gitproxy.click镜像
+if "%repo_choice%"=="1" (
+    set REPO_URL=https://github.com/hgmzhn/manga-translator-ui.git
+    echo 使用: GitHub官方
 ) else if "%repo_choice%"=="3" (
     set /p REPO_URL="请输入仓库地址: "
     echo 使用: 自定义地址
 ) else (
-    set REPO_URL=https://github.com/hgmzhn/manga-translator-ui.git
-    echo 使用: GitHub官方
+    set REPO_URL=https://cdn.gh-proxy.com/https://github.com/hgmzhn/manga-translator-ui.git
+    echo 使用: cdn.gh-proxy.com镜像
 )
 echo.
 goto :eof
@@ -445,7 +499,7 @@ echo 正在检测 GPU 支持...
 echo.
 
 REM 调用项目的 launch.py 进行依赖安装
-python launch.py --install-deps-only
+python packaging\launch.py --install-deps-only
 
 if %ERRORLEVEL% neq 0 (
     echo.
