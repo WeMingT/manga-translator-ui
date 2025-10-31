@@ -35,39 +35,8 @@ if exist "PortableGit\cmd\git.exe" (
     )
 )
 
-REM 快速检查版本（不停顿）
-if exist "packaging\VERSION" (
-    set /p CURRENT_VERSION=<packaging\VERSION
-) else (
-    set CURRENT_VERSION=unknown
-)
-
-REM 静默检查远程版本
-%GIT% fetch origin >nul 2>&1
-%GIT% show origin/main:packaging/VERSION > tmp_version.txt 2>nul
-if exist "tmp_version.txt" (
-    set /p REMOTE_VERSION=<tmp_version.txt
-    del tmp_version.txt
-) else (
-    set REMOTE_VERSION=unknown
-)
-
-REM 显示版本信息（不停顿）
-echo.
-echo ========================================
-echo 漫画翻译器 - 启动中
-echo ========================================
-echo 当前版本: !CURRENT_VERSION!
-
-if not "!REMOTE_VERSION!"=="unknown" (
-    if not "!CURRENT_VERSION!"=="!REMOTE_VERSION!" (
-        echo 远程版本: !REMOTE_VERSION!
-        echo.
-        echo [提示] 发现新版本可用！
-        echo 请运行 步骤4-更新维护.bat 进行更新
-        echo.
-    )
-)
+REM 使用Python脚本快速检查版本（避免批处理冒号问题）
+python packaging\check_version.py --brief 2>nul
 
 :skip_version_check
 REM 切换到项目根目录
