@@ -104,7 +104,7 @@ echo 正在下载 Git 便携版...
 echo.
 echo 请选择下载源:
 echo [1] GitHub 官方
-echo [2] gitproxy.click 镜像 (国内快)
+echo [2] gh-proxy.com 镜像 (国内推荐)
 echo.
 set /p git_source="请选择 (1/2, 默认2): "
 
@@ -115,8 +115,8 @@ if "%git_source%"=="1" (
     set GIT_URL=https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
     echo 使用: GitHub 官方源
 ) else (
-    set GIT_URL=https://cdn.gh-proxy.com/https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
-    echo 使用: cdn.gh-proxy.com 镜像
+    set GIT_URL=https://gh-proxy.com/https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe
+    echo 使用: gh-proxy.com 镜像
 )
 
 echo.
@@ -222,10 +222,21 @@ if exist ".git" (
         echo 目标仓库: !REPO_URL!
         echo.
         
-        REM 标准化仓库地址进行比较
+        REM 标准化仓库地址进行比较（去除.git后缀和所有镜像前缀）
         set CURRENT_CLEAN=!CURRENT_REPO:.git=!
         set TARGET_CLEAN=!REPO_URL:.git=!
+        
+        REM 移除常见镜像前缀，统一标准化为 github.com 地址
+        set CURRENT_CLEAN=!CURRENT_CLEAN:https://gh-proxy.com/https://github.com/=https://github.com/!
+        set CURRENT_CLEAN=!CURRENT_CLEAN:https://ghproxy.com/https://github.com/=https://github.com/!
+        set CURRENT_CLEAN=!CURRENT_CLEAN:https://mirror.ghproxy.com/https://github.com/=https://github.com/!
+        set CURRENT_CLEAN=!CURRENT_CLEAN:https://ghfast.top/https://github.com/=https://github.com/!
         set CURRENT_CLEAN=!CURRENT_CLEAN:https://gitproxy.click/https://github.com/=https://github.com/!
+        
+        set TARGET_CLEAN=!TARGET_CLEAN:https://gh-proxy.com/https://github.com/=https://github.com/!
+        set TARGET_CLEAN=!TARGET_CLEAN:https://ghproxy.com/https://github.com/=https://github.com/!
+        set TARGET_CLEAN=!TARGET_CLEAN:https://mirror.ghproxy.com/https://github.com/=https://github.com/!
+        set TARGET_CLEAN=!TARGET_CLEAN:https://ghfast.top/https://github.com/=https://github.com/!
         set TARGET_CLEAN=!TARGET_CLEAN:https://gitproxy.click/https://github.com/=https://github.com/!
         
         if "!CURRENT_CLEAN!"=="!TARGET_CLEAN!" (
@@ -323,7 +334,7 @@ goto :do_clone
 :get_repo_url
 echo 请选择克隆源:
 echo [1] GitHub 官方 (国外推荐)
-echo [2] cdn.gh-proxy.com 镜像 (国内推荐)
+echo [2] gh-proxy.com 镜像 (国内推荐)
 echo [3] 手动输入仓库地址
 echo.
 set /p repo_choice="请选择 (1/2/3, 默认2): "
@@ -335,8 +346,8 @@ if "%repo_choice%"=="1" (
     set /p REPO_URL="请输入仓库地址: "
     echo 使用: 自定义地址
 ) else (
-    set REPO_URL=https://cdn.gh-proxy.com/https://github.com/hgmzhn/manga-translator-ui.git
-    echo 使用: cdn.gh-proxy.com镜像
+    set REPO_URL=https://gh-proxy.com/https://github.com/hgmzhn/manga-translator-ui.git
+    echo 使用: gh-proxy.com镜像
 )
 echo.
 goto :eof
