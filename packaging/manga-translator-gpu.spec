@@ -3,19 +3,37 @@ from PyInstaller.utils.hooks import collect_data_files, collect_all, get_package
 import os
 
 # Collect data files dynamically instead of using a hardcoded path
-py3langid_datas = collect_data_files('py3langid')
-unidic_datas = collect_data_files('unidic_lite')
-manga_ocr_datas = collect_data_files('manga_ocr')  # 收集manga_ocr的数据文件（包括example.jpg）
+# Use try-except to handle cases where packages might not be found
+try:
+    py3langid_datas = collect_data_files('py3langid')
+except Exception:
+    py3langid_datas = []
+
+try:
+    unidic_datas = collect_data_files('unidic_lite')
+except Exception:
+    unidic_datas = []
+
+try:
+    manga_ocr_datas = collect_data_files('manga_ocr')
+except Exception:
+    manga_ocr_datas = []
 
 # 使用collect_all自动收集onnxruntime的所有内容
-onnx_datas, onnx_binaries, onnx_hiddenimports = collect_all('onnxruntime')
+try:
+    onnx_datas, onnx_binaries, onnx_hiddenimports = collect_all('onnxruntime')
+except Exception:
+    onnx_datas, onnx_binaries, onnx_hiddenimports = [], [], []
 
 # 同时将onnxruntime的核心DLL也复制到根目录
-onnxruntime_pkg_base, onnxruntime_pkg_dir = get_package_paths('onnxruntime')
-onnx_binaries.extend([
-    (os.path.join(onnxruntime_pkg_dir, 'capi', 'onnxruntime.dll'), '.'),
-    (os.path.join(onnxruntime_pkg_dir, 'capi', 'onnxruntime_providers_shared.dll'), '.'),
-])
+try:
+    onnxruntime_pkg_base, onnxruntime_pkg_dir = get_package_paths('onnxruntime')
+    onnx_binaries.extend([
+        (os.path.join(onnxruntime_pkg_dir, 'capi', 'onnxruntime.dll'), '.'),
+        (os.path.join(onnxruntime_pkg_dir, 'capi', 'onnxruntime_providers_shared.dll'), '.'),
+    ])
+except Exception:
+    pass
 
 a = Analysis(
     ['../desktop_qt_ui/main.py'],  # 相对于packaging目录
