@@ -301,7 +301,7 @@ class MainAppLogic(QObject):
             return False
 
     def update_single_config(self, full_key: str, value: Any):
-        self.logger.info(f"--- DIAGNOSTIC_KEY: update_single_config called with key: '{full_key}', value: '{value}'")
+        self.logger.debug(f"update_single_config: '{full_key}' = '{value}'")
         try:
             config_obj = self.config_service.get_config()
             keys = full_key.split('.')
@@ -311,16 +311,16 @@ class MainAppLogic(QObject):
             setattr(parent_obj, keys[-1], value)
             self.config_service.set_config(config_obj)
             self.config_service.save_config_file()
-            self.logger.info(f"Saved '{full_key}' = '{value}' to config.")
+            self.logger.debug(f"配置已保存: '{full_key}' = '{value}'")
 
             # 当翻译器设置被更改时，直接更新翻译服务的内部状态
             if full_key == 'translator.translator':
-                self.logger.info(f"Translator has been changed to '{value}'. Updating translation service state.")
+                self.logger.debug(f"翻译器已切换: '{value}'")
                 self.translation_service.set_translator(value)
 
             # 当渲染设置被更改时，通知编辑器刷新
             if full_key.startswith('render.'):
-                self.logger.info(f"Render setting '{full_key}' changed. Emitting signal.")
+                self.logger.debug(f"渲染设置已更改: '{full_key}'")
                 self.render_setting_changed.emit()
 
         except Exception as e:
