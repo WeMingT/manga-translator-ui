@@ -148,7 +148,21 @@ echo 更新/安装依赖
 echo ========================================
 echo.
 
-python packaging\launch.py --install-deps-only
+REM 检测当前环境的 PyTorch 类型
+echo 正在检测 PyTorch 版本类型...
+python packaging\detect_torch_type.py >nul 2>&1
+if %ERRORLEVEL% == 0 (
+    REM 检测成功,获取对应的 requirements 文件
+    for /f "delims=" %%i in ('python packaging\detect_torch_type.py --file-only') do set REQ_FILE=%%i
+    echo 检测到 PyTorch 类型,使用: !REQ_FILE!
+    echo.
+    python packaging\launch.py --install-deps-only --requirements !REQ_FILE!
+) else (
+    REM 检测失败(未安装PyTorch),让 launch.py 自动选择
+    echo 未检测到 PyTorch,将进行首次安装...
+    echo.
+    python packaging\launch.py --install-deps-only
+)
 
 if %ERRORLEVEL% == 0 (
     echo [OK] 依赖更新完成
@@ -190,7 +204,22 @@ echo [OK] 代码更新完成
 
 echo.
 echo [2/2] 更新依赖...
-python packaging\launch.py --install-deps-only
+
+REM 检测当前环境的 PyTorch 类型
+echo 正在检测 PyTorch 版本类型...
+python packaging\detect_torch_type.py >nul 2>&1
+if %ERRORLEVEL% == 0 (
+    REM 检测成功,获取对应的 requirements 文件
+    for /f "delims=" %%i in ('python packaging\detect_torch_type.py --file-only') do set REQ_FILE=%%i
+    echo 检测到 PyTorch 类型,使用: !REQ_FILE!
+    echo.
+    python packaging\launch.py --install-deps-only --requirements !REQ_FILE!
+) else (
+    REM 检测失败(未安装PyTorch),让 launch.py 自动选择
+    echo 未检测到 PyTorch,将进行首次安装...
+    echo.
+    python packaging\launch.py --install-deps-only
+)
 
 if %ERRORLEVEL% == 0 (
     echo.

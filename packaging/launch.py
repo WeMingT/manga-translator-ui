@@ -147,6 +147,33 @@ def detect_gpu():
     return "CPU"
 
 
+def detect_installed_pytorch_version():
+    """检测当前安装的PyTorch版本类型(CPU/GPU)"""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            # 检查CUDA版本
+            cuda_version = torch.version.cuda
+            if cuda_version:
+                return "GPU", f"CUDA {cuda_version}"
+        return "CPU", "CPU-only"
+    except (ImportError, AttributeError):
+        return None, "未安装"
+
+
+def get_requirements_file_from_env():
+    """从当前虚拟环境检测应该使用哪个requirements文件"""
+    pytorch_type, detail = detect_installed_pytorch_version()
+    
+    if pytorch_type == "GPU":
+        return 'requirements_gpu.txt', pytorch_type, detail
+    elif pytorch_type == "CPU":
+        return 'requirements_cpu.txt', pytorch_type, detail
+    else:
+        # 未安装PyTorch,返回None让后续逻辑自动检测
+        return None, None, detail
+
+
 def prepare_environment(args):
     """准备运行环境"""
     
@@ -238,21 +265,13 @@ def prepare_environment(args):
             print(f'自动选择: {requirements_file}')
     
     # 选择对应的PyTorch版本 (根据requirements_gpu.txt中的版本)
-    if requirements_file == 'requirements_gpu.txt' and gpu_type == "NVIDIA":
-        # 读取requirements文件获取实际的CUDA版本
-        torch_command = os.environ.get('TORCH_COMMAND',
-                                      "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu129")
-    else:
-        # AMD/CPU 都使用CPU版本的PyTorch
-        torch_command = os.environ.get('TORCH_COMMAND',
-                                      "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu")
-        if gpu_type == "AMD":
-            print('提示: AMD GPU在Windows上PyTorch支持有限,使用CPU版本')
-
-    # 安装PyTorch
-    if args.reinstall_torch or not is_installed("torch") or not is_installed("torchvision"):
-        print(f'正在为 {gpu_type} 安装 PyTorch...')
-        run(f'"{python}" -m {torch_command}', "安装 PyTorch", "无法安装 PyTorch", live=True)
+    # 注意: 不再单独安装 PyTorch，而是通过 requirements 文件统一安装
+    # 这样可以避免版本冲突和 DLL 损坏问题
+    
+    # 如果用户明确要求重装 PyTorch，先卸载
+    if args.reinstall_torch:
+        print('正在卸载现有的 PyTorch...')
+        run(f'"{python}" -m pip uninstall torch torchvision torchaudio -y', "卸载 PyTorch", "无法卸载 PyTorch", live=True)
 
     # 检查并安装其他依赖
     if not os.path.exists(requirements_file):
@@ -260,8 +279,11 @@ def prepare_environment(args):
         return
 
     print(f'正在检查依赖: {requirements_file}')
-    if not check_req_file(requirements_file):
-        print(f'发现缺失依赖,正在安装...')
+    if not check_req_file(requirements_file) or args.reinstall_torch:
+        if args.reinstall_torch:
+            print(f'强制重新安装所有依赖...')
+        else:
+            print(f'发现缺失依赖,正在安装...')
         run_pip(f"install -r {requirements_file}", f"{requirements_file} 中的依赖")
     else:
         print(f'依赖已满足 ✓')
