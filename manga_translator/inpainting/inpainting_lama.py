@@ -21,16 +21,137 @@ class LamaInpainter(LamaMPEInpainter):
             'hash': '',
             'file': '.',
         },
+        'onnx': {
+            'url': 'https://github.com/frederik-uni/manga-image-translator-rust/releases/download/lama_mpe/model.onnx',
+            'hash': '4c372fdbb974d9b6ccce7a91eaa3aef65c68bf2178e9671a50f65b6eae590a66',
+            'file': 'lamampe.onnx',
+        },
     }
+    
+    def _check_downloaded_map(self, map_key: str) -> bool:
+        """如果ONNX模型存在，跳过PyTorch模型检查"""
+        onnx_path = self._get_file_path('lamampe.onnx')
+        if os.path.isfile(onnx_path):
+            return True  # ONNX存在，不检查.ckpt
+        return super()._check_downloaded_map(map_key)
 
     async def _load(self, device: str):
+        self.device = device
+        
+        # ✅ CPU模式使用ONNX（解决虚拟内存泄漏）
+        if not device.startswith('cuda') and device != 'mps':
+            try:
+                import onnxruntime as ort
+                onnx_path = self._get_file_path('lamampe.onnx')
+                self.logger.info(f'使用ONNX模型（CPU优化，default模型）: {onnx_path}')
+                
+                # 🔧 内存优化配置
+                sess_options = ort.SessionOptions()
+                sess_options.enable_mem_pattern = False  # 禁用内存模式优化
+                sess_options.enable_cpu_mem_arena = False  # 禁用CPU内存池，按需分配
+                
+                self.session = ort.InferenceSession(
+                    onnx_path,
+                    sess_options=sess_options,
+                    providers=['CPUExecutionProvider']
+                )
+                self.backend = 'onnx'
+                self.logger.info(f'ONNX Runtime版本: {ort.__version__}（内存优化模式）')
+                return
+            except Exception as e:
+                self.logger.warning(f'ONNX加载失败，回退到PyTorch: {e}')
+        
+        # ✅ GPU模式或ONNX失败时使用PyTorch
         model = get_generator()
         sd = torch.load(self._get_file_path('inpainting_lama.ckpt'), map_location='cpu')
         model.load_state_dict(sd['model'] if 'model' in sd else sd)
+        self.model = model
         self.model.eval()
-        self.device = device
+        self.backend = 'torch'
         if device.startswith('cuda') or device == 'mps':
             self.model.to(device)
+    
+    async def _unload(self):
+        if hasattr(self, 'backend'):
+            if self.backend == 'onnx':
+                del self.session
+            elif self.backend == 'torch':
+                del self.model
+        elif hasattr(self, 'model'):
+            del self.model
+    
+    async def _infer(self, image: np.ndarray, mask: np.ndarray, config, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
+        # ✅ ONNX推理（default模型，2个输入）
+        if hasattr(self, 'backend') and self.backend == 'onnx':
+            return await self._infer_onnx_default(image, mask, inpainting_size, verbose)
+        
+        # ✅ PyTorch推理（调用父类）
+        return await super()._infer(image, mask, config, inpainting_size, verbose)
+    
+    async def _infer_onnx_default(self, image: np.ndarray, mask: np.ndarray, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
+        """ONNX推理方法（default模型，只需image和mask）"""
+        import cv2
+        img_original = np.copy(image)
+        mask_original = np.copy(mask)
+        mask_original[mask_original < 127] = 0
+        mask_original[mask_original >= 127] = 1
+        mask_original = mask_original[:, :, None]
+        
+        height, width, c = image.shape
+        if max(image.shape[0: 2]) > inpainting_size:
+            from ..utils import resize_keep_aspect
+            image = resize_keep_aspect(image, inpainting_size)
+            mask_resized = resize_keep_aspect(mask, inpainting_size)
+            mask_original_resized = resize_keep_aspect(mask_original, inpainting_size)
+        else:
+            mask_resized = mask
+            mask_original_resized = mask_original
+        
+        pad_size = 8
+        h, w, c = image.shape
+        new_h = h if h % pad_size == 0 else (pad_size - (h % pad_size)) + h
+        new_w = w if w % pad_size == 0 else (pad_size - (w % pad_size)) + w
+        
+        # Padding
+        img_pad = np.pad(image, ((0, new_h - h), (0, new_w - w), (0, 0)), mode='symmetric')
+        mask_pad = np.pad(mask_original_resized, ((0, new_h - h), (0, new_w - w), (0, 0)), mode='symmetric')
+        
+        # 准备输入（0-1归一化）
+        img = img_pad.astype(np.float32) / 255.0
+        img = np.transpose(img, (2, 0, 1))[None, ...]  # [1, 3, H, W]
+        
+        mask_input = mask_pad.astype(np.float32)[:, :, 0:1]
+        mask_input = np.transpose(mask_input, (2, 0, 1))[None, ...]  # [1, 1, H, W]
+        
+        # ONNX推理（只需2个输入：image和mask）
+        ort_inputs = {
+            'image': img.astype(np.float32),
+            'mask': mask_input.astype(np.float32)
+        }
+        img_inpainted = self.session.run(None, ort_inputs)[0]
+        
+        # 后处理
+        img_inpainted = np.transpose(img_inpainted[0], (1, 2, 0))  # [H, W, 3]
+        img_inpainted = (img_inpainted * 255.).astype(np.uint8)
+        
+        # Remove padding
+        img_inpainted = img_inpainted[:h, :w, :]
+        
+        # Resize back
+        if max(height, width) > inpainting_size:
+            img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_LINEAR)
+            mask_original_resized = cv2.resize(mask_original_resized, (width, height), interpolation=cv2.INTER_LINEAR)
+            if len(mask_original_resized.shape) == 2:
+                mask_original_resized = mask_original_resized[:, :, None]
+        
+        ans = img_inpainted * mask_original_resized + img_original * (1 - mask_original_resized)
+        
+        # ✅ ONNX内存清理
+        import gc
+        del img, mask_input, ort_inputs, img_inpainted, img_original, mask_original, mask_original_resized
+        gc.collect()
+        
+        return ans
 
 
 class DepthWiseSeparableConv(nn.Module):

@@ -66,20 +66,33 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Download and Extract Models
+    - name: Download and Extract GPU Models
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        echo "Downloading models from release assets..."
+        echo "Downloading GPU models from release assets..."
         gh release download v1.6.0 -p "models.7z"
 
-        echo "Decompressing models..."
-        7z x "models.7z" -o./extracted_models
+        echo "Decompressing GPU models..."
+        7z x "models.7z" -o./extracted_models_gpu
 
-        echo "Replacing models directory..."
-        rm -rf ./models
-        mv ./extracted_models/models ./models
-        echo "Models replaced successfully."
+        echo "Setting up GPU models directory..."
+        rm -rf ./models_gpu
+        mv ./extracted_models_gpu/models ./models_gpu
+        echo "GPU models ready."
+
+    - name: Download and Extract CPU Models
+      run: |
+        echo "Downloading CPU models from v1.7.9..."
+        curl -L -o models_cpu.7z https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.9/models.7z
+
+        echo "Decompressing CPU models..."
+        7z x "models_cpu.7z" -o./extracted_models_cpu
+
+        echo "Setting up CPU models directory..."
+        rm -rf ./models_cpu
+        mv ./extracted_models_cpu/models ./models_cpu
+        echo "CPU models ready."
 
     # - name: Restore Previous TUF Assets
     #   env:
@@ -170,13 +183,13 @@ jobs:
         
         cp -r examples dist/manga-translator-cpu/_internal/
         cp -r fonts dist/manga-translator-cpu/_internal/
-        cp -r models dist/manga-translator-cpu/_internal/
+        cp -r models_cpu dist/manga-translator-cpu/_internal/models
         cp -r dict dist/manga-translator-cpu/_internal/
         cp packaging/VERSION dist/manga-translator-cpu/_internal/
         
         cp -r examples dist/manga-translator-gpu/_internal/
         cp -r fonts dist/manga-translator-gpu/_internal/
-        cp -r models dist/manga-translator-gpu/_internal/
+        cp -r models_gpu dist/manga-translator-gpu/_internal/models
         cp -r dict dist/manga-translator-gpu/_internal/
         cp packaging/VERSION dist/manga-translator-gpu/_internal/
 

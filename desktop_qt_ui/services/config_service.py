@@ -47,27 +47,23 @@ class ConfigService(QObject):
         # Use get_default_config_path() for PyInstaller compatibility
         # Temporarily set a placeholder, will be properly set after initialization
         self.default_config_path = None
+        self.user_config_path = None
 
         self.config_path = None # This will hold the path of a loaded file
         self.current_config: AppSettings = AppSettings()
 
         # Set the correct default config path
         self.default_config_path = self.get_default_config_path()
-        self.logger.info(f"默认配置文件路径: {self.default_config_path}")
-        self.logger.info(f"配置文件是否存在: {os.path.exists(self.default_config_path)}")
+        self.user_config_path = self.get_user_config_path()
+        self.logger.debug(f"默认配置: {os.path.basename(self.default_config_path)}")
+        self.logger.debug(f"用户配置: {os.path.basename(self.user_config_path)}")
+        self.logger.debug(f"默认配置存在: {os.path.exists(self.default_config_path)}")
+        self.logger.debug(f"用户配置存在: {os.path.exists(self.user_config_path)}")
         if hasattr(sys, '_MEIPASS'):
-            self.logger.info(f"打包环境，sys._MEIPASS = {sys._MEIPASS}")
+            self.logger.debug(f"打包环境，sys._MEIPASS = {sys._MEIPASS}")
 
-        # Try to load the default config on startup
-        if os.path.exists(self.default_config_path):
-            self.logger.info(f"正在加载配置文件: {self.default_config_path}")
-            success = self.load_config_file(self.default_config_path)
-            if success:
-                self.logger.info("配置文件加载成功")
-            else:
-                self.logger.error("配置文件加载失败")
-        else:
-            self.logger.warning(f"Default config file not found at: {self.default_config_path}")
+        # 加载配置：优先级 用户配置 > 默认配置 > 代码默认值
+        self._load_configs_with_priority()
         
         self._translator_configs = None
         self._env_cache = None
@@ -159,7 +155,7 @@ class ConfigService(QObject):
             self.current_config = AppSettings.parse_obj(new_config_dict)
             
             self.config_path = config_path
-            self.logger.info(f"成功加载配置文件: {config_path}")
+            self.logger.debug(f"加载配置: {os.path.basename(config_path)}")
             self.config_changed.emit(self.current_config.dict())
             return True
             
@@ -168,21 +164,58 @@ class ConfigService(QObject):
             return False
     
     def save_config_file(self, config_path: Optional[str] = None) -> bool:
-        """保存JSON配置文件"""
+        """
+        保存JSON配置文件
+        默认同时保存到用户配置和模板配置
+        - 模板配置：临时UI状态强制设为默认值
+        - 用户配置：包含所有配置（保留实际值）
+        """
         try:
-            save_path = config_path or self.config_path or self.default_config_path
-            if not save_path:
-                self.logger.error("没有指定保存路径，且无默认路径")
-                return False
-                
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            if config_path:
+                # 如果指定了路径，只保存到指定路径
+                save_paths = [config_path]
+            else:
+                # 默认同时保存到两个文件
+                save_paths = [self.user_config_path, self.default_config_path]
             
-            with open(save_path, 'w', encoding='utf-8') as f:
-                json.dump(self.current_config.dict(), f, indent=2, ensure_ascii=False)
+            success_count = 0
+            for save_path in save_paths:
+                if not save_path:
+                    continue
                 
-            self.config_path = save_path
-            self.logger.info(f"成功保存配置文件: {save_path}")
-            return True
+                # 获取当前配置
+                config_dict = self.current_config.dict()
+                
+                # 只有保存到模板配置时才重置临时状态
+                is_default_config = save_path == self.default_config_path
+                if is_default_config:
+                    # 重置临时UI状态为默认值
+                    if 'app' not in config_dict:
+                        config_dict['app'] = {}
+                    config_dict['app']['last_open_dir'] = '.'
+                    config_dict['app']['last_output_path'] = ''
+                    
+                    if 'cli' in config_dict:
+                        config_dict['cli']['verbose'] = False
+                
+                try:
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    
+                    with open(save_path, 'w', encoding='utf-8') as f:
+                        json.dump(config_dict, f, indent=2, ensure_ascii=False)
+                    
+                    filename = os.path.basename(save_path)
+                    self.logger.debug(f"保存配置: {filename}")
+                    success_count += 1
+                except Exception as e:
+                    self.logger.error(f"保存配置失败 ({os.path.basename(save_path)}): {e}")
+            
+            if success_count > 0:
+                self.config_path = self.user_config_path
+                return True
+            else:
+                self.logger.error("所有配置文件保存失败")
+                return False
             
         except Exception as e:
             self.logger.error(f"保存配置文件失败: {e}")
@@ -202,10 +235,8 @@ class ConfigService(QObject):
         # 2. 重新创建 AppSettings 对象 (用于UI设置)
         self.current_config = AppSettings()
 
-        # 3. 在新创建的 AppSettings 对象之上，重新应用 JSON 配置文件中的设置
-        config_file_to_load = self.config_path or self.default_config_path
-        if config_file_to_load and os.path.exists(config_file_to_load):
-            self.load_config_file(config_file_to_load)
+        # 3. 按优先级重新加载配置文件
+        self._load_configs_with_priority()
 
         # 4. 通知所有监听者配置已更改
         self.config_changed.emit(self.current_config.dict())
@@ -216,7 +247,7 @@ class ConfigService(QObject):
         强制从当前设置的 config_path 重新加载配置, 并通知所有监听者。
         """
         if self.config_path and os.path.exists(self.config_path):
-            self.logger.info(f"正在从 {self.config_path} 强制重载配置...")
+            self.logger.debug(f"从磁盘重载配置: {os.path.basename(self.config_path)}")
             self.load_config_file(self.config_path)
         else:
             self.logger.warning("无法重载配置：config_path 未设置或文件不存在。")
@@ -232,7 +263,7 @@ class ConfigService(QObject):
     def set_config(self, config: AppSettings) -> None:
         """设置配置并通知监听者"""
         self.current_config = config.copy(deep=True)
-        self.logger.info("配置已更新，正在通知监听者...")
+        self.logger.debug("配置已更新，正在通知监听者...")
         self.config_changed.emit(self.current_config.dict())
     
     def update_config(self, updates: Dict[str, Any]) -> None:
@@ -249,7 +280,7 @@ class ConfigService(QObject):
         deep_update(new_config_dict, updates)
 
         self.current_config = AppSettings.parse_obj(new_config_dict)
-        self.logger.info("配置已更新，正在通知监听者...")
+        self.logger.debug("配置已更新，正在通知监听者...")
         self.config_changed.emit(self.current_config.dict())
 
     def load_env_vars(self) -> Dict[str, str]:
@@ -353,6 +384,106 @@ class ConfigService(QObject):
         else:
             # 开发环境
             return os.path.join(self.root_dir, "examples", "config-example.json")
+    
+    def get_user_config_path(self) -> str:
+        """
+        获取用户配置文件路径
+        
+        打包后和开发时都在examples目录
+        """
+        if hasattr(sys, '_MEIPASS'):
+            # 打包环境：用户配置在_internal/examples目录
+            return os.path.join(sys._MEIPASS, 'examples', 'config.json')
+        else:
+            # 开发环境：用户配置在项目根目录的examples目录
+            return os.path.join(self.root_dir, "examples", "config.json")
+    
+    def _load_configs_with_priority(self):
+        """
+        按优先级加载配置文件
+        优先级：用户配置 > 默认配置 > 代码默认值
+        """
+        # 1. 先加载默认配置（如果存在）
+        if os.path.exists(self.default_config_path):
+            self.logger.debug(f"加载默认配置: {os.path.basename(self.default_config_path)}")
+            self.load_config_file(self.default_config_path)
+        else:
+            self.logger.warning(f"默认配置不存在: {os.path.basename(self.default_config_path)}")
+        
+        # 2. 再加载用户配置（如果存在），覆盖默认配置
+        if os.path.exists(self.user_config_path):
+            self.logger.debug(f"加载用户配置: {os.path.basename(self.user_config_path)}")
+            self.load_config_file(self.user_config_path)
+            self.config_path = self.user_config_path
+        else:
+            self.logger.debug(f"用户配置不存在，使用默认配置")
+            # 如果用户配置不存在，使用默认配置路径作为保存目标
+            if os.path.exists(self.default_config_path):
+                self.config_path = self.default_config_path
+        
+        # 3. 同步用户配置（添加新字段、删除旧字段）
+        self._sync_user_config()
+    
+    def _sync_user_config(self):
+        """
+        同步用户配置文件
+        - 如果默认配置新增字段 → 添加到用户配置
+        - 如果默认配置删除字段 → 从用户配置删除
+        - 保持用户修改的值不变
+        """
+        if not os.path.exists(self.default_config_path):
+            self.logger.warning("默认配置不存在，跳过同步")
+            return
+        
+        try:
+            # 读取默认配置（作为模板）
+            with open(self.default_config_path, 'r', encoding='utf-8') as f:
+                default_data = json.load(f)
+            
+            # 如果用户配置存在，读取并同步
+            if os.path.exists(self.user_config_path):
+                with open(self.user_config_path, 'r', encoding='utf-8') as f:
+                    user_data = json.load(f)
+                
+                # 同步配置（递归处理嵌套字典）
+                synced_data = self._sync_dict(default_data, user_data)
+                
+                # 如果有变化，保存回用户配置
+                if synced_data != user_data:
+                    self.logger.info("检测到配置结构变化，正在同步用户配置")
+                    with open(self.user_config_path, 'w', encoding='utf-8') as f:
+                        json.dump(synced_data, f, indent=2, ensure_ascii=False)
+                    self.logger.info("用户配置同步完成")
+            else:
+                # 用户配置不存在，创建一个空的（只包含用户修改的值）
+                self.logger.info("用户配置不存在，将在首次保存时创建")
+                
+        except Exception as e:
+            self.logger.error(f"同步用户配置失败: {e}")
+    
+    def _sync_dict(self, template: dict, user: dict) -> dict:
+        """
+        递归同步字典
+        - 保留模板中存在的键
+        - 删除模板中不存在的键
+        - 保持用户设置的值
+        """
+        result = {}
+        
+        for key in template.keys():
+            if key in user:
+                # 用户配置有这个键
+                if isinstance(template[key], dict) and isinstance(user[key], dict):
+                    # 递归处理嵌套字典
+                    result[key] = self._sync_dict(template[key], user[key])
+                else:
+                    # 使用用户的值
+                    result[key] = user[key]
+            else:
+                # 用户配置没有这个键，使用模板的值
+                result[key] = template[key]
+        
+        return result
     
     def load_default_config(self) -> bool:
         """加载默认配置"""
