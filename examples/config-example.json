@@ -85,7 +85,7 @@
     "verbose": false,
     "attempts": 2,
     "ignore_errors": false,
-    "use_gpu": false,
+    "use_gpu": true,
     "use_gpu_limited": false,
     "context_size": 3,
     "format": "不指定",
