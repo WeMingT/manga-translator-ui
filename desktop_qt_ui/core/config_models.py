@@ -91,6 +91,9 @@ class RenderSettings(BaseModel):
 
 class UpscaleSettings(BaseModel):
     upscaler: str = "esrgan"
+    upscale_ratio: Optional[int] = None
+    realcugan_model: Optional[str] = None
+    tile_size: Optional[int] = None
     revert_upscaling: bool = False
 
 class ColorizerSettings(BaseModel):
@@ -118,6 +121,7 @@ class CliSettings(BaseModel):
     batch_concurrent: bool = False
     generate_and_export: bool = False
     colorize_only: bool = False
+    upscale_only: bool = False  # 仅超分模式
     high_quality_batch_size: int = 3
 
 class AppSection(BaseModel):

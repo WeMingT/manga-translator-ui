@@ -109,6 +109,7 @@ class Ocr(str, Enum):
     mocr = "mocr"
     paddleocr = "paddleocr"
     paddleocr_korean = "paddleocr_korean"
+    paddleocr_latin = "paddleocr_latin"
 
 class Translator(str, Enum):
     youdao = "youdao"
@@ -151,6 +152,7 @@ class Upscaler(str, Enum):
     waifu2x = "waifu2x"
     esrgan = "esrgan"
     upscler4xultrasharp = "4xultrasharp"
+    realcugan = "realcugan"
 
 class RenderConfig(BaseModel):
     renderer: Renderer = Renderer.default
@@ -233,6 +235,10 @@ class UpscaleConfig(BaseModel):
     """Downscales the previously upscaled image after translation back to original size (Use with --upscale-ratio)."""
     upscale_ratio: Optional[int] = None
     """Image upscale ratio applied before detection. Can improve text detection."""
+    realcugan_model: Optional[str] = None
+    """Real-CUGAN model to use when upscaler is set to realcugan"""
+    tile_size: Optional[int] = None
+    """Tile size for Real-CUGAN upscaling (default: 400, 0 = process full image without tiling)"""
 
 class TranslatorConfig(BaseModel):
     translator: Translator = Translator.sugoi

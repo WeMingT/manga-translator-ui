@@ -156,7 +156,9 @@ class ConfigService(QObject):
             
             self.config_path = config_path
             self.logger.debug(f"加载配置: {os.path.basename(config_path)}")
-            self.config_changed.emit(self.current_config.dict())
+            config_dict = self.current_config.dict()
+            config_dict = self._convert_config_for_ui(config_dict)
+            self.config_changed.emit(config_dict)
             return True
             
         except Exception as e:
@@ -239,7 +241,9 @@ class ConfigService(QObject):
         self._load_configs_with_priority()
 
         # 4. 通知所有监听者配置已更改
-        self.config_changed.emit(self.current_config.dict())
+        config_dict = self.current_config.dict()
+        config_dict = self._convert_config_for_ui(config_dict)
+        self.config_changed.emit(config_dict)
         self.logger.info("配置重载完成。")
 
     def reload_from_disk(self):
@@ -260,11 +264,24 @@ class ConfigService(QObject):
         """获取对当前配置模型的直接引用，谨慎使用。"""
         return self.current_config
     
+    def _convert_config_for_ui(self, config_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """将配置转换为UI显示格式"""
+        # 转换超分倍数：None -> '不使用', int -> str
+        if 'upscale' in config_dict and 'upscale_ratio' in config_dict['upscale']:
+            ratio = config_dict['upscale']['upscale_ratio']
+            if ratio is None:
+                config_dict['upscale']['upscale_ratio'] = '不使用'
+            else:
+                config_dict['upscale']['upscale_ratio'] = str(ratio)
+        return config_dict
+    
     def set_config(self, config: AppSettings) -> None:
         """设置配置并通知监听者"""
         self.current_config = config.copy(deep=True)
         self.logger.debug("配置已更新，正在通知监听者...")
-        self.config_changed.emit(self.current_config.dict())
+        config_dict = self.current_config.dict()
+        config_dict = self._convert_config_for_ui(config_dict)
+        self.config_changed.emit(config_dict)
     
     def update_config(self, updates: Dict[str, Any]) -> None:
         """更新配置的部分内容"""
@@ -281,7 +298,9 @@ class ConfigService(QObject):
 
         self.current_config = AppSettings.parse_obj(new_config_dict)
         self.logger.debug("配置已更新，正在通知监听者...")
-        self.config_changed.emit(self.current_config.dict())
+        config_dict = self.current_config.dict()
+        config_dict = self._convert_config_for_ui(config_dict)
+        self.config_changed.emit(config_dict)
 
     def load_env_vars(self) -> Dict[str, str]:
         """加载环境变量"""

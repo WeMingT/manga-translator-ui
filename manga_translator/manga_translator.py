@@ -338,6 +338,7 @@ class MangaTranslator:
         self.skip_no_text = params.get('skip_no_text', False)
         self.generate_and_export = params.get('generate_and_export', False)
         self.colorize_only = params.get('colorize_only', False)
+        self.upscale_only = params.get('upscale_only', False)
         
         
         # batch_concurrent 已在初始化时设置并验证
@@ -442,6 +443,29 @@ class MangaTranslator:
                 ctx.result = ctx.input
             
             await self._report_progress('colorize-only-complete', True)
+            return ctx
+
+        # --- Upscale Only Mode ---
+        if self.upscale_only:
+            logger.info("Upscale Only mode: Running upscaling only, skipping detection, OCR, translation and rendering.")
+            
+            # Run upscaling if enabled
+            if config.upscale.upscale_ratio:
+                await self._report_progress('upscaling')
+                try:
+                    ctx.img_up = await self._run_upscaling(config, ctx)
+                    ctx.result = ctx.img_up
+                    logger.info("Upscaling completed successfully.")
+                except Exception as e:
+                    logger.error(f"Error during upscaling:\n{traceback.format_exc()}")
+                    if not self.ignore_errors:
+                        raise
+                    ctx.result = ctx.input  # Fallback to input image if upscaling fails
+            else:
+                logger.warning("Upscale Only mode enabled but no upscale_ratio set. Returning original image.")
+                ctx.result = ctx.input
+            
+            await self._report_progress('upscale-only-complete', True)
             return ctx
 
         if self.load_text:
@@ -1166,7 +1190,32 @@ class MangaTranslator:
     async def _run_upscaling(self, config: Config, ctx: Context):
         current_time = time.time()
         self._model_usage_timestamps[("upscaling", config.upscale.upscaler)] = current_time
-        return (await dispatch_upscaling(config.upscale.upscaler, [ctx.img_colorized], config.upscale.upscale_ratio, self.device))[0]
+        
+        # Prepare kwargs for Real-CUGAN (NCNN version)
+        upscaler_kwargs = {}
+        if config.upscale.upscaler == 'realcugan':
+            realcugan_model = getattr(config.upscale, 'realcugan_model', None)
+            if realcugan_model:
+                upscaler_kwargs['model_name'] = realcugan_model
+            # tile_size: None=use upscaler default, 0=no tiling, >0=manual tile size
+            tile_size = getattr(config.upscale, 'tile_size', None)
+            if tile_size is not None:
+                upscaler_kwargs['tile_size'] = tile_size
+        
+        result = (await dispatch_upscaling(
+            config.upscale.upscaler, 
+            [ctx.img_colorized], 
+            config.upscale.upscale_ratio, 
+            self.device,
+            **upscaler_kwargs
+        ))[0]
+        
+        # Unload upscaling model immediately after use to free VRAM
+        logger.info(f"Unloading upscaling model {config.upscale.upscaler} to free VRAM")
+        await self._unload_model('upscaling', config.upscale.upscaler, **upscaler_kwargs)
+        del self._model_usage_timestamps[("upscaling", config.upscale.upscaler)]
+        
+        return result
 
     async def _run_detection(self, config: Config, ctx: Context):
         current_time = time.time()
@@ -1271,7 +1320,7 @@ class MangaTranslator:
         # --- END NON-MAXIMUM SUPPRESSION (NMS) ---
 
         return result
-    async def _unload_model(self, tool: str, model: str):
+    async def _unload_model(self, tool: str, model: str, **kwargs):
         logger.info(f"Unloading {tool} model: {model}")
         match tool:
             case 'colorization':
@@ -1283,7 +1332,7 @@ class MangaTranslator:
             case 'ocr':
                 await unload_ocr(model)
             case 'upscaling':
-                await unload_upscaling(model)
+                await unload_upscaling(model, **kwargs)
             case 'translation':
                 await unload_translation(model)
         if torch.cuda.is_available():
@@ -2325,7 +2374,13 @@ class MangaTranslator:
                         for folder in input_folders:
                             if parent_dir.startswith(folder):
                                 relative_path = os.path.relpath(parent_dir, folder)
-                                final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                # Normalize path and avoid adding '.' as a directory component
+                                if relative_path == '.':
+                                    final_output_dir = os.path.join(output_folder, os.path.basename(folder))
+                                else:
+                                    final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                # Normalize to use consistent separators
+                                final_output_dir = os.path.normpath(final_output_dir)
                                 break
 
                         os.makedirs(final_output_dir, exist_ok=True)
@@ -2406,7 +2461,13 @@ class MangaTranslator:
                             for folder in input_folders:
                                 if parent_dir.startswith(folder):
                                     relative_path = os.path.relpath(parent_dir, folder)
-                                    final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                    # Normalize path and avoid adding '.' as a directory component
+                                    if relative_path == '.':
+                                        final_output_dir = os.path.join(output_folder, os.path.basename(folder))
+                                    else:
+                                        final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                    # Normalize to use consistent separators
+                                    final_output_dir = os.path.normpath(final_output_dir)
                                     break
 
                             os.makedirs(final_output_dir, exist_ok=True)
@@ -2447,6 +2508,10 @@ class MangaTranslator:
                 await asyncio.sleep(0)
                 try:
                     self._set_image_context(config, image)
+                    # ✅ 保存context以便渲染阶段复用，避免生成两个文件夹
+                    from .utils.generic import get_image_md5
+                    image_md5 = get_image_md5(image)
+                    self._save_current_image_context(image_md5)
                     ctx = await self._translate_until_translation(image, config)
                     if hasattr(image, 'name'):
                         ctx.image_name = image.name
@@ -2528,7 +2593,13 @@ class MangaTranslator:
                             for folder in input_folders:
                                 if parent_dir.startswith(folder):
                                     relative_path = os.path.relpath(parent_dir, folder)
-                                    final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                    # Normalize path and avoid adding '.' as a directory component
+                                    if relative_path == '.':
+                                        final_output_dir = os.path.join(output_folder, os.path.basename(folder))
+                                    else:
+                                        final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                    # Normalize to use consistent separators
+                                    final_output_dir = os.path.normpath(final_output_dir)
                                     break
                             
                             os.makedirs(final_output_dir, exist_ok=True)
@@ -2640,6 +2711,14 @@ class MangaTranslator:
                 ctx.upscaled = ctx.img_colorized
         else:
             ctx.upscaled = ctx.img_colorized
+
+        # --- Upscale Only Mode Check (for batch processing) ---
+        if self.upscale_only:
+            logger.info("Upscale Only mode (batch): Running upscaling only, skipping detection, OCR, translation and rendering.")
+            ctx.result = ctx.upscaled
+            ctx.text_regions = []  # Empty text regions
+            await self._report_progress('upscale-only-complete', True)
+            return ctx
 
         ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
 
@@ -3840,6 +3919,10 @@ class MangaTranslator:
                 await asyncio.sleep(0)
                 try:
                     self._set_image_context(config, image)
+                    # ✅ 保存context以便渲染阶段复用，避免生成两个文件夹
+                    from .utils.generic import get_image_md5
+                    image_md5 = get_image_md5(image)
+                    self._save_current_image_context(image_md5)
                     ctx = await self._translate_until_translation(image, config)
                     if hasattr(image, 'name'):
                         ctx.image_name = image.name
@@ -4005,10 +4088,17 @@ class MangaTranslator:
                             file_path = ctx.image_name
                             final_output_dir = output_folder
                             parent_dir = os.path.normpath(os.path.dirname(file_path))
+                            
                             for folder in input_folders:
                                 if parent_dir.startswith(folder):
                                     relative_path = os.path.relpath(parent_dir, folder)
-                                    final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                    # Normalize path and avoid adding '.' as a directory component
+                                    if relative_path == '.':
+                                        final_output_dir = os.path.join(output_folder, os.path.basename(folder))
+                                    else:
+                                        final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
+                                    # Normalize to use consistent separators
+                                    final_output_dir = os.path.normpath(final_output_dir)
                                     break
                             
                             os.makedirs(final_output_dir, exist_ok=True)

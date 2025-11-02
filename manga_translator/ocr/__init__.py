@@ -5,7 +5,7 @@ from .model_32px import Model32pxOCR
 from .model_48px import Model48pxOCR
 from .model_48px_ctc import Model48pxCTCOCR
 from .model_manga_ocr import ModelMangaOCR
-from .model_paddleocr import ModelPaddleOCR, ModelPaddleOCRKorean
+from .model_paddleocr import ModelPaddleOCR, ModelPaddleOCRKorean, ModelPaddleOCRLatin
 from ..config import Ocr, OcrConfig
 from ..utils import Quadrilateral
 
@@ -16,6 +16,7 @@ OCRS = {
     Ocr.mocr: ModelMangaOCR,
     Ocr.paddleocr: ModelPaddleOCR,
     Ocr.paddleocr_korean: ModelPaddleOCRKorean,
+    Ocr.paddleocr_latin: ModelPaddleOCRLatin,
 }
 ocr_cache = {}
 

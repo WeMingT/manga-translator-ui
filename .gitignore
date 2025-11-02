@@ -7,15 +7,9 @@ venv/
 .venv_cpu/
 .venv_gpu/
 
-# Rust project directory (reference only)
-manga-image-translator-rust-master/
-
 # Environment files (contain sensitive information)
 .env
 .env.*
-
-# User configuration file (contains user-specific settings)
-examples/config.json
 
 # Claude settings
 .claude/
@@ -84,7 +78,7 @@ gemini_key_validator_ui.py30cadb668d2efc5c432fd2939130df0d_translations.json
 新建文件夹/
 manga-translator-ui-1.5.1/
 manga-translator-ui-1.7.6/
-BallonsTranslator-dev/
+BallonsTranslator-dev/*
 # Added by Gemini to ignore untracked files
 .cunzhi-memory/
 logs/
@@ -134,3 +128,8 @@ venv/
 .venv/
 
 gen_scripts.py
+
+# Ignore test/example directories
+ailab-main/
+manga-image-translator-rust-master/
+examples/config.json

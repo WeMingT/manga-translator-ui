@@ -309,6 +309,7 @@ class MainAppLogic(QObject):
             for key in keys[:-1]:
                 parent_obj = getattr(parent_obj, key)
             setattr(parent_obj, keys[-1], value)
+            
             self.config_service.set_config(config_obj)
             self.config_service.save_config_file()
             self.logger.debug(f"配置已保存: '{full_key}' = '{value}'")
@@ -372,7 +373,7 @@ class MainAppLogic(QObject):
                     "direction": "文本方向", "uppercase": "大写", "lowercase": "小写", "gimp_font": "GIMP字体",
                     "font_path": "字体路径", "no_hyphenation": "禁用连字符", "font_color": "字体颜色",
                     "auto_rotate_symbols": "竖排内横排", "rtl": "从右到左", "layout_mode": "排版模式",
-                    "upscaler": "超分模型", "revert_upscaling": "还原超分", "colorization_size": "上色大小",
+                    "upscaler": "超分模型", "upscale_ratio": "超分倍数", "realcugan_model": "Real-CUGAN模型", "tile_size": "分块大小(0=不分割)", "revert_upscaling": "还原超分", "colorization_size": "上色大小",
                     "denoise_sigma": "降噪强度", "colorizer": "上色模型", "verbose": "详细日志",
                     "attempts": "重试次数", "max_requests_per_minute": "每分钟最大请求数", "ignore_errors": "忽略错误", "use_gpu": "使用 GPU",
                     "use_gpu_limited": "使用 GPU（受限）", "context_size": "上下文页数", "format": "输出格式",
@@ -403,6 +404,25 @@ class MainAppLogic(QObject):
             "alignment": [member.value for member in Alignment],
             "direction": [member.value for member in Direction],
             "upscaler": [member.value for member in Upscaler],
+            "upscale_ratio": ["不使用", "2", "3", "4"],
+            "realcugan_model": [
+                "2x-conservative",
+                "2x-conservative-pro",
+                "2x-no-denoise",
+                "2x-denoise1x",
+                "2x-denoise2x",
+                "2x-denoise3x",
+                "2x-denoise3x-pro",
+                "3x-conservative",
+                "3x-conservative-pro",
+                "3x-no-denoise",
+                "3x-no-denoise-pro",
+                "3x-denoise3x",
+                "3x-denoise3x-pro",
+                "4x-conservative",
+                "4x-no-denoise",
+                "4x-denoise3x",
+            ],
             "translator": [member.value for member in Translator],
             "detector": [member.value for member in Detector],
             "colorizer": [member.value for member in Colorizer],
@@ -1131,9 +1151,21 @@ class TranslationWorker(QObject):
             translator_config_data['attempts'] = cli_attempts
             self.log_received.emit(f"--- Setting translator attempts to: {cli_attempts} (from UI config)")
 
+            # 转换超分倍数：'不使用' -> None, '2'/'4' -> int
+            upscale_config_data = self.config_dict.get('upscale', {}).copy()
+            if 'upscale_ratio' in upscale_config_data:
+                ratio_value = upscale_config_data['upscale_ratio']
+                if ratio_value == '不使用' or ratio_value is None:
+                    upscale_config_data['upscale_ratio'] = None
+                else:
+                    try:
+                        upscale_config_data['upscale_ratio'] = int(ratio_value)
+                    except (ValueError, TypeError):
+                        upscale_config_data['upscale_ratio'] = None
+
             config = Config(
                 render=RenderConfig(**render_config_data),
-                upscale=UpscaleConfig(**self.config_dict.get('upscale', {})),
+                upscale=UpscaleConfig(**upscale_config_data),
                 translator=TranslatorConfig(**translator_config_data),
                 detector=DetectorConfig(**self.config_dict.get('detector', {})),
                 colorizer=ColorizerConfig(**self.config_dict.get('colorizer', {})),
@@ -1170,7 +1202,10 @@ class TranslationWorker(QObject):
             workflow_mode = "正常翻译流程"
             workflow_tip = ""
             cli_config = self.config_dict.get('cli', {})
-            if cli_config.get('colorize_only', False):
+            if cli_config.get('upscale_only', False):
+                workflow_mode = "仅超分"
+                workflow_tip = "💡 提示：仅对图片进行超分处理，不进行检测、OCR、翻译和渲染"
+            elif cli_config.get('colorize_only', False):
                 workflow_mode = "仅上色"
                 workflow_tip = "💡 提示：仅对图片进行上色处理，不进行检测、OCR、翻译和渲染"
             elif cli_config.get('generate_and_export', False):

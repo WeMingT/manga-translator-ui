@@ -163,7 +163,98 @@ class MainView(QWidget):
             reverse_map = {v: k for k, v in display_map.items()}
             final_value = reverse_map.get(value, value) # Fallback to value itself if not in map
         
+        # 特殊处理：当 upscaler 变化时，更新 upscale_ratio 动态下拉框
+        if full_key == "upscale.upscaler":
+            self._update_upscale_ratio_options(value)
+        
         self.setting_changed.emit(full_key, final_value)
+
+    def _on_upscale_ratio_changed(self, text, full_key):
+        """处理 upscale_ratio 动态下拉框的变化"""
+        config = self.config_service.get_config()
+        
+        if config.upscale.upscaler == "realcugan":
+            # 当前是 realcugan
+            if text == "不使用":
+                # 禁用超分
+                self.setting_changed.emit("upscale.upscale_ratio", None)
+                self.setting_changed.emit("upscale.realcugan_model", None)
+            else:
+                # text 是模型名称，从中提取倍率
+                scale_str = text.split('x')[0] if 'x' in text else None
+                if scale_str and scale_str.isdigit():
+                    scale = int(scale_str)
+                    # 同时更新 realcugan_model 和 upscale_ratio
+                    self.setting_changed.emit("upscale.realcugan_model", text)
+                    self.setting_changed.emit("upscale.upscale_ratio", scale)
+                else:
+                    # 无法解析倍率，只更新模型
+                    self.setting_changed.emit("upscale.realcugan_model", text)
+        else:
+            # 当前是其他超分模型，text 是倍率
+            if text == "不使用":
+                self.setting_changed.emit(full_key, None)
+            else:
+                try:
+                    ratio = int(text)
+                    self.setting_changed.emit(full_key, ratio)
+                except ValueError:
+                    self.setting_changed.emit(full_key, None)
+    
+    def _on_tile_size_input_changed(self, text, full_key):
+        """处理 tile_size 输入框的变化"""
+        if not text or not text.strip():
+            # 空值 = 使用默认值 (None)
+            self.setting_changed.emit(full_key, None)
+        else:
+            try:
+                tile_size = int(text)
+                self.setting_changed.emit(full_key, tile_size)
+            except ValueError:
+                # 无效输入 = 使用默认值
+                self.setting_changed.emit(full_key, None)
+    
+    def _update_upscale_ratio_options(self, upscaler):
+        """当 upscaler 变化时，更新 upscale_ratio 下拉框的选项"""
+        # 查找 upscale_ratio_dynamic widget
+        upscale_ratio_widget = self.findChild(QComboBox, "upscale_ratio_dynamic")
+        if not upscale_ratio_widget:
+            return
+        
+        # 阻止信号触发
+        upscale_ratio_widget.blockSignals(True)
+        
+        # 清空并重新填充
+        upscale_ratio_widget.clear()
+        
+        if upscaler == "realcugan":
+            # 显示 Real-CUGAN 模型列表
+            realcugan_models = self.controller.get_options_for_key("realcugan_model")
+            if realcugan_models:
+                # 添加"不使用"选项
+                all_options = ["不使用"] + realcugan_models
+                upscale_ratio_widget.addItems(all_options)
+            # 设置默认值
+            config = self.config_service.get_config()
+            if config.upscale.realcugan_model:
+                upscale_ratio_widget.setCurrentText(config.upscale.realcugan_model)
+            elif config.upscale.upscale_ratio is None:
+                upscale_ratio_widget.setCurrentText("不使用")
+            elif realcugan_models:
+                upscale_ratio_widget.setCurrentText(realcugan_models[0])
+        else:
+            # 显示普通倍率选项
+            ratio_options = ["不使用", "2", "3", "4"]
+            upscale_ratio_widget.addItems(ratio_options)
+            # 设置默认值
+            config = self.config_service.get_config()
+            if config.upscale.upscale_ratio is None:
+                upscale_ratio_widget.setCurrentText("不使用")
+            else:
+                upscale_ratio_widget.setCurrentText(str(config.upscale.upscale_ratio))
+        
+        # 恢复信号
+        upscale_ratio_widget.blockSignals(False)
 
     def _create_param_widgets(self, data, parent_layout, prefix=""):
         if not isinstance(data, dict):
@@ -173,7 +264,8 @@ class MainView(QWidget):
             full_key = f"{prefix}.{key}" if prefix else key
 
             # 跳过这些选项，因为已经用下拉框替代或不需要在UI中显示
-            if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export", "cli.colorize_only"]:
+            # realcugan_model 将通过 upscale_ratio 动态下拉框处理
+            if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export", "cli.colorize_only", "cli.upscale_only", "upscale.realcugan_model"]:
                 continue
 
             label_text = key
@@ -249,24 +341,71 @@ class MainView(QWidget):
                 widget.setChecked(value)
                 widget.stateChanged.connect(lambda state, k=full_key: self._on_setting_changed(bool(state), k, None))
 
+            # 特殊处理：upscale_ratio 动态下拉框（必须在 int/float 判断之前）
+            elif full_key == "upscale.upscale_ratio":
+                widget = QComboBox()
+                widget.setObjectName("upscale_ratio_dynamic")
+                
+                # 获取当前的 upscaler 值来决定显示什么选项
+                config = self.config_service.get_config()
+                current_upscaler = config.upscale.upscaler
+                
+                if current_upscaler == "realcugan":
+                    # 显示 Real-CUGAN 模型列表
+                    realcugan_models = self.controller.get_options_for_key("realcugan_model")
+                    if realcugan_models:
+                        # 添加"不使用"选项
+                        all_options = ["不使用"] + realcugan_models
+                        widget.addItems(all_options)
+                    # 设置当前值（从 realcugan_model 获取）
+                    current_model = config.upscale.realcugan_model
+                    if current_model:
+                        widget.setCurrentText(current_model)
+                    elif value is None:
+                        widget.setCurrentText("不使用")
+                    elif realcugan_models:
+                        widget.setCurrentText(realcugan_models[0])
+                else:
+                    # 显示普通倍率选项
+                    ratio_options = ["不使用", "2", "3", "4"]
+                    widget.addItems(ratio_options)
+                    # 设置当前值
+                    if value is None:
+                        widget.setCurrentText("不使用")
+                    else:
+                        widget.setCurrentText(str(value))
+                
+                widget.currentTextChanged.connect(lambda text, k=full_key: self._on_upscale_ratio_changed(text, k))
+            
+            # 特殊处理：tile_size 输入框（即使值为 None 也显示）
+            elif full_key == "upscale.tile_size":
+                widget = QLineEdit(str(value) if value is not None else "")
+                widget.setPlaceholderText("默认: 400")
+                widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_tile_size_input_changed(w.text(), k))
+
             elif isinstance(value, (int, float)):
                 widget = QLineEdit(str(value))
                 widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_setting_changed(w.text(), k, None))
 
-            elif isinstance(value, str) and (options or display_map):
+            elif (isinstance(value, str) or value is None) and (options or display_map):
                 widget = QComboBox()
                 if key == "translator":
                     widget.setObjectName("translator.translator")
                 
                 if display_map:
                     widget.addItems(list(display_map.values()))
-                    current_display_name = display_map.get(value)
+                    current_display_name = display_map.get(value) if value is not None else None
                     if current_display_name:
                         widget.setCurrentText(current_display_name)
                     widget.currentTextChanged.connect(lambda text, k=full_key, dm=display_map: self._on_setting_changed(text, k, dm))
                 else:
                     widget.addItems(options)
-                    widget.setCurrentText(value)
+                    if value is not None:
+                        widget.setCurrentText(value)
+                    else:
+                        # 对于 None 值，设置第一个选项为默认值（通常是 "不使用"）
+                        if options:
+                            widget.setCurrentText(options[0])
                     widget.currentTextChanged.connect(lambda text, k=full_key: self._on_setting_changed(text, k, None))
 
             elif isinstance(value, str):
@@ -324,7 +463,8 @@ class MainView(QWidget):
             "导出翻译",
             "导出原文",
             "导入翻译并渲染",
-            "仅上色"
+            "仅上色",
+            "仅超分"
         ])
         self.workflow_mode_combo.currentIndexChanged.connect(self._on_workflow_mode_changed)
         left_layout.addWidget(self.workflow_mode_combo)
@@ -506,7 +646,9 @@ class MainView(QWidget):
             # 阻止信号触发，避免循环
             self.workflow_mode_combo.blockSignals(True)
 
-            if config.cli.colorize_only:
+            if config.cli.upscale_only:
+                self.workflow_mode_combo.setCurrentIndex(5)  # 仅超分
+            elif config.cli.colorize_only:
                 self.workflow_mode_combo.setCurrentIndex(4)  # 仅上色
             elif config.cli.load_text:
                 self.workflow_mode_combo.setCurrentIndex(3)  # 导入翻译并渲染
@@ -529,6 +671,7 @@ class MainView(QWidget):
         # 2: 导出原文
         # 3: 导入翻译并渲染
         # 4: 仅上色
+        # 5: 仅超分
 
         config = self.config_service.get_config()
 
@@ -537,6 +680,7 @@ class MainView(QWidget):
         config.cli.template = False
         config.cli.generate_and_export = False
         config.cli.colorize_only = False
+        config.cli.upscale_only = False
 
         if index == 1:  # 导出翻译
             config.cli.generate_and_export = True
@@ -546,6 +690,8 @@ class MainView(QWidget):
             config.cli.load_text = True
         elif index == 4:  # 仅上色
             config.cli.colorize_only = True
+        elif index == 5:  # 仅超分
+            config.cli.upscale_only = True
 
         # ✅ 保存配置到内存和文件
         self.config_service.set_config(config)
@@ -561,7 +707,9 @@ class MainView(QWidget):
 
         try:
             config = self.config_service.get_config()
-            if config.cli.colorize_only:
+            if config.cli.upscale_only:
+                self.start_button.setText("开始超分")
+            elif config.cli.colorize_only:
                 self.start_button.setText("开始上色")
             elif config.cli.load_text:
                 self.start_button.setText("导入翻译并渲染")

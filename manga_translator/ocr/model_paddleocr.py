@@ -55,6 +55,16 @@ class ModelPaddleOCR(OfflineOCR):
             'url': 'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.1/ppocrv5_korean_dict.txt',
             'hash': 'a88071c68c01707489baa79ebe0405b7beb5cca229f4fc94cc3ef992328802d7',
             'file': '.',
+        },
+        'latin_onnx': {
+            'url': 'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.8.0/latin_PP-OCRv5_rec_mobile_infer.onnx',
+            'hash': '614ffc2d6d3902d360fad7f1b0dd455ee45e877069d14c4e51a99dc4ef144409',
+            'file': '.',
+        },
+        'latin_dict': {
+            'url': 'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.8.0/ppocrv5_latin_dict.txt',
+            'hash': '3c0a8a79b612653c25f765271714f71281e4e955962c153e272b7b8c1d2b13ff',
+            'file': '.',
         }
     }
 
@@ -66,13 +76,17 @@ class ModelPaddleOCR(OfflineOCR):
         'korean': {  # Korean/English
             'onnx': 'korean_PP-OCRv5_rec_mobile_infer.onnx',
             'dict': 'ppocrv5_korean_dict.txt',
+        },
+        'latin': {  # Latin alphabet languages (English, Spanish, etc.)
+            'onnx': 'latin_PP-OCRv5_rec_mobile_infer.onnx',
+            'dict': 'ppocrv5_latin_dict.txt',
         }
     }
 
     def __init__(self, model_type='ch', *args, **kwargs):
         """
         Args:
-            model_type: 'ch' for Chinese/Japanese/English, 'korean' for Korean/English
+            model_type: 'ch' for Chinese/Japanese/English, 'korean' for Korean/English, 'latin' for Latin/English
         """
         super().__init__(*args, **kwargs)
         self.model_type = model_type
@@ -227,7 +241,11 @@ class ModelPaddleOCR(OfflineOCR):
                 self.logger.error(f"Inference failed: {e}")
         
         # ✅ 清理临时numpy数组
-        del regions, batch_imgs, preds
+        if regions:
+            try:
+                del regions, batch, predictions
+            except:
+                pass  # 如果变量不存在则忽略
         import gc
         gc.collect()
 
@@ -457,3 +475,9 @@ class ModelPaddleOCRKorean(ModelPaddleOCR):
     """Korean/English OCR"""
     def __init__(self, *args, **kwargs):
         super().__init__(model_type='korean', *args, **kwargs)
+
+
+class ModelPaddleOCRLatin(ModelPaddleOCR):
+    """Latin/English OCR"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(model_type='latin', *args, **kwargs)
