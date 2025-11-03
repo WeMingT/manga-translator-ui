@@ -2,6 +2,7 @@ import asyncio
 import copy
 import os
 import sys
+from typing import Optional
 
 import cv2
 import numpy as np
