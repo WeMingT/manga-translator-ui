@@ -766,18 +766,12 @@ class RegionTextItem(QGraphicsItemGroup):
 
             elif self._interaction_mode in ['white_corner', 'white_edge']:
                 # 使用 desktop-ui 的数据结构保存结果
-                print(f"[RELEASE WHITE] Region {self.region_index}: 白框编辑完成")
-                print(f"  当前 pos={self.pos()}, desktop_geometry.center={self.desktop_geometry.center}")
-
                 new_region_data = self.desktop_geometry.to_region_data()
-
-                print(f"  to_region_data 返回 center={new_region_data['center']}, angle={new_region_data['angle']}")
 
                 import copy
                 final_region_data = copy.deepcopy(self.region_data)
                 final_region_data.update(new_region_data)
 
-                print(f"[RELEASE WHITE] 调用 geometry_callback, final center={final_region_data['center']}")
                 self.geometry_callback(self.region_index, final_region_data)
                 self.region_data.update(final_region_data)
 
@@ -786,7 +780,6 @@ class RegionTextItem(QGraphicsItemGroup):
                     from PyQt6.QtWidgets import QGraphicsScene
                     new_scene_rect = self.sceneBoundingRect()
                     update_rect = self._drag_start_scene_rect.united(new_scene_rect)
-                    print(f"[RELEASE WHITE] 刷新空间索引: 初始rect={self._drag_start_scene_rect}, 新rect={new_scene_rect}")
                     self.scene().invalidate(update_rect, QGraphicsScene.SceneLayer.ItemLayer)
                     self.scene().update(update_rect)
 
@@ -1105,9 +1098,6 @@ class RegionTextItem(QGraphicsItemGroup):
 
         # 使用 desktop-ui 的白框编辑函数
         try:
-            print(f"[MOVE WHITE] Region {self.region_index}: 调用 handle_white_frame_edit 前")
-            print(f"  self.desktop_geometry.center={self.desktop_geometry.center}")
-
             new_geometry = handle_white_frame_edit(
                 geometry=self._drag_start_geometry,
                 action_type=action_type,
@@ -1116,14 +1106,9 @@ class RegionTextItem(QGraphicsItemGroup):
                 mouse_y=mouse_y
             )
 
-            print(f"[MOVE WHITE] Region {self.region_index}: handle_white_frame_edit 返回")
-            print(f"  new_geometry.center={new_geometry.center}")
-
             # 更新Item的位置和旋转
             self.desktop_geometry = new_geometry
 
-            print(f"[MOVE WHITE] Region {self.region_index}: 赋值后")
-            print(f"  self.desktop_geometry.center={self.desktop_geometry.center}")
             model_lines = new_geometry.lines  # 未旋转的世界坐标
             self.rotation_angle = new_geometry.angle
 
