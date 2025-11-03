@@ -544,7 +544,28 @@ echo   双击 步骤4-更新维护.bat
 echo.
 pause
 
+REM 询问是否清理pip缓存
+echo.
+echo ========================================
+echo 磁盘空间优化
+echo ========================================
+echo.
+echo pip 缓存文件可能占用较大空间
+echo 清理缓存不会影响已安装的包
+echo.
+set /p clean_cache="是否清理 pip 缓存? (y/n, 默认n): "
+if /i "%clean_cache%"=="y" (
+    echo.
+    echo 正在清理 pip 缓存...
+    call venv\Scripts\activate.bat
+    python -m pip cache purge >nul 2>&1
+    echo [OK] 缓存已清理
+) else (
+    echo [INFO] 跳过缓存清理
+)
+
 REM 询问是否立即运行
+echo.
 set /p run_now="是否立即运行? (y/n): "
 if /i "%run_now%"=="y" (
     echo.

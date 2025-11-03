@@ -38,11 +38,15 @@
 3. **运行安装**：
    - 双击 `步骤1-首次安装.bat`
    - 脚本会自动：
+     - ✓ 检测显卡类型（NVIDIA / AMD / 集显）
+     - ✓ 自动选择对应的 PyTorch 版本
+       - NVIDIA: CUDA 12.x 版本（需驱动 >= 525.60.13）
+       - AMD: ROCm 版本（实验性支持，支持 RX 5000/6000/7000 系列）
+       - 其他: CPU 版本（通用，速度较慢）
      - ✓ 安装便携版 Git（可选）
      - ✓ 克隆代码仓库
      - ✓ 创建虚拟环境
      - ✓ 安装所有依赖
-     - ✓ 检测并配置 GPU/CPU
 
 4. **启动程序**：
    - 双击 `步骤2-启动Qt界面.bat`
@@ -53,7 +57,8 @@
    - 前往 [GitHub Releases](https://github.com/hgmzhn/manga-translator-ui/releases)
    - 选择版本：
      - **CPU 版本**：适用于所有电脑
-     - **GPU 版本**：需要支持 CUDA 12.x 的 NVIDIA 显卡
+     - **GPU 版本 (NVIDIA)**：需要支持 CUDA 12.x 的 NVIDIA 显卡
+     - ⚠️ **AMD GPU 不支持打包版本**，请使用"方式一：安装脚本"安装
 
 2. **解压运行**：
    - 解压压缩包到任意目录
@@ -64,7 +69,8 @@
 1. **安装 Python 3.12**：[下载](https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe)
 2. **克隆仓库**：`git clone https://github.com/hgmzhn/manga-translator-ui.git`
 3. **安装依赖**：
-   - **GPU 版本**：`py -3.12 -m pip install -r requirements.txt`
+   - **NVIDIA GPU**：`py -3.12 -m pip install -r requirements_gpu.txt`
+   - **AMD GPU**：`py -3.12 -m pip install -r requirements_amd.txt` 并参考文件注释安装 AMD PyTorch
    - **CPU 版本**：`py -3.12 -m pip install -r requirements_cpu.txt`
 4. **运行程序**：`py -3.12 -m desktop_qt_ui.main`
 
@@ -155,6 +161,7 @@
 ## 🙏 致谢
 
 - [zyddnys/manga-image-translator](https://github.com/zyddnys/manga-image-translator) - 核心翻译引擎
+- [bilibili/ailab](https://github.com/bilibili/ailab) - Real-CUGAN 超分辨率模型
 - [lhj5426/YSG](https://github.com/lhj5426/YSG) - 提供模型支持
 - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) - 提供 OCR 模型支持
 - 所有贡献者和用户的支持

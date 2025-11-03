@@ -26,9 +26,14 @@
 ### 推荐配置
 
 - **内存**：16 GB RAM 或更多
-- **GPU**：NVIDIA 显卡，支持 CUDA 12.x（仅 GPU 版本需要）
-  - 建议显存：6 GB 或更多
-  - 支持的 NVIDIA 显卡：GTX 1060 及以上
+- **GPU**：
+  - **NVIDIA 显卡**：支持 CUDA 12.x（需驱动版本 >= 525.60.13）
+    - 建议显存：6 GB 或更多
+    - 支持的 NVIDIA 显卡：GTX 1060 及以上
+  - **AMD 显卡**：支持 ROCm（实验性）
+    - 支持的显卡：RX 5000/6000/7000 系列（RDNA 1/2/3）
+    - ⚠️ AMD GPU 仅支持安装脚本方式，不支持打包版本
+    - ⚠️ Windows 上 ROCm 支持有限，Linux 下体验更好
 - **存储空间**：10 GB SSD
 
 ---
@@ -82,8 +87,15 @@
 
 **2.6 安装依赖**
 - 自动检测 GPU：
-  - ✓ 有 NVIDIA 显卡：安装 GPU 版本依赖
-  - ✗ 无 NVIDIA 显卡：安装 CPU 版本依赖
+  - ✓ **NVIDIA 显卡**：
+    - 检测 CUDA 版本
+    - CUDA >= 12: 安装 GPU 版本依赖（requirements_gpu.txt）
+    - CUDA < 12: 提示更新驱动或使用 CPU 版本
+  - ✓ **AMD 显卡**：
+    - 自动识别显卡型号和 gfx 版本
+    - 询问用户确认后安装 AMD ROCm PyTorch（requirements_amd.txt）
+    - 支持 RX 5000/6000/7000 系列（RDNA 1/2/3）
+  - ✗ **其他显卡/集显**：安装 CPU 版本依赖（requirements_cpu.txt）
 - 使用 `launch.py` 智能安装所有必需的包
 
 **2.7 完成安装**
@@ -318,6 +330,8 @@ python -m desktop-ui.main
 - [功能特性](FEATURES.md) - 了解程序的所有功能
 - [工作流程](WORKFLOWS.md) - 学习不同的翻译工作流程
 - [设置说明](SETTINGS.md) - 配置翻译器和参数
+
+---
 
 返回 [主页](../README.md)
 
