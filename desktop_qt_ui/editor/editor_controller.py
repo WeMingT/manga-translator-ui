@@ -17,6 +17,7 @@ from services import (
     get_history_service,
     get_logger,
     get_ocr_service,
+    get_resource_manager,
     get_translation_service,
 )
 
@@ -58,11 +59,12 @@ class EditorController(QObject):
         self.history_service = get_history_service() # 用于撤销/重做
         self.file_service = get_file_service()
         self.config_service = get_config_service()
+        self.resource_manager = get_resource_manager()  # 新的资源管理器
 
-        # 增量修复缓存
+        # 增量修复缓存 - TODO: 迁移到ResourceManager
         self._last_inpainted_image = None  # 上一次完整的修复结果
         
-        # DEBUG: 测试历史记录功能
+        # DEBUG: 测试历史记录功能 - TODO: 迁移到ResourceManager
         self._last_processed_mask = None   # 上一次处理的蒙版状态
 
         # Connect internal signals for thread-safe updates
@@ -74,6 +76,43 @@ class EditorController(QObject):
         self.logger.info("[CONTROLLER LOG] Internal signals connected to model methods")
 
         self._connect_model_signals()
+    
+    # ========== Resource Access Helpers (新的资源访问辅助方法) ==========
+    
+    def _get_current_image(self) -> Optional[Image.Image]:
+        """获取当前图片（PIL Image）
+        
+        优先从ResourceManager获取，如果失败则从Model获取（向后兼容）
+        """
+        resource = self.resource_manager.get_current_image()
+        if resource:
+            return resource.image
+        # 向后兼容：如果ResourceManager没有，尝试从Model获取
+        return self.model.get_image()
+    
+    def _get_current_mask(self, mask_type: str = "raw") -> Optional[np.ndarray]:
+        """获取当前蒙版
+        
+        Args:
+            mask_type: 蒙版类型，"raw" 或 "refined"
+        
+        Returns:
+            Optional[np.ndarray]: 蒙版数据，如果不存在返回None
+        """
+        from .core.types import MaskType
+        
+        mask_type_enum = MaskType.RAW if mask_type == "raw" else MaskType.REFINED
+        mask_resource = self.resource_manager.get_mask(mask_type_enum)
+        
+        if mask_resource:
+            return mask_resource.data
+        
+        # 向后兼容
+        if mask_type == "raw":
+            return self.model.get_raw_mask()
+        elif mask_type == "refined":
+            return self.model.get_refined_mask()
+        return None
 
     def set_view(self, view):
         """设置view引用，用于更新UI状态"""
@@ -133,7 +172,7 @@ class EditorController(QObject):
         self.logger.info("Refined mask changed, checking for incremental inpainting...")
 
         # 检查是否有必要的数据来进行 inpainting
-        image = self.model.get_image()
+        image = self._get_current_image()
         raw_mask = self.model.get_raw_mask()  # 获取原始蒙版用于比较
 
         if image is not None and mask is not None and raw_mask is not None:
@@ -356,7 +395,7 @@ class EditorController(QObject):
         """Asynchronously refines the mask and generates an inpainting preview."""
         try:
             self.logger.info("Starting async mask refinement and inpainting...")
-            image = self.model.get_image()
+            image = self._get_current_image()
             raw_mask = self.model.get_raw_mask() # Use the raw mask for refinement
             regions = self.model.get_regions()
 
@@ -510,7 +549,7 @@ class EditorController(QObject):
         """边界框局部修复 - 只修复变化区域的矩形边界框"""
         try:
             self.logger.info("Starting bounding box incremental inpainting...")
-            image = self.model.get_image()
+            image = self._get_current_image()
 
             if image is None or current_mask is None:
                 self.logger.warning("Incremental inpainting skipped: missing data.")
@@ -642,7 +681,7 @@ class EditorController(QObject):
         """执行完整修复并缓存结果"""
         try:
             self.logger.info("Performing full inpainting with caching...")
-            image = self.model.get_image()
+            image = self._get_current_image()
 
             if image is None or mask is None:
                 return
@@ -1359,7 +1398,7 @@ class EditorController(QObject):
         """导出基于编辑器当前数据的图片（使用编辑器的蒙版和样式设置）"""
         self.logger.info("Toolbar: 'Export Image' requested.")
         try:
-            image = self.model.get_image()
+            image = self._get_current_image()
             regions = self.model.get_regions()
             if not image or not regions:
                 self.logger.warning("Cannot export: missing image or regions data")
@@ -1616,7 +1655,7 @@ class EditorController(QObject):
         selected_indices = self.model.get_selection()
         if not selected_indices:
             return
-        image = self.model.get_image()
+        image = self._get_current_image()
         if not image:
             return
 
@@ -1727,7 +1766,7 @@ class EditorController(QObject):
         selected_indices = self.model.get_selection()
         if not selected_indices:
             return
-        image = self.model.get_image()
+        image = self._get_current_image()
         if not image:
             return
 
