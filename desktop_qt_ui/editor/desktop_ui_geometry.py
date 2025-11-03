@@ -370,22 +370,10 @@ def handle_white_frame_edit(
     """
     处理白框编辑 - 在世界坐标系中进行边编辑
     """
-    global last_debug_print_time
-
     center = geometry.center
     angle = geometry.angle
     original_lines = geometry.lines
     padding = 40
-
-    # 调试输出限制：每秒最多一次
-    current_time = time.time()
-    should_print = (current_time - last_debug_print_time) >= 1.0
-
-    if should_print:
-        print(f"\n[白框编辑调试] 开始编辑")
-        print(f"  action_type={action_type}, handle_index={handle_index}")
-        print(f"  mouse=({mouse_x:.1f}, {mouse_y:.1f})")
-        print(f"  center={center}, angle={angle:.2f}")
 
     # 1. 计算蓝框在模型坐标系中的边界
     all_vertices_model = [vertex for poly in original_lines for vertex in poly]
@@ -396,9 +384,6 @@ def handle_white_frame_edit(
     model_max_x = max(v[0] for v in all_vertices_model)
     model_min_y = min(v[1] for v in all_vertices_model)
     model_max_y = max(v[1] for v in all_vertices_model)
-
-    if should_print:
-        print(f"  蓝框模型坐标边界: x=[{model_min_x:.1f}, {model_max_x:.1f}], y=[{model_min_y:.1f}, {model_max_y:.1f}]")
 
     # 2. 构建原始白框(模型坐标,轴对齐)
     old_white_frame_model = [
@@ -416,9 +401,6 @@ def handle_white_frame_edit(
             old_white_frame_world.append(world_p)
     else:
         old_white_frame_world = old_white_frame_model[:]
-
-    if should_print:
-        print(f"  原始白框(世界): 左上=({old_white_frame_world[0][0]:.1f}, {old_white_frame_world[0][1]:.1f}), 右下=({old_white_frame_world[2][0]:.1f}, {old_white_frame_world[2][1]:.1f})")
 
     # 4. 根据拖动类型计算新的白框(世界坐标)
     if action_type == 'white_frame_edge_edit':
@@ -492,9 +474,6 @@ def handle_white_frame_edit(
         else:
             new_white_frame_world = new_white_frame_model[:]
 
-    if should_print:
-        print(f"  新白框(世界): 左上=({new_white_frame_world[0][0]:.1f}, {new_white_frame_world[0][1]:.1f}), 右下=({new_white_frame_world[2][0]:.1f}, {new_white_frame_world[2][1]:.1f})")
-
     # 5. 将新白框转换回模型坐标系
     new_white_frame_model = []
     if angle != 0:
@@ -516,9 +495,6 @@ def handle_white_frame_edit(
     new_model_min_y = new_white_model_min_y + padding
     new_model_max_y = new_white_model_max_y - padding
 
-    if should_print:
-        print(f"  新蓝框(模型): x=[{new_model_min_x:.1f}, {new_model_max_x:.1f}], y=[{new_model_min_y:.1f}, {new_model_max_y:.1f}]")
-
     # 8. 计算缩放比例(模型坐标)
     old_model_width = model_max_x - model_min_x
     old_model_height = model_max_y - model_min_y
@@ -527,9 +503,6 @@ def handle_white_frame_edit(
 
     scale_x = new_model_width / old_model_width if old_model_width > 0 else 1.0
     scale_y = new_model_height / old_model_height if old_model_height > 0 else 1.0
-
-    if should_print:
-        print(f"  缩放比例: scale_x={scale_x:.3f}, scale_y={scale_y:.3f}")
 
     # 9. 确定锚点(对边或对角)
     if action_type == 'white_frame_edge_edit':
@@ -600,10 +573,6 @@ def handle_white_frame_edit(
     else:
         final_center_x, final_center_y = new_model_center_x, new_model_center_y
 
-    if should_print:
-        print(f"  新中心点(模型): ({new_model_center_x:.1f}, {new_model_center_y:.1f})")
-        print(f"  新中心点(世界): ({final_center_x:.1f}, {final_center_y:.1f})")
-
     # 13. 将 lines 转换到新的模型坐标系(以新中心为旋转中心)
     final_lines_model = []
     for poly_model in new_lines_model:
@@ -612,10 +581,6 @@ def handle_white_frame_edit(
         # 再转换回新的模型坐标系
         poly_new_model = [rotate_point(p[0], p[1], -angle, final_center_x, final_center_y) for p in poly_world]
         final_lines_model.append(poly_new_model)
-
-    if should_print:
-        print(f"[白框编辑调试] 结束\n")
-        last_debug_print_time = current_time
 
     # 12. 返回新的几何
     return DesktopUIGeometry({
