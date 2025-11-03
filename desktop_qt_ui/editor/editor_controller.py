@@ -1038,6 +1038,7 @@ class EditorController(QObject):
 
         new_region_data = old_region_data.copy()
         new_region_data['direction'] = direction_value
+        
         command = UpdateRegionCommand(
             model=self.model,
             region_index=region_index,

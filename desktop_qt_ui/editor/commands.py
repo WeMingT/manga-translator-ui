@@ -46,6 +46,11 @@ class UpdateRegionCommand(Command):
 
         # 直接更新模型中的区域字典
         self._model._regions[self._index] = data_to_apply
+        
+        # 【关键修复】同时更新resource_manager中的regions（延迟导入避免循环）
+        from services import get_resource_manager
+        resource_manager = get_resource_manager()
+        resource_manager.update_region(self._index, data_to_apply)
 
         # 如果 center 改变了,需要触发完全更新,重新创建 item
         # 否则只触发单个 item 更新

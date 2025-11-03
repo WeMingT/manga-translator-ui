@@ -11,12 +11,18 @@ def detect_torch_type():
     try:
         import torch
         
-        # 检查是否支持 CUDA
-        if torch.cuda.is_available():
+        # 检查是否是 AMD ROCm 版本
+        if hasattr(torch.version, 'hip') and torch.version.hip:
+            # AMD ROCm PyTorch
+            return "AMD", f"rocm{torch.version.hip}" if torch.version.hip else "rocm"
+        
+        # 检查是否支持 CUDA (NVIDIA)
+        elif torch.cuda.is_available():
             cuda_version = torch.version.cuda
             return "GPU", f"cu{cuda_version.replace('.', '')}" if cuda_version else "unknown"
+        
         else:
-            # 检查 torch 的版本字符串中是否包含 cpu 标识
+            # CPU 版本
             torch_version = torch.__version__
             if '+cpu' in torch_version or 'cpu' in torch_version:
                 return "CPU", "cpu"
@@ -33,6 +39,8 @@ def get_requirements_file():
     
     if torch_type == "GPU":
         return "requirements_gpu.txt"
+    elif torch_type == "AMD":
+        return "requirements_amd.txt"
     elif torch_type == "CPU":
         return "requirements_cpu.txt"
     else:

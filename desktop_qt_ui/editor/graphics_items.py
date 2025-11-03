@@ -85,12 +85,14 @@ class RegionTextItem(QGraphicsItemGroup):
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable | QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setAcceptHoverEvents(True)
         self._interaction_mode = 'none'
+        self._is_dragging = False  # 拖动状态标志
 
         # 添加缺失的初始化
         self._drag_handle_indices = None
         self._drag_start_pos = QPointF()
         self._drag_start_polygons = []
         self._drag_start_rotation = 0.0
+        self._drag_start_visual_center = QPointF()  # 保存拖动开始时的visual_center
         self._polygons_visible = True
         self._setup_pens_and_brushes()
 
@@ -173,6 +175,10 @@ class RegionTextItem(QGraphicsItemGroup):
 
     def update_from_data(self, region_data: dict):
         """Updates the item's entire state from a new region_data dictionary."""
+        # 【关键修复】在拖动过程中，完全跳过更新，避免重置位置和geometry
+        if self._is_dragging:
+            return
+        
         # 保存旧的场景边界矩形（在改变几何之前）
         old_scene_rect = self.sceneBoundingRect() if self.scene() else None
 
@@ -520,7 +526,6 @@ class RegionTextItem(QGraphicsItemGroup):
         # 使用 Qt 自动计算的局部坐标（已考虑旋转）
         local_pos = event.pos()
 
-        # 限制日志频率：每秒最多打印一次
         if event.button() == Qt.MouseButton.LeftButton:
             if self.isSelected():
                 self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
@@ -532,6 +537,7 @@ class RegionTextItem(QGraphicsItemGroup):
                 self._drag_start_angle = self.rotation_angle  # 我们的内部角度（真实的起始角度）
                 self._drag_start_center = QPointF(0, 0)  # 局部坐标的中心点
                 self._drag_start_scene_rect = self.sceneBoundingRect() if self.scene() else None  # 保存初始场景边界
+                self._drag_start_visual_center = QPointF(self.visual_center)  # 保存拖动开始时的visual_center
                 # 确保Qt变换的transform origin是局部坐标的(0,0)
 
                 self.setTransformOriginPoint(QPointF(0, 0))
@@ -561,9 +567,11 @@ class RegionTextItem(QGraphicsItemGroup):
                         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
                     event.accept()
                     return
+                else:
+                    # 点击多边形时进入移动模式
+                    self._interaction_mode = 'move'
+                    self._is_dragging = True
 
-                # 点击多边形时进入移动模式
-                self._interaction_mode = 'move'
                 super().mousePressEvent(event)
                 event.accept()
                 return
@@ -658,43 +666,16 @@ class RegionTextItem(QGraphicsItemGroup):
         event.accept()
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
-        # CRITICAL FIX: 即使 _interaction_mode 是 'none'，也要检查位置是否变化
-        # Qt 的 ItemIsMovable 会自动移动 item，但不会触发我们的 move 逻辑
-        current_pos = self.pos()
-        if current_pos != self.visual_center:
-            # 位置发生了变化，需要更新模型
-            delta_x = current_pos.x() - self.visual_center.x()
-            delta_y = current_pos.y() - self.visual_center.y()
-
-            if abs(delta_x) >= 0.1 or abs(delta_y) >= 0.1:
-                # 更新 lines：所有点都加上偏移量
-                new_lines = []
-                for poly in self.desktop_geometry.lines:
-                    new_poly = [[p[0] + delta_x, p[1] + delta_y] for p in poly]
-                    new_lines.append(new_poly)
-
-                # 更新内部状态
-                self.visual_center = current_pos
-                self.desktop_geometry.center = [current_pos.x(), current_pos.y()]
-                self.desktop_geometry.lines = new_lines
-
-                import copy
-                new_region_data = copy.deepcopy(self.region_data)
-                new_region_data['center'] = [current_pos.x(), current_pos.y()]
-                new_region_data['lines'] = new_lines
-
-                # 更新模型
-                self.geometry_callback(self.region_index, new_region_data)
-                self.region_data.update(new_region_data)
-
         if self._interaction_mode != 'none':
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
 
-            # --- Start of Change ---
+            # 处理移动模式
             if self._interaction_mode == 'move':
-                # lines是未旋转的世界坐标（绝对位置），移动时需要同步更新lines和center
+                self._is_dragging = False  # 清除拖动状态
+                
+                # 使用保存的初始visual_center计算delta
                 new_center = self.pos()
-                old_center = self.visual_center
+                old_center = self._drag_start_visual_center
 
                 # 计算偏移量
                 delta_x = new_center.x() - old_center.x()
@@ -711,7 +692,7 @@ class RegionTextItem(QGraphicsItemGroup):
                     new_poly = [[p[0] + delta_x, p[1] + delta_y] for p in poly]
                     new_lines.append(new_poly)
 
-                # Update the internal state
+                # 更新内部状态
                 self.visual_center = new_center
                 self.desktop_geometry.center = [new_center.x(), new_center.y()]
                 self.desktop_geometry.lines = new_lines
@@ -721,9 +702,18 @@ class RegionTextItem(QGraphicsItemGroup):
                 new_region_data['center'] = [new_center.x(), new_center.y()]
                 new_region_data['lines'] = new_lines
 
-                # Update the model via callback
+                # 更新模型
                 self.geometry_callback(self.region_index, new_region_data)
                 self.region_data.update(new_region_data)
+                
+                # 【关键修复】手动更新polygons，因为update_from_data在拖动时被跳过了
+                # 转换为局部坐标: local = world - center
+                self.polygons = []
+                for i, line in enumerate(new_lines):
+                    local_poly = QPolygonF()
+                    for x, y in line:
+                        local_poly.append(QPointF(x - new_center.x(), y - new_center.y()))
+                    self.polygons.append(local_poly)
 
 
             elif self._interaction_mode == 'rotate':

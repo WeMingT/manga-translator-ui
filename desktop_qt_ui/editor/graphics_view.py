@@ -663,6 +663,7 @@ class GraphicsView(QGraphicsView):
 
         # 1. 将字典转换为 TextBlock 对象（保留原始的 angle）
         constructor_args = region_dict.copy()
+        
         if 'lines' in constructor_args and isinstance(constructor_args['lines'], list):
             constructor_args['lines'] = np.array(constructor_args['lines'])
 
@@ -685,6 +686,16 @@ class GraphicsView(QGraphicsView):
 
         if 'bg_colors' in constructor_args:
             constructor_args['bg_color'] = constructor_args.pop('bg_colors')
+
+        # 【关键修复】转换direction字段：'horizontal'→'h', 'vertical'→'v'
+        # TextBlock.direction只认'h', 'v', 'hr', 'vr'，不认'horizontal'/'vertical'
+        if 'direction' in constructor_args:
+            dir_val = constructor_args['direction']
+            if dir_val == 'horizontal':
+                constructor_args['direction'] = 'h'
+            elif dir_val == 'vertical':
+                constructor_args['direction'] = 'v'
+            # 'h', 'v', 'hr', 'vr', 'auto' 保持不变
 
         # 创建未旋转的 text block 用于计算 dst_points
         # 因为 Qt 会通过 setRotation() 来应用旋转,所以这里需要使用 angle=0
@@ -776,6 +787,14 @@ class GraphicsView(QGraphicsView):
             constructor_args['fg_color'] = constructor_args.pop('fg_colors')
         if 'bg_colors' in constructor_args:
             constructor_args['bg_color'] = constructor_args.pop('bg_colors')
+
+        # 【关键修复】转换direction字段：'horizontal'→'h', 'vertical'→'v'
+        if 'direction' in constructor_args:
+            dir_val = constructor_args['direction']
+            if dir_val == 'horizontal':
+                constructor_args['direction'] = 'h'
+            elif dir_val == 'vertical':
+                constructor_args['direction'] = 'v'
 
         # 使用缓存中计算好的 font_size（经过 resize_regions_to_font_size 计算的）
         if text_block is not None and hasattr(text_block, 'font_size'):
