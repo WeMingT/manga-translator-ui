@@ -240,13 +240,23 @@ class RegionTextItem(QGraphicsItemGroup):
                 self.setTransformOriginPoint(QPointF(0, 0))
         elif change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             # 位置改变后，更新模型数据
+            print(f"[DRAG_DEBUG] ItemPositionHasChanged triggered for region {self.region_index}")
+            print(f"[DRAG_DEBUG] New position: {value}")
+            print(f"[DRAG_DEBUG] Has callback: {hasattr(self, '_on_geometry_change_callback') and self._on_geometry_change_callback is not None}")
+            
             if hasattr(self, '_on_geometry_change_callback') and self._on_geometry_change_callback:
                 # 获取新的场景坐标中心
                 scene_center = self.scenePos()
+                print(f"[DRAG_DEBUG] Scene center: {scene_center}")
+                
                 # 转换为图像坐标
                 img_x, img_y = self._scene_to_image_coords(scene_center)
+                print(f"[DRAG_DEBUG] Image coords: ({img_x}, {img_y})")
+                print(f"[DRAG_DEBUG] Old visual_center: {self.visual_center}")
+                
                 # 更新visual_center（这是模型坐标中的中心）
                 self.visual_center = QPointF(img_x, img_y)
+                print(f"[DRAG_DEBUG] New visual_center: {self.visual_center}")
                 
                 # 更新region_data
                 new_region_data = self.region_data.copy()
@@ -263,9 +273,13 @@ class RegionTextItem(QGraphicsItemGroup):
                     model_polygons.append(model_line)
                 
                 new_region_data['polygons'] = model_polygons
+                print(f"[DRAG_DEBUG] Calling callback with new polygons")
                 
                 # 调用回调更新controller
                 self._on_geometry_change_callback(self.region_index, new_region_data)
+                print(f"[DRAG_DEBUG] Callback completed")
+            else:
+                print(f"[DRAG_DEBUG] No callback to call")
         
         return super().itemChange(change, value)
 
