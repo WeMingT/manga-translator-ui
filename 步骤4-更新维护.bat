@@ -14,8 +14,9 @@ set CONDA_ENV_PATH=%CD%\conda_env
 set MINICONDA_ROOT=%CD%\Miniconda3
 
 REM 检测路径是否包含非ASCII字符（中文等）
-for /f "delims=" %%i in ('echo %CD%^| findstr /R "[^\x00-\x7F]"') do (
-    REM 如果路径包含非ASCII字符，使用备用Miniconda路径
+echo %CD%| findstr /R /C:"[^\x00-\x7F]" >nul
+if %ERRORLEVEL% == 0 (
+    REM 路径包含中文，使用磁盘根目录的Miniconda
     set MINICONDA_ROOT=%~d0\Miniconda3
 )
 
