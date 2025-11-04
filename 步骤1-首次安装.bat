@@ -79,21 +79,24 @@ REM 检查系统是否已安装7z
 where 7z >nul 2>&1
 if %ERRORLEVEL% == 0 (
     echo [OK] 找到 7-Zip
-    7z x python-3.12.12-win64.7z -o"Python-3.12.12" -y
+    7z x python-3.12.12-win64.7z -y
+    move python-3.12.12-portable Python-3.12.12 >nul 2>&1
     goto :check_python_extracted
 )
 
 REM 检查常见安装路径
 if exist "C:\Program Files\7-Zip\7z.exe" (
     echo [OK] 找到 7-Zip
-    "C:\Program Files\7-Zip\7z.exe" x python-3.12.12-win64.7z -o"Python-3.12.12" -y
+    "C:\Program Files\7-Zip\7z.exe" x python-3.12.12-win64.7z -y
+    move python-3.12.12-portable Python-3.12.12 >nul 2>&1
     goto :check_python_extracted
 )
 
 REM 检查是否已有便携版7z
 if exist "Portable7z\7zr.exe" (
     echo [OK] 找到便携版 7-Zip
-    Portable7z\7zr.exe x python-3.12.12-win64.7z -o"Python-3.12.12" -y
+    Portable7z\7zr.exe x python-3.12.12-win64.7z -y
+    move python-3.12.12-portable Python-3.12.12 >nul 2>&1
     goto :check_python_extracted
 )
 
@@ -137,7 +140,8 @@ move /y tmp\7zr.exe Portable7z\7zr.exe >nul
 
 echo [OK] 7-Zip 准备完成
 echo 正在解压 Python...
-Portable7z\7zr.exe x python-3.12.12-win64.7z -o"Python-3.12.12" -y
+Portable7z\7zr.exe x python-3.12.12-win64.7z -y
+move python-3.12.12-portable Python-3.12.12 >nul 2>&1
 
 :check_python_extracted
 if not exist "Python-3.12.12\python.exe" (
