@@ -446,10 +446,38 @@ class LamaLargeInpainter(LamaMPEInpainter):
     }
     
     def _check_downloaded_map(self, map_key: str) -> bool:
-        """如果ONNX模型存在，跳过PyTorch模型检查"""
-        onnx_path = self._get_file_path('lamalarge.onnx')
-        if os.path.isfile(onnx_path):
-            return True  # ONNX存在，不检查.ckpt
+        """检查模型文件是否存在
+        
+        逻辑：
+        - 如果是 'onnx' key，只检查 ONNX 文件
+        - 如果是 'model' key：
+          - CPU 环境：如果 ONNX 存在，跳过 .ckpt 检查
+          - GPU 环境：必须检查 .ckpt 文件
+        """
+        # 如果检查的是 onnx key，直接调用父类检查
+        if map_key == 'onnx':
+            return super()._check_downloaded_map(map_key)
+        
+        # 如果检查的是 model key（.ckpt）
+        if map_key == 'model':
+            onnx_path = self._get_file_path('lamalarge.onnx')
+            ckpt_path = self._get_file_path('lama_large_512px.ckpt')
+            
+            # 如果两者都存在，返回 True
+            if os.path.isfile(onnx_path) and os.path.isfile(ckpt_path):
+                return True
+            
+            # 如果只有 ONNX 存在（假设 CPU 环境），返回 True
+            if os.path.isfile(onnx_path):
+                return True
+            
+            # 如果只有 .ckpt 存在，返回 True
+            if os.path.isfile(ckpt_path):
+                return True
+            
+            # 两者都不存在，返回 False（需要下载）
+            return False
+        
         return super()._check_downloaded_map(map_key)
 
     async def _load(self, device: str):
@@ -460,6 +488,15 @@ class LamaLargeInpainter(LamaMPEInpainter):
             try:
                 import onnxruntime as ort
                 onnx_path = self._get_file_path('lamalarge.onnx')
+                
+                # 检查 ONNX 文件是否存在
+                if not os.path.isfile(onnx_path):
+                    self.logger.info('ONNX 模型不存在，需要下载')
+                    # 标记为未下载，触发下载
+                    self._downloaded = False
+                    await self._download()
+                    self._downloaded = True
+                
                 self.logger.info(f'使用ONNX模型（CPU优化）: {onnx_path}')
                 
                 # 🔧 内存优化配置
@@ -479,7 +516,17 @@ class LamaLargeInpainter(LamaMPEInpainter):
                 self.logger.warning(f'ONNX加载失败，回退到PyTorch: {e}')
         
         # ✅ GPU模式或ONNX失败时使用PyTorch
-        self.model = load_lama_mpe(self._get_file_path('lama_large_512px.ckpt'), device='cpu', use_mpe=False, large_arch=True)
+        ckpt_path = self._get_file_path('lama_large_512px.ckpt')
+        
+        # 检查 .ckpt 文件是否存在
+        if not os.path.isfile(ckpt_path):
+            self.logger.info('PyTorch 模型 (.ckpt) 不存在，需要下载')
+            # 标记为未下载，触发下载
+            self._downloaded = False
+            await self._download()
+            self._downloaded = True
+        
+        self.model = load_lama_mpe(ckpt_path, device='cpu', use_mpe=False, large_arch=True)
         self.model.eval()
         self.backend = 'torch'
         if device.startswith('cuda') or device == 'mps':

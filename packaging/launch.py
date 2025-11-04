@@ -785,7 +785,8 @@ def prepare_environment(args):
         
         try:
             # 直接使用 run() 而不是 run_pip() 以完全控制参数顺序
-            amd_pytorch_cmd = f'"{python}" -m pip install torch torchvision torchaudio --index-url {amd_index_url} --no-cache-dir'
+            # 指定最新稳定版本以确保兼容性
+            amd_pytorch_cmd = f'"{python}" -m pip install "torch>=2.9.0" "torchvision>=0.24.0" "torchaudio>=2.9.0" --index-url {amd_index_url} --no-cache-dir'
             run(amd_pytorch_cmd, "正在安装 AMD ROCm PyTorch", "AMD ROCm PyTorch 安装失败", live=True)
             print('\n✓ AMD ROCm PyTorch 安装完成')
             print('\n⚠️  注意:')
