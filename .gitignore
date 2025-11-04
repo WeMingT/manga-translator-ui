@@ -120,6 +120,13 @@ PortableGit/
 !PortableGit/.gitkeep
 !PortableGit/README.md
 
+# Ignore portable Python (users will download it)
+Python-3.12.12/
+python-3.12.12-win64/
+
+# Ignore portable 7-Zip (auto-downloaded)
+Portable7z/
+
 # Ignore launch script temp files
 tmp/
 

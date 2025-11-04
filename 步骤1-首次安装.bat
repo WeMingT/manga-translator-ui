@@ -9,7 +9,7 @@ echo Manga Translator UI - Installer
 echo ========================================
 echo.
 echo 本脚本将自动完成以下步骤:
-echo [1] 检查 Python 3.12+
+echo [1] 下载/解压便携版 Python 3.12 (如需要)
 echo [2] 下载便携版 Git (如需要)
 echo [3] 从 GitHub 克隆代码
 echo [4] 安装 Python 依赖
@@ -17,53 +17,147 @@ echo [5] 完成安装
 echo.
 pause
 
-REM ===== 步骤1: 检查Python =====
+REM ===== 步骤1: 检查/下载/解压便携版Python =====
 echo.
-echo [1/5] 检查 Python 3.12...
+echo [1/5] 检查便携版 Python 3.12...
 echo ========================================
 
-py -3.12 --version >nul 2>&1
-if %ERRORLEVEL% == 0 (
-    set PYTHON=py -3.12
-    echo [OK] 找到 Python 3.12
+REM 检查是否已经解压好
+if exist "Python-3.12.12\python.exe" (
+    set PYTHON=Python-3.12.12\python.exe
+    set PYTHON_VERSION=3.12
+    echo [OK] 找到便携版 Python 3.12
+    Python-3.12.12\python.exe --version
     goto :check_git
 )
 
-python --version >nul 2>&1
-if %ERRORLEVEL% == 0 (
-    python --version | findstr "3\.12\." >nul
-    if %ERRORLEVEL% == 0 (
-        set PYTHON=python
-        echo [OK] 找到 Python 3.12
-        goto :check_git
-    ) else (
-        REM 检查是否是更高版本
-        python --version | findstr "3\.1[3-9]\." >nul
-        if %ERRORLEVEL% == 0 (
-            echo.
-            echo [ERROR] 错误: 检测到 Python 3.13+ 版本
-            echo.
-            echo 本项目仅支持 Python 3.12,不支持更高版本
-            echo 请安装 Python 3.12 版本:
-            echo https://www.python.org/downloads/release/python-3120/
-            echo.
-            pause
-            exit /b 1
-        )
-    )
+echo [INFO] 未找到便携版 Python
+echo.
+
+REM 检查是否已下载压缩包
+if exist "python-3.12.12-win64.7z" (
+    echo [INFO] 找到已下载的压缩包
+    goto :extract_python
+)
+
+echo 需要下载便携版 Python 3.12 (约25MB)
+echo.
+echo 请选择下载源:
+echo [1] GitHub 官方
+echo [2] gh-proxy.com 镜像 (国内推荐)
+echo.
+set /p python_source="请选择 (1/2, 默认2): "
+
+set PYTHON_VERSION_FULL=3.12.12
+set PYTHON_URL_PATH=https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.8.2/python-3.12.12-win64.7z
+
+if "%python_source%"=="1" (
+    set PYTHON_URL=%PYTHON_URL_PATH%
+    echo 使用: GitHub 官方源
+) else (
+    set PYTHON_URL=https://gh-proxy.com/%PYTHON_URL_PATH%
+    echo 使用: gh-proxy.com 镜像
 )
 
 echo.
-echo [ERROR] 错误: 未找到 Python 3.12
+echo 下载中... (约25MB, 可能需要几分钟)
+powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Write-Host '正在下载...'; try { Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile 'python-3.12.12-win64.7z' -UseBasicParsing; Write-Host '[OK] 下载完成'; exit 0 } catch { Write-Host '[ERROR] 下载失败: $_'; exit 1 }}"
+
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo 下载失败,请检查网络连接后重试
+    pause
+    exit /b 1
+)
+
+:extract_python
 echo.
-echo 本项目仅支持 Python 3.12 版本
-echo 请先安装 Python 3.12:
-echo https://www.python.org/downloads/release/python-3120/
+echo 正在解压 Python 3.12...
+echo 需要使用 7-Zip 解压, 正在检查...
+
+REM 检查系统是否已安装7z
+where 7z >nul 2>&1
+if %ERRORLEVEL% == 0 (
+    echo [OK] 找到 7-Zip
+    7z x python-3.12.12-win64.7z -o"Python-3.12.12" -y
+    goto :check_python_extracted
+)
+
+REM 检查常见安装路径
+if exist "C:\Program Files\7-Zip\7z.exe" (
+    echo [OK] 找到 7-Zip
+    "C:\Program Files\7-Zip\7z.exe" x python-3.12.12-win64.7z -o"Python-3.12.12" -y
+    goto :check_python_extracted
+)
+
+REM 检查是否已有便携版7z
+if exist "Portable7z\7zr.exe" (
+    echo [OK] 找到便携版 7-Zip
+    Portable7z\7zr.exe x python-3.12.12-win64.7z -o"Python-3.12.12" -y
+    goto :check_python_extracted
+)
+
+REM 下载便携版7-Zip
+echo [INFO] 未找到 7-Zip
+echo 正在下载便携版 7-Zip (约1MB)...
 echo.
-echo 安装时请勾选 "Add Python to PATH"
-echo.
-pause
-exit /b 1
+
+if not exist "tmp" mkdir tmp
+
+REM 下载7-Zip Extra便携版（包含7zr.exe）
+set SEVENZIP_URL=https://www.7-zip.org/a/7zr.exe
+powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $ProgressPreference = 'SilentlyContinue'; Write-Host '正在下载 7-Zip...'; try { Invoke-WebRequest -Uri '%SEVENZIP_URL%' -OutFile 'tmp\7zr.exe' -UseBasicParsing; Write-Host '[OK] 下载完成'; exit 0 } catch { Write-Host '[ERROR] 下载失败: $_'; exit 1 }}"
+
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [ERROR] 7-Zip 下载失败
+    echo.
+    echo 请选择:
+    echo [1] 安装 7-Zip 后重试
+    echo [2] 手动解压 python-3.12.12-win64.7z 到 Python-3.12.12 文件夹
+    echo [3] 退出
+    echo.
+    set /p extract_choice="请选择 (1/2/3): "
+    
+    if "!extract_choice!"=="1" (
+        start https://www.7-zip.org/download.html
+        pause
+        exit /b 1
+    ) else if "!extract_choice!"=="2" (
+        echo 请手动解压后重新运行本脚本
+        pause
+        exit /b 1
+    )
+    exit /b 1
+)
+
+REM 创建便携版7z目录
+if not exist "Portable7z" mkdir Portable7z
+move /y tmp\7zr.exe Portable7z\7zr.exe >nul
+
+echo [OK] 7-Zip 准备完成
+echo 正在解压 Python...
+Portable7z\7zr.exe x python-3.12.12-win64.7z -o"Python-3.12.12" -y
+
+:check_python_extracted
+if not exist "Python-3.12.12\python.exe" (
+    echo [ERROR] 解压后未找到 python.exe
+    pause
+    exit /b 1
+)
+
+echo [OK] Python 3.12 解压完成
+
+REM 清理压缩包
+if exist "python-3.12.12-win64.7z" (
+    echo 正在清理安装包...
+    del /f /q "python-3.12.12-win64.7z" >nul 2>&1
+    echo [OK] 已删除 python-3.12.12-win64.7z
+)
+
+set PYTHON=Python-3.12.12\python.exe
+set PYTHON_VERSION=3.12
+Python-3.12.12\python.exe --version
 
 REM ===== 步骤2: 检查/下载Git =====
 :check_git
@@ -291,12 +385,12 @@ if exist ".git" (
         echo [WARNING] 无法读取仓库信息,将重新克隆
     )
     
-    REM 删除现有文件和目录(保留venv和PortableGit)
+    REM 删除现有文件和目录(保留venv、PortableGit、Python-3.12.12、Portable7z)
     echo 正在清理旧文件...
     
-    REM 删除目录(保留venv和PortableGit)
+    REM 删除目录(保留venv、PortableGit、Python-3.12.12、Portable7z)
     for /d %%d in (*) do (
-        if /i not "%%d"=="venv" if /i not "%%d"=="PortableGit" (
+        if /i not "%%d"=="venv" if /i not "%%d"=="PortableGit" if /i not "%%d"=="Python-3.12.12" if /i not "%%d"=="Portable7z" (
             echo 删除目录: %%d
             rmdir /s /q "%%d" 2>nul
         )
@@ -484,7 +578,7 @@ if !VENV_VALID! == 0 (
     )
     
     echo 正在创建虚拟环境...
-    %PYTHON% -m venv venv
+    Python-3.12.12\python.exe -m venv venv
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] 虚拟环境创建失败
         pause
