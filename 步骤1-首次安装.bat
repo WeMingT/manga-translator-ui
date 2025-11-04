@@ -32,7 +32,7 @@ REM 检测路径是否包含非ASCII字符（中文等）
 REM 使用PowerShell进行更可靠的检测
 set "TEMP_CHECK_PATH=%CD%"
 powershell -Command "$path = '%TEMP_CHECK_PATH%'; if ($path -match '[^\x00-\x7F]') { exit 1 } else { exit 0 }" >nul 2>&1
-if %ERRORLEVEL% neq 0 (
+if !ERRORLEVEL! neq 0 (
     REM 路径包含中文，使用磁盘根目录
     set MINICONDA_ROOT=%~d0\Miniconda3
     set PATH_HAS_CHINESE=1
@@ -68,7 +68,7 @@ echo 本项目需要 Python 3.12 环境
 echo.
 
 REM 如果路径包含中文，给出说明并使用备用路径
-if %PATH_HAS_CHINESE% == 1 (
+if !PATH_HAS_CHINESE! == 1 (
     echo.
     echo ========================================
     echo [!] 检测到路径包含非英文字符
@@ -76,7 +76,7 @@ if %PATH_HAS_CHINESE% == 1 (
     echo 当前路径: %CD%
     echo.
     echo Miniconda 对非英文路径的兼容性有限
-    echo 将自动使用备用安装路径: %MINICONDA_ROOT%
+    echo 将自动使用备用安装路径: !MINICONDA_ROOT!
     echo (同一磁盘，不同位置)
     echo.
     echo 建议: 为避免其他潜在问题，可以将项目移动到纯英文路径
