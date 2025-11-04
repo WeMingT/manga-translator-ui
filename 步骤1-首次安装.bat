@@ -29,13 +29,11 @@ set PATH_HAS_CHINESE=0
 set ALT_INSTALL_PATH=
 
 REM 检测路径是否包含非ASCII字符（中文等）
-for /f "delims=" %%i in ('echo %CD%^| findstr /R "[^\x00-\x7F]"') do set PATH_HAS_CHINESE=1
-
-REM 如果检测到非ASCII字符，准备备用路径
-if %PATH_HAS_CHINESE% == 1 (
-    REM 使用当前磁盘根目录的Miniconda3作为备用
-    set ALT_INSTALL_PATH=%~d0\Miniconda3
+echo %CD%| findstr /R /C:"[^\x00-\x7F]" >nul
+if %ERRORLEVEL% == 0 (
+    REM 路径包含中文，使用磁盘根目录
     set MINICONDA_ROOT=%~d0\Miniconda3
+    set PATH_HAS_CHINESE=1
 )
 
 if exist "%MINICONDA_ROOT%\Scripts\conda.exe" (
