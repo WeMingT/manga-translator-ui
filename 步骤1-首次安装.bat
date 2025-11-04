@@ -95,9 +95,9 @@ echo.
 echo 正在下载 Miniconda...
 echo.
 
-REM Miniconda下载链接
-set MINICONDA_OFFICIAL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe
-set MINICONDA_TUNA=https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-Windows-x86_64.exe
+        REM Miniconda下载链接（Python 3.12版本）
+        set MINICONDA_OFFICIAL=https://repo.anaconda.com/miniconda/Miniconda3-py312_25.9.1-1-Windows-x86_64.exe
+        set MINICONDA_TUNA=https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-py312_25.9.1-1-Windows-x86_64.exe
 
 echo 请选择下载源:
 echo [1] 清华大学镜像 (国内推荐, 更快)
