@@ -34,8 +34,8 @@ for /f "delims=" %%i in ('echo %CD%^| findstr /R "[^\x00-\x7F]"') do set PATH_HA
 REM 如果检测到非ASCII字符，准备备用路径
 if %PATH_HAS_CHINESE% == 1 (
     REM 使用当前磁盘根目录的Miniconda3作为备用
-    set ALT_INSTALL_PATH=%~d0\Miniconda3_MangaTranslator
-    set MINICONDA_ROOT=%~d0\Miniconda3_MangaTranslator
+    set ALT_INSTALL_PATH=%~d0\Miniconda3
+    set MINICONDA_ROOT=%~d0\Miniconda3
 )
 
 if exist "%MINICONDA_ROOT%\Scripts\conda.exe" (

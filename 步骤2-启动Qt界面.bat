@@ -9,7 +9,7 @@ set MINICONDA_ROOT=%CD%\Miniconda3
 REM 检测路径是否包含非ASCII字符（中文等）
 for /f "delims=" %%i in ('echo %CD%^| findstr /R "[^\x00-\x7F]"') do (
     REM 如果路径包含非ASCII字符，使用备用Miniconda路径
-    set MINICONDA_ROOT=%~d0\Miniconda3_MangaTranslator
+    set MINICONDA_ROOT=%~d0\Miniconda3
 )
 
 where conda >nul 2>&1
