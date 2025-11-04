@@ -28,9 +28,20 @@ if not exist "%CONDA_ENV_PATH%\python.exe" (
 )
 
 REM 激活conda环境
-call conda activate "%CONDA_ENV_PATH%"
+REM 使用直接路径激活，避免conda activate的路径问题
+if exist "%CD%\Miniconda3\Scripts\activate.bat" (
+    call "%CD%\Miniconda3\Scripts\activate.bat" "%CONDA_ENV_PATH%" 2>nul
+    if %ERRORLEVEL% neq 0 (
+        REM 尝试使用conda activate作为备用
+        call conda activate "%CONDA_ENV_PATH%" 2>nul
+    )
+) else (
+    call conda activate "%CONDA_ENV_PATH%" 2>nul
+)
+
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] 无法激活环境
+    echo 请检查Conda是否正确安装
     pause
     exit /b 1
 )

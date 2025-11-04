@@ -57,7 +57,7 @@ if %PATH_HAS_CHINESE% == 1 (
     echo 当前路径: %CD%
     echo.
     echo Miniconda 对非英文路径的支持不完善，可能导致:
-    echo   - 安装失败
+    echo   - 安装失败或激活失败
     echo   - 某些功能异常
     echo   - 包安装错误
     echo.
@@ -646,9 +646,24 @@ if %CONDA_ENV_EXISTS% == 0 (
 
 echo.
 echo 正在激活环境...
-call conda activate "%CONDA_ENV_PATH%"
+REM 使用直接路径激活，避免conda activate的路径问题
+if exist "%CD%\Miniconda3\Scripts\activate.bat" (
+    call "%CD%\Miniconda3\Scripts\activate.bat" "%CONDA_ENV_PATH%" 2>nul
+    if !ERRORLEVEL! neq 0 (
+        REM 尝试使用conda activate作为备用
+        call conda activate "%CONDA_ENV_PATH%" 2>nul
+    )
+) else (
+    call conda activate "%CONDA_ENV_PATH%" 2>nul
+)
+
 if !ERRORLEVEL! neq 0 (
     echo [ERROR] 环境激活失败
+    echo.
+    echo 可能原因:
+    echo   - 路径包含特殊字符
+    echo   - Conda未正确安装
+    echo.
     pause
     exit /b 1
 )
