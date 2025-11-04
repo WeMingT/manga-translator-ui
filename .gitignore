@@ -133,3 +133,6 @@ gen_scripts.py
 ailab-main/
 manga-image-translator-rust-master/
 examples/config.json
+
+# Ignore local build directories
+pydensecrf/
