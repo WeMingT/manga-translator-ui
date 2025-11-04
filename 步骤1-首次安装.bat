@@ -738,9 +738,12 @@ set /p clean_cache="是否清理 pip 缓存? (y/n, 默认n): "
 if /i "%clean_cache%"=="y" (
     echo.
     echo 正在清理 pip 缓存...
-    call venv\Scripts\activate.bat
     python -m pip cache purge >nul 2>&1
-    echo [OK] 缓存已清理
+    if errorlevel 1 (
+        echo [WARNING] 缓存清理失败，可能权限不足
+    ) else (
+        echo [OK] 缓存已清理
+    )
 ) else (
     echo [INFO] 跳过缓存清理
 )
