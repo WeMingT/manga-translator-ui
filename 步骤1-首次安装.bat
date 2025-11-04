@@ -68,6 +68,11 @@ echo.
 echo 本项目需要 Python 3.12 环境
 echo.
 
+REM [DEBUG] 检查路径变量
+echo [DEBUG] PATH_HAS_CHINESE = !PATH_HAS_CHINESE!
+echo [DEBUG] MINICONDA_ROOT = !MINICONDA_ROOT!
+echo.
+
 REM 如果路径包含中文，给出说明并使用备用路径
 if !PATH_HAS_CHINESE! == 1 (
     echo ========================================
@@ -83,6 +88,9 @@ if !PATH_HAS_CHINESE! == 1 (
     echo       例如: D:\manga-translator\
     echo.
     pause
+    echo.
+) else (
+    echo [DEBUG] 路径不包含中文，跳过备用路径提示
     echo.
 )
 
