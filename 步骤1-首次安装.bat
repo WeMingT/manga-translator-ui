@@ -63,13 +63,13 @@ if exist "%MINICONDA_ROOT%\Scripts\conda.exe" (
 
 REM 提示：需要安装本地Miniconda
 echo [INFO] 未检测到本地 Miniconda
+echo ========================================
 echo.
 echo 本项目需要 Python 3.12 环境
 echo.
 
 REM 如果路径包含中文，给出说明并使用备用路径
 if !PATH_HAS_CHINESE! == 1 (
-    echo.
     echo ========================================
     echo [!] 检测到路径包含非英文字符
     echo ========================================
@@ -83,6 +83,7 @@ if !PATH_HAS_CHINESE! == 1 (
     echo       例如: D:\manga-translator\
     echo.
     pause
+    echo.
 )
 
 echo 将安装 Miniconda 到: %MINICONDA_ROOT%
