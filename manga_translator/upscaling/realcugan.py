@@ -148,13 +148,29 @@ class RealCUGANUpscaler(OfflineUpscaler):
             from pathlib import Path
             
             project_root = Path(__file__).parent.parent.parent
+            logger.info(f'Project root: {project_root}')
+            
             models_path = project_root / 'models'
+            logger.info(f'Models path: {models_path}')
+            logger.info(f'Models path exists: {models_path.exists()}')
+            
             upcunet_path = models_path / 'RealCUGAN' / 'upcunet_v3.py'
+            logger.info(f'Upcunet path: {upcunet_path}')
+            logger.info(f'Upcunet path exists: {upcunet_path.exists()}')
+            
+            if not upcunet_path.exists():
+                raise FileNotFoundError(f'upcunet_v3.py not found at {upcunet_path}')
             
             # Load module dynamically
+            logger.info('Loading upcunet_v3 module dynamically...')
             spec = importlib.util.spec_from_file_location("upcunet_v3", upcunet_path)
+            if spec is None:
+                raise ImportError(f'Failed to create spec for {upcunet_path}')
+            
             upcunet_v3 = importlib.util.module_from_spec(spec)
+            sys.modules['upcunet_v3'] = upcunet_v3  # Add to sys.modules
             spec.loader.exec_module(upcunet_v3)
+            logger.info('Successfully loaded upcunet_v3 module')
             
             # Create model based on scale
             if self.scale == 2:
