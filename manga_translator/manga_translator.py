@@ -449,6 +449,9 @@ class MangaTranslator:
         if self.upscale_only:
             logger.info("Upscale Only mode: Running upscaling only, skipping detection, OCR, translation and rendering.")
             
+            # Initialize img_colorized (same as batch processing flow)
+            ctx.img_colorized = ctx.input
+            
             # Run upscaling if enabled
             if config.upscale.upscale_ratio:
                 await self._report_progress('upscaling')

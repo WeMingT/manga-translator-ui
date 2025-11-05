@@ -212,10 +212,6 @@ class RealCUGANUpscaler(OfflineUpscaler):
         device = next(self.model.parameters()).device
         
         for img in image_batch:
-            if img is None:
-                logger.error('Received None image in batch, skipping')
-                continue
-                
             # Use tiling only if tile_size > 0
             if self.tile_size > 0:
                 output_img = self._process_with_tiles(img, device, self.tile_size)
@@ -223,10 +219,7 @@ class RealCUGANUpscaler(OfflineUpscaler):
                 logger.info('Processing full image without tiling')
                 output_img = self._process_single(img, device)
             
-            if output_img is not None:
-                results.append(output_img)
-            else:
-                logger.error('Model returned None for image')
+            results.append(output_img)
         
         return results
     
