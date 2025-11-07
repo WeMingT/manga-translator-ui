@@ -67,6 +67,7 @@ class MainAppLogic(QObject):
         self.thread = None
         self.worker = None
         self.saved_files_count = 0
+        self.saved_files_list = []  # 收集所有保存的文件路径
 
         self.source_files: List[str] = [] # Holds both files and folders
         self.file_to_folder_map: Dict[str, Optional[str]] = {} # 记录文件来自哪个文件夹
@@ -144,6 +145,7 @@ class MainAppLogic(QObject):
             self._update_translation_map(original_path, final_output_path)
 
             self.saved_files_count += 1
+            self.saved_files_list.append(final_output_path)  # 收集保存的文件路径
             self.logger.info(f"成功保存文件: {final_output_path}")
             self.task_file_completed.emit({'path': final_output_path})
 
@@ -624,6 +626,7 @@ class MainAppLogic(QObject):
             return
 
         self.saved_files_count = 0
+        self.saved_files_list = []  # 重置保存文件列表
         self.thread = QThread()
         self.worker = TranslationWorker(
             files=files_to_process,
@@ -724,6 +727,10 @@ class MainAppLogic(QObject):
 
         # This part runs for both sequential and batch modes
         self.logger.info(f"翻译任务完成。总共成功处理 {self.saved_files_count} 个文件。")
+        
+        # 对于顺序处理模式，使用累积的 saved_files_list
+        if not saved_files and self.saved_files_list:
+            saved_files = self.saved_files_list.copy()
         
         try:
             print("--- DEBUG: on_task_finished step 1: Setting translating state to False.")

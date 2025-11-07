@@ -42,6 +42,7 @@ class MangaColorizationV2(OfflineColorizer):
     async def _infer(self, image: Image.Image, colorization_size: int, denoise_sigma=25, **kwargs) -> Image.Image:
         # Size has to be multiple of 32
         img = np.array(image.convert('RGBA'))
+        original_size = image.size  # 保存原始尺寸 (width, height)
         max_size = min(*img.shape[:2])
         max_size -= max_size % 32
         if colorization_size > 0:
@@ -71,4 +72,10 @@ class MangaColorizationV2(OfflineColorizer):
             result = result[:, :-current_pad[1]]
 
         colored_image = result.numpy() * 255
-        return Image.fromarray(colored_image.astype(np.uint8))
+        colored_img_pil = Image.fromarray(colored_image.astype(np.uint8))
+        
+        # 恢复到原始尺寸
+        if colored_img_pil.size != original_size:
+            colored_img_pil = colored_img_pil.resize(original_size, Image.Resampling.LANCZOS)
+        
+        return colored_img_pil
