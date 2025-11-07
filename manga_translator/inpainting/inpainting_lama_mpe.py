@@ -190,9 +190,19 @@ class LamaMPEInpainter(OfflineInpainter):
             del self.model
 
     async def _infer(self, image: np.ndarray, mask: np.ndarray, config: InpainterConfig, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
-        # ✅ ONNX推理（lamampe.onnx实际是Lama Large，不含MPE）
+        # ✅ ONNX推理（lamampe.onnx实际是Lama Large，不含MPE），失败时自动降级到PyTorch
         if hasattr(self, 'backend') and self.backend == 'onnx':
-            return await self._infer_onnx(image, mask, inpainting_size, verbose)
+            try:
+                return await self._infer_onnx(image, mask, inpainting_size, verbose)
+            except Exception as e:
+                self.logger.warning(f'ONNX推理失败（{str(e)[:100]}），本次降级到PyTorch')
+                # 降级：需要加载PyTorch模型
+                if not hasattr(self, 'model'):
+                    self.logger.info('正在加载PyTorch模型...')
+                    self.model = load_lama_mpe(self._get_file_path('inpainting_lama_mpe.ckpt'), device='cpu')
+                    self.model.eval()
+                    if self.device.startswith('cuda') or self.device == 'mps':
+                        self.model.to(self.device)
         
         # ✅ PyTorch推理（原有逻辑）
         img_original = np.copy(image)
@@ -550,9 +560,25 @@ class LamaLargeInpainter(LamaMPEInpainter):
                 del self.model
     
     async def _infer(self, image: np.ndarray, mask: np.ndarray, config: InpainterConfig, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
-        # ✅ ONNX推理
+        # ✅ ONNX推理，失败时自动降级到PyTorch
         if hasattr(self, 'backend') and self.backend == 'onnx':
-            return await self._infer_onnx(image, mask, inpainting_size, verbose)
+            try:
+                return await self._infer_onnx(image, mask, inpainting_size, verbose)
+            except Exception as e:
+                self.logger.warning(f'ONNX推理失败（{str(e)[:100]}），本次降级到PyTorch')
+                # 降级：需要加载PyTorch模型
+                if not hasattr(self, 'model'):
+                    self.logger.info('正在加载PyTorch模型...')
+                    ckpt_path = self._get_file_path('lama_large_512px.ckpt')
+                    if not os.path.isfile(ckpt_path):
+                        self.logger.info('PyTorch 模型 (.ckpt) 不存在，需要下载')
+                        self._downloaded = False
+                        await self._download()
+                        self._downloaded = True
+                    self.model = load_lama_mpe(ckpt_path, device='cpu', use_mpe=False, large_arch=True)
+                    self.model.eval()
+                    if self.device.startswith('cuda') or self.device == 'mps':
+                        self.model.to(self.device)
         
         # ✅ PyTorch推理（调用父类）
         return await super()._infer(image, mask, config, inpainting_size, verbose)

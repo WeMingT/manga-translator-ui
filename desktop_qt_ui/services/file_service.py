@@ -13,6 +13,7 @@ from typing import List, Optional, Set, Tuple
 
 import cv2
 import numpy as np
+from PIL import Image
 
 # 添加项目根目录到路径以便导入path_manager
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -35,7 +36,7 @@ class FileService:
             '.json', '.yaml', '.yml', '.toml'
         }
 
-    def load_translation_json(self, image_path: str) -> Tuple[List[dict], Optional[np.ndarray], Optional[Tuple[int, int]]]:
+    def load_translation_json(self, image_path: str, image: Image.Image = None) -> Tuple[List[dict], Optional[np.ndarray], Optional[Tuple[int, int]]]:
         """
         根据给定的图片路径，加载关联的 _translations.json 文件。
         优先从新目录结构加载，支持向后兼容。
@@ -70,6 +71,33 @@ class FileService:
                 image_data = data[image_key]
 
             regions = image_data.get('regions', [])
+            
+            # 检查是否有超分倍率，如果有则总是缩小坐标和字体大小
+            upscale_ratio = image_data.get('upscale_ratio', 0)
+            if upscale_ratio and upscale_ratio > 0:
+                self.logger.info(f"检测到超分倍率: {upscale_ratio}, 将坐标和字体大小缩小到原图比例")
+                for region in regions:
+                    # 缩放坐标
+                    if 'lines' in region:
+                        lines = region['lines']
+                        if isinstance(lines, list):
+                            # 将坐标除以upscale_ratio
+                            scaled_lines = []
+                            for poly in lines:
+                                scaled_poly = []
+                                for point in poly:
+                                    if isinstance(point, (list, tuple)) and len(point) >= 2:
+                                        scaled_point = [point[0] / upscale_ratio, point[1] / upscale_ratio]
+                                        scaled_poly.append(scaled_point)
+                                if scaled_poly:
+                                    scaled_lines.append(scaled_poly)
+                            region['lines'] = scaled_lines
+                    
+                    # 缩放字体大小
+                    if 'font_size' in region and region['font_size']:
+                        original_font_size = region['font_size']
+                        region['font_size'] = int(original_font_size / upscale_ratio)
+                        self.logger.debug(f"Font size scaled: {original_font_size} → {region['font_size']}")
 
             config = self.config_service.get_config()
             default_target_lang = config.translator.target_lang if config else None
@@ -85,11 +113,23 @@ class FileService:
                     img_bytes = base64.b64decode(mask_data)
                     img_array = np.frombuffer(img_bytes, dtype=np.uint8)
                     raw_mask = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
+                    # 如果有超分倍率，缩小mask
+                    if upscale_ratio and upscale_ratio > 0 and raw_mask is not None:
+                        new_height = int(raw_mask.shape[0] / upscale_ratio)
+                        new_width = int(raw_mask.shape[1] / upscale_ratio)
+                        raw_mask = cv2.resize(raw_mask, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                        self.logger.info(f"蒙版已缩小到原图比例: {raw_mask.shape}")
                 except Exception as e:
                     self.logger.error(f"Failed to decode base64 mask in {os.path.basename(json_path)}: {e}")
                     raw_mask = None
             elif isinstance(mask_data, list):
                 raw_mask = np.array(mask_data, dtype=np.uint8)
+                # 如果有超分倍率，缩小mask
+                if upscale_ratio and upscale_ratio > 0 and raw_mask is not None:
+                    new_height = int(raw_mask.shape[0] / upscale_ratio)
+                    new_width = int(raw_mask.shape[1] / upscale_ratio)
+                    raw_mask = cv2.resize(raw_mask, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                    self.logger.info(f"蒙版已缩小到原图比例: {raw_mask.shape}")
             
             original_size = (image_data.get('original_width'), image_data.get('original_height'))
 

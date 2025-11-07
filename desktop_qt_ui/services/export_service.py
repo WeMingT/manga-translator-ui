@@ -166,7 +166,7 @@ class ExportService:
                 # 保存区域数据到JSON文件，使用load_text模式期望的文件名格式
                 base_name = os.path.splitext(os.path.basename(temp_image_path))[0]
                 regions_json_path = os.path.join(temp_dir, f"{base_name}_translations.json")
-                self._save_regions_data(regions_data, regions_json_path, mask)
+                self._save_regions_data(regions_data, regions_json_path, mask, config)
                 
                 if progress_callback:
                     progress_callback("初始化翻译引擎...")
@@ -261,7 +261,7 @@ class ExportService:
             # 强制执行垃圾回收，释放内存
             gc.collect()
     
-    def _save_regions_data(self, regions_data: List[Dict[str, Any]], json_path: str, mask: Optional[np.ndarray] = None):
+    def _save_regions_data(self, regions_data: List[Dict[str, Any]], json_path: str, mask: Optional[np.ndarray] = None, config: Optional[Dict[str, Any]] = None):
         """保存区域数据到JSON文件，确保格式与TextBlock兼容"""
         # 准备保存数据，确保数据格式正确
         save_data = []
@@ -377,6 +377,23 @@ class ExportService:
             }
         }
         
+        # 添加超分和上色配置信息
+        if config:
+            upscale_config = config.get('upscale', {})
+            upscale_ratio = upscale_config.get('upscale_ratio', 0)
+            if upscale_ratio:
+                formatted_data[image_key]['upscale_ratio'] = upscale_ratio
+                upscaler = upscale_config.get('upscaler', '')
+                if upscaler:
+                    formatted_data[image_key]['upscaler'] = upscaler
+                self.logger.info(f"在JSON中记录超分信息: ratio={upscale_ratio}, upscaler={upscaler}")
+            
+            colorizer_config = config.get('colorizer', {})
+            colorizer = colorizer_config.get('colorizer', '')
+            if colorizer and colorizer != 'none':
+                formatted_data[image_key]['colorizer'] = colorizer
+                self.logger.info(f"在JSON中记录上色信息: colorizer={colorizer}")
+        
         # 如果有蒙版数据，则添加到JSON中
         if mask is not None:
             self.logger.info("在导出JSON中加入预计算的蒙版。")
@@ -431,6 +448,17 @@ class ExportService:
         translator_params['load_text'] = True  # 关键：启用加载文本模式
         translator_params['save_text'] = False  # 不保存文本
         
+        # 添加调试日志
+        self.logger.info(f"Config keys: {list(config.keys())}")
+        if 'upscale' in config:
+            self.logger.info(f"Upscale config: {config['upscale']}")
+        else:
+            self.logger.warning("No upscale config found in config")
+        if 'colorizer' in config:
+            self.logger.info(f"Colorizer config: {config['colorizer']}")
+        else:
+            self.logger.warning("No colorizer config found in config")
+        
         # 关键：设置翻译器为none，跳过翻译步骤，直接渲染
         translator_params['translator'] = 'none'
         self.logger.info("设置翻译器为none，启用load_text模式，跳过翻译步骤，直接进行渲染")
@@ -474,10 +502,18 @@ class ExportService:
             render_cfg = RenderConfig(**render_config)
 
             # 创建翻译器配置，设置为none以跳过翻译
-            from manga_translator.config import TranslatorConfig
+            from manga_translator.config import TranslatorConfig, UpscaleConfig, ColorizerConfig
             translator_cfg = TranslatorConfig(translator='none')
+            
+            # 从config中提取upscale和colorizer配置
+            upscale_config = config.get('upscale', {})
+            colorizer_config = config.get('colorizer', {})
+            upscale_cfg = UpscaleConfig(**upscale_config) if upscale_config else UpscaleConfig()
+            colorizer_cfg = ColorizerConfig(**colorizer_config) if colorizer_config else ColorizerConfig()
+            
+            self.logger.info(f"Creating Config with upscale_ratio={upscale_cfg.upscale_ratio}, colorizer={colorizer_cfg.colorizer}")
 
-            cfg = Config(render=render_cfg, translator=translator_cfg)
+            cfg = Config(render=render_cfg, translator=translator_cfg, upscale=upscale_cfg, colorizer=colorizer_cfg)
 
             if progress_callback:
                 progress_callback("执行后端渲染...")
@@ -512,10 +548,10 @@ class ExportService:
             if image:
                 image.close()
     
-    def export_regions_json(self, regions_data: List[Dict[str, Any]], output_path: str) -> bool:
+    def export_regions_json(self, regions_data: List[Dict[str, Any]], output_path: str, config: Optional[Dict[str, Any]] = None) -> bool:
         """导出区域数据为JSON文件"""
         try:
-            self._save_regions_data(regions_data, output_path)
+            self._save_regions_data(regions_data, output_path, None, config)
             self.logger.info(f"区域数据已导出到: {output_path}")
             return True
         except Exception as e:

@@ -81,9 +81,22 @@ class LamaInpainter(LamaMPEInpainter):
             del self.model
     
     async def _infer(self, image: np.ndarray, mask: np.ndarray, config, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
-        # ✅ ONNX推理（default模型，2个输入）
+        # ✅ ONNX推理（default模型，2个输入），失败时自动降级到PyTorch
         if hasattr(self, 'backend') and self.backend == 'onnx':
-            return await self._infer_onnx_default(image, mask, inpainting_size, verbose)
+            try:
+                return await self._infer_onnx_default(image, mask, inpainting_size, verbose)
+            except Exception as e:
+                self.logger.warning(f'ONNX推理失败（{str(e)[:100]}），本次降级到PyTorch')
+                # 降级：需要加载PyTorch模型
+                if not hasattr(self, 'model'):
+                    self.logger.info('正在加载PyTorch模型...')
+                    model = get_generator()
+                    sd = torch.load(self._get_file_path('inpainting_lama.ckpt'), map_location='cpu')
+                    model.load_state_dict(sd['model'] if 'model' in sd else sd)
+                    self.model = model
+                    self.model.eval()
+                    if self.device.startswith('cuda') or self.device == 'mps':
+                        self.model.to(self.device)
         
         # ✅ PyTorch推理（调用父类）
         return await super()._infer(image, mask, config, inpainting_size, verbose)

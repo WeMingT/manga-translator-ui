@@ -397,7 +397,7 @@ class EditorController(QObject):
                 return
 
             # 原图或无翻译映射的图片：正常加载JSON
-            # Call FileService to handle JSON loading and parsing
+            # Call FileService to handle JSON loading and parsing  
             regions, raw_mask, original_size = self.file_service.load_translation_json(image_path)
 
             # First, import render parameters from the loaded JSON data
@@ -436,6 +436,10 @@ class EditorController(QObject):
                 # 加载inpainted图片并触发信号
                 try:
                     inpainted_image = Image.open(inpainted_path)
+                    # 如果inpainted图尺寸与原图不同，缩放到原图尺寸
+                    if inpainted_image.size != image.size:
+                        self.logger.info(f"Resizing inpainted image from {inpainted_image.size} to {image.size}")
+                        inpainted_image = inpainted_image.resize(image.size, Image.LANCZOS)
                     self.model.set_inpainted_image(inpainted_image)
                     self.logger.info(f"Loaded inpainted image: {inpainted_path}")
                 except Exception as e:
@@ -537,6 +541,12 @@ class EditorController(QObject):
                 self.logger.info(f"Loading existing inpainted image from: {inpainted_path}")
                 try:
                     inpainted_image = Image.open(inpainted_path)
+                    # 获取原图尺寸
+                    original_image = self.model.get_image()
+                    # 如果inpainted图尺寸与原图不同，缩放到原图尺寸
+                    if original_image and inpainted_image.size != original_image.size:
+                        self.logger.info(f"Resizing inpainted image from {inpainted_image.size} to {original_image.size}")
+                        inpainted_image = inpainted_image.resize(original_image.size, Image.LANCZOS)
                     inpainted_image_np = np.array(inpainted_image.convert("RGB"))
 
                     self.model.set_inpainted_image(inpainted_image)
@@ -1570,6 +1580,17 @@ class EditorController(QObject):
                 config_dict = config.dict()
             else:
                 config_dict = {}
+            
+            # 添加调试日志，查看upscale和colorizer配置
+            self.logger.info(f"Config keys: {list(config_dict.keys())}")
+            if 'upscale' in config_dict:
+                self.logger.info(f"Upscale config: {config_dict['upscale']}")
+            else:
+                self.logger.warning("No upscale config found in config_dict")
+            if 'colorizer' in config_dict:
+                self.logger.info(f"Colorizer config: {config_dict['colorizer']}")
+            else:
+                self.logger.warning("No colorizer config found in config_dict")
 
             # 添加调试信息
             self.logger.info(f"Export called with {len(regions)} regions")

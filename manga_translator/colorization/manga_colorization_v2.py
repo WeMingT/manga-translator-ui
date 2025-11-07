@@ -1,4 +1,5 @@
 import os
+import cv2
 import torch
 import numpy as np
 from PIL import Image
@@ -51,8 +52,17 @@ class MangaColorizationV2(OfflineColorizer):
             # size<=576 gives best results
             size = min(max_size, 576)
 
+        # Denoising前先保存原始img尺寸，因为denoiser可能会改变尺寸
+        img_shape_before_denoise = img.shape[:2]
+        
         if 0 <= denoise_sigma and denoise_sigma <= 255:
             img = self.denoiser.get_denoised_image(img, sigma=denoise_sigma)
+        
+        # 如果denoiser改变了尺寸，恢复回去
+        if img.shape[:2] != img_shape_before_denoise:
+            # denoiser可能缩小了图片，需要恢复
+            # 注意：cv2.resize的参数是 (width, height)，而shape是 (height, width, channels)
+            img = cv2.resize(img, (img_shape_before_denoise[1], img_shape_before_denoise[0]), interpolation=cv2.INTER_LINEAR)
 
         img, current_pad = resize_pad(img, size)
 

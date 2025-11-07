@@ -414,6 +414,7 @@ class MangaTranslator:
         ctx.result = None
         ctx.verbose = self.verbose
         ctx.save_quality = self.save_quality
+        ctx.config = config  # 保存config以便后续使用
 
         # 设置图片上下文以生成调试图片子文件夹
         self._set_image_context(config, image)
@@ -502,7 +503,36 @@ class MangaTranslator:
                         region.font_size = min(int(box_height * 0.8), 128)
 
                 ctx.text_regions = loaded_regions
-                ctx.img_rgb, ctx.img_alpha = load_image(ctx.input)
+                
+                # -- 在load_text模式下也执行上色和超分 --
+                # Colorization
+                if config.colorizer.colorizer != Colorizer.none:
+                    await self._report_progress('colorizing')
+                    try:
+                        ctx.img_colorized = await self._run_colorizer(config, ctx)
+                    except Exception as e:  
+                        logger.error(f"Error during colorizing in load_text mode:\n{traceback.format_exc()}")  
+                        if not self.ignore_errors:  
+                            raise  
+                        ctx.img_colorized = ctx.input  # Fallback to input image if colorization fails
+                else:
+                    ctx.img_colorized = ctx.input
+
+                # Upscaling
+                if config.upscale.upscale_ratio:
+                    await self._report_progress('upscaling')
+                    try:
+                        ctx.upscaled = await self._run_upscaling(config, ctx)
+                    except Exception as e:  
+                        logger.error(f"Error during upscaling in load_text mode:\n{traceback.format_exc()}")  
+                        if not self.ignore_errors:  
+                            raise  
+                        ctx.upscaled = ctx.img_colorized # Fallback to colorized (or input) image if upscaling fails
+                else:
+                    ctx.upscaled = ctx.img_colorized
+
+                # 使用上色和超分后的图片进行后续处理
+                ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
 
                 # 加载文本模式不需要翻译处理，直接跳过到渲染阶段
                 
@@ -519,6 +549,30 @@ class MangaTranslator:
                         polygons = [p.reshape((-1, 1, 2)) for r in ctx.text_regions for p in r.lines]
                         cv2.fillPoly(mask, polygons, 255)
                         ctx.mask_raw = mask
+                
+                # 如果执行了超分，需要将mask和坐标也超分到相同尺寸
+                if config.upscale.upscale_ratio:
+                    upscale_ratio = config.upscale.upscale_ratio
+                    if ctx.mask_raw is not None:
+                        logger.info(f"Upscaling mask_raw from {ctx.mask_raw.shape} to match upscaled image {ctx.img_rgb.shape[:2]}")
+                        ctx.mask_raw = cv2.resize(ctx.mask_raw, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+                    if ctx.mask is not None:
+                        logger.info(f"Upscaling mask from {ctx.mask.shape} to match upscaled image {ctx.img_rgb.shape[:2]}")
+                        ctx.mask = cv2.resize(ctx.mask, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+                    
+                    # 同时放大文本区域的坐标和字体大小
+                    logger.info(f"Upscaling text region coordinates and font sizes by {upscale_ratio}x")
+                    for i, region in enumerate(ctx.text_regions):
+                        # 放大坐标
+                        old_lines = region.lines.copy()
+                        region.lines = region.lines * upscale_ratio
+                        # 放大字体大小
+                        if hasattr(region, 'font_size') and region.font_size:
+                            old_font_size = region.font_size
+                            region.font_size = int(region.font_size * upscale_ratio)
+                            logger.debug(f"Region {i}: coordinates scaled, font_size {old_font_size} → {region.font_size}")
+                        else:
+                            logger.debug(f"Region {i}: coordinates scaled, no font_size to scale")
                 
                 # Mask generation
                 if ctx.mask is None:  # Only run mask refinement if no pre-refined mask is loaded
@@ -570,7 +624,14 @@ class MangaTranslator:
         if ( self.models_ttl == 0 and not self._models_loaded ):
             logger.info('Loading models')
             if config.upscale.upscale_ratio:
-                await prepare_upscaling(config.upscale.upscaler)
+                # 传递超分配置参数
+                upscaler_kwargs = {}
+                if config.upscale.upscaler == 'realcugan':
+                    if config.upscale.realcugan_model:
+                        upscaler_kwargs['model_name'] = config.upscale.realcugan_model
+                    if config.upscale.tile_size is not None:
+                        upscaler_kwargs['tile_size'] = config.upscale.tile_size
+                await prepare_upscaling(config.upscale.upscaler, **upscaler_kwargs)
             await prepare_detection(config.detector.detector)
             await prepare_ocr(config.ocr.ocr, self.device)
             await prepare_inpainting(config.inpainter.inpainter, self.device)
@@ -600,7 +661,7 @@ class MangaTranslator:
 
         return ctx
 
-    def _save_text_to_file(self, image_path: str, ctx: Context):
+    def _save_text_to_file(self, image_path: str, ctx: Context, config: Config = None):
         """保存翻译数据到JSON文件，使用新的目录结构"""
         text_output_file = self.text_output_file
         if not text_output_file:
@@ -619,6 +680,18 @@ class MangaTranslator:
             'original_width': original_width,
             'original_height': original_height
         }
+        
+        # 添加超分和上色配置信息
+        if config:
+            if config.upscale and config.upscale.upscale_ratio:
+                data_to_save['upscale_ratio'] = config.upscale.upscale_ratio
+                if config.upscale.upscaler:
+                    data_to_save['upscaler'] = config.upscale.upscaler
+                logger.info(f"在JSON中记录超分信息: ratio={config.upscale.upscale_ratio}, upscaler={config.upscale.upscaler}")
+            
+            if config.colorizer and config.colorizer.colorizer and config.colorizer.colorizer != 'none':
+                data_to_save['colorizer'] = config.colorizer.colorizer
+                logger.info(f"在JSON中记录上色信息: colorizer={config.colorizer.colorizer}")
 
         if self.save_mask and ctx.mask_raw is not None:
             try:
@@ -1009,7 +1082,7 @@ class MangaTranslator:
 
             # 保存JSON文件
             if hasattr(ctx, 'image_name') and ctx.image_name:
-                self._save_text_to_file(ctx.image_name, ctx)
+                self._save_text_to_file(ctx.image_name, ctx, config)
                 logger.info(f"JSON template saved for {os.path.basename(ctx.image_name)}.")
                 
                 # 直接导出TXT文件（原文）
@@ -2095,7 +2168,9 @@ class MangaTranslator:
         # --- Save JSON after all post-processing (including punctuation replacement and filtering) ---
         if self.save_text or self.text_output_file:
             if hasattr(ctx, 'image_name') and ctx.image_name:
-                self._save_text_to_file(ctx.image_name, ctx)
+                # 使用ctx中保存的config，如果没有则使用当前config参数
+                config_to_use = getattr(ctx, 'config', config) if hasattr(ctx, 'config') else config
+                self._save_text_to_file(ctx.image_name, ctx, config_to_use)
                 logger.info(f"Translations saved to JSON for {ctx.image_name} (after post-processing).")
             else:
                 logger.warning("Could not save translation file, image_name not in context.")
@@ -2546,7 +2621,7 @@ class MangaTranslator:
                 logger.info("'Generate and Export' mode enabled for standard batch. Skipping rendering.")
                 for ctx, config in translated_contexts:
                     if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
-                        self._save_text_to_file(ctx.image_name, ctx)
+                        self._save_text_to_file(ctx.image_name, ctx, config)
                         try:
                             json_path = find_json_path(ctx.image_name)
                             if json_path and os.path.exists(json_path):
@@ -2630,7 +2705,8 @@ class MangaTranslator:
                             logger.error(f"Error saving standard batch result for {os.path.basename(ctx.image_name)}: {save_err}")
 
                     if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
-                        self._save_text_to_file(ctx.image_name, ctx)
+                        # 使用循环变量中的config，而不是从ctx中获取
+                        self._save_text_to_file(ctx.image_name, ctx, config)
 
                     results.append(ctx)
                 except Exception as e:
@@ -2665,7 +2741,14 @@ class MangaTranslator:
         if ( self.models_ttl == 0 and not self._models_loaded ):
             logger.info('Loading models')
             if config.upscale.upscale_ratio:
-                await prepare_upscaling(config.upscale.upscaler)
+                # 传递超分配置参数
+                upscaler_kwargs = {}
+                if config.upscale.upscaler == 'realcugan':
+                    if config.upscale.realcugan_model:
+                        upscaler_kwargs['model_name'] = config.upscale.realcugan_model
+                    if config.upscale.tile_size is not None:
+                        upscaler_kwargs['tile_size'] = config.upscale.tile_size
+                await prepare_upscaling(config.upscale.upscaler, **upscaler_kwargs)
             await prepare_detection(config.detector.detector)
             await prepare_ocr(config.ocr.ocr, self.device)
             await prepare_inpainting(config.inpainter.inpainter, self.device)
@@ -4040,7 +4123,7 @@ class MangaTranslator:
                 for ctx, config in preprocessed_contexts:
                     # Ensure JSON is saved first
                     if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
-                        self._save_text_to_file(ctx.image_name, ctx)
+                        self._save_text_to_file(ctx.image_name, ctx, config)
 
                         # Export the clean text using the template
                         try:
@@ -4131,7 +4214,8 @@ class MangaTranslator:
                     # --- END SAVE LOGIC ---
 
                     if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
-                        self._save_text_to_file(ctx.image_name, ctx)
+                        # 使用循环变量中的config，而不是从ctx中获取
+                        self._save_text_to_file(ctx.image_name, ctx, config)
 
                     # ✅ 标记成功（在清理result之前）
                     ctx.success = True
