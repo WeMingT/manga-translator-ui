@@ -148,19 +148,26 @@ class MainWindow(QMainWindow):
         """
         import os
 
-        # 展开文件夹为文件列表
+        # 展开文件夹为文件列表，但保留文件夹信息
         expanded_files = []
+        folder_map = {}  # 文件到文件夹的映射
+        
         for path in self.app_logic.source_files:
             if os.path.isdir(path):
                 # 展开文件夹
                 folder_files = self.app_logic.file_service.get_image_files_from_folder(path, recursive=True)
+                for f in folder_files:
+                    folder_map[f] = path  # 记录文件来自哪个文件夹
                 expanded_files.extend(folder_files)
             elif os.path.isfile(path):
                 expanded_files.append(path)
+                folder_map[path] = None  # 单独的文件
 
         # 传递翻译后的图片列表给编辑器
         # 从file_to_folder_map获取翻译后的图片路径
         translated_files = []
+        translated_folder_map = {}  # 翻译后文件的文件夹映射
+        
         for source_file in expanded_files:
             # 根据源文件路径构造翻译后的图片路径
             source_folder = self.app_logic.file_to_folder_map.get(source_file)
@@ -170,15 +177,25 @@ class MainWindow(QMainWindow):
                 output_folder = self.app_logic.config_service.get_config().app.last_output_path
                 final_output_folder = os.path.join(output_folder, folder_name)
                 translated_file = os.path.join(final_output_folder, os.path.basename(source_file))
+                
+                if os.path.exists(translated_file):
+                    translated_files.append(translated_file)
+                    translated_folder_map[translated_file] = final_output_folder  # 记录翻译后文件所属文件夹
             else:
                 # 单独添加的文件
                 output_folder = self.app_logic.config_service.get_config().app.last_output_path
                 translated_file = os.path.join(output_folder, os.path.basename(source_file))
 
-            if os.path.exists(translated_file):
-                translated_files.append(translated_file)
+                if os.path.exists(translated_file):
+                    translated_files.append(translated_file)
+                    translated_folder_map[translated_file] = None
 
-        self.editor_logic.load_file_lists(source_files=expanded_files, translated_files=translated_files)
+        # 传递文件列表和文件夹映射
+        self.editor_logic.load_file_lists(
+            source_files=expanded_files, 
+            translated_files=translated_files,
+            folder_map=translated_folder_map if translated_files else folder_map
+        )
 
         # 如果指定了要加载的文件，加载第一个翻译后的文件
         if file_to_load:
