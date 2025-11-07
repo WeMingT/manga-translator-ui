@@ -23,7 +23,7 @@ from manga_translator.config import (
 )
 from manga_translator.save import OUTPUT_FORMATS
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import QFileDialog, QListView, QTreeView
 
 from services import (
     get_config_service,
@@ -486,12 +486,32 @@ class MainAppLogic(QObject):
         self.update_single_config('app.last_open_dir', path)
 
     def add_folder(self):
-        """Opens a dialog to select a folder and adds its path to the list."""
+        """Opens a dialog to select folders (supports multiple selection) and adds their paths to the list."""
         last_dir = self.get_last_open_dir()
-        folder = QFileDialog.getExistingDirectory(None, "选择文件夹", last_dir)
-        if folder:
-            self.set_last_open_dir(folder)
-            self.add_files([folder])
+        # 使用文件对话框的 Directory 模式，并启用多选
+        dialog = QFileDialog()
+        dialog.setFileMode(QFileDialog.FileMode.Directory)
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        dialog.setDirectory(last_dir)
+        dialog.setWindowTitle("选择文件夹（可多选）")
+        
+        # 启用多选
+        file_view = dialog.findChild(QListView, 'listView')
+        if file_view:
+            file_view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
+        tree_view = dialog.findChild(QTreeView)
+        if tree_view:
+            tree_view.setSelectionMode(QTreeView.SelectionMode.ExtendedSelection)
+        
+        if dialog.exec():
+            folders = dialog.selectedFiles()
+            if folders:
+                self.set_last_open_dir(folders[0])  # 保存第一个文件夹的路径
+                self.add_files(folders)
+    
+    def add_folders(self):
+        """Alias for add_folder for backward compatibility."""
+        self.add_folder()
 
     def remove_file(self, file_path: str):
         try:
