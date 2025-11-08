@@ -259,7 +259,10 @@ class UpCunet2x(nn.Module):
         if(tile_mode==0):#不tile
             ph = ((h0 - 1) // 2 + 1) * 2
             pw = ((w0 - 1) // 2 + 1) * 2
-            x = F.pad(x, (18, 18 + pw - w0, 18, 18 + ph - h0), 'reflect')  # 需要保证被2整除
+            # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+            pad_h = min(18, (h0 - 1) // 2) if h0 > 1 else 0
+            pad_w = min(18, (w0 - 1) // 2) if w0 > 1 else 0
+            x = F.pad(x, (pad_w, pad_w + pw - w0, pad_h, pad_h + ph - h0), 'reflect')  # 需要保证被2整除
             x = self.unet1.forward(x)
             x0 = self.unet2.forward(x,alpha)
             x = F.pad(x, (-20, -20, -20, -20))
@@ -287,7 +290,10 @@ class UpCunet2x(nn.Module):
 
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(18,18+pw-w0,18,18+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(18, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(18, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         if (if_half):se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float16)
         else:se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float32)
@@ -385,7 +391,10 @@ class UpCunet2x(nn.Module):
         if(tile_mode==0):#不tile
             ph = ((h0 - 1) // 2 + 1) * 2
             pw = ((w0 - 1) // 2 + 1) * 2
-            x = F.pad(x, (18, 18 + pw - w0, 18, 18 + ph - h0), 'reflect')  # 需要保证被2整除
+            # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+            pad_h = min(18, (h0 - 1) // 2) if h0 > 1 else 0
+            pad_w = min(18, (w0 - 1) // 2) if w0 > 1 else 0
+            x = F.pad(x, (pad_w, pad_w + pw - w0, pad_h, pad_h + ph - h0), 'reflect')  # 需要保证被2整除
             x = self.unet1.forward(x)
             x0 = self.unet2.forward(x,alpha)
             x = F.pad(x, (-20, -20, -20, -20))
@@ -412,7 +421,10 @@ class UpCunet2x(nn.Module):
             os._exit(233)
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(18,18+pw-w0,18,18+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(18, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(18, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         if (if_half):se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float16)
         else:se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float32)
@@ -517,7 +529,10 @@ class UpCunet2x(nn.Module):
             crop_size=(((h0-1)//t2*t2+t2)//tile_mode,((w0-1)//t2*t2+t2)//tile_mode)
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(18,18+pw-w0,18,18+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(18, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(18, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         h1,w1=crop_size[0]+36,crop_size[1]+36
         n_patch=0
@@ -587,7 +602,10 @@ class UpCunet3x(nn.Module):
         if(tile_mode==0):#不tile
             ph = ((h0 - 1) // 4 + 1) * 4
             pw = ((w0 - 1) // 4 + 1) * 4
-            x = F.pad(x, (14, 14 + pw - w0, 14, 14 + ph - h0), 'reflect')  # 需要保证被2整除
+            # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+            pad_h = min(14, (h0 - 1) // 2) if h0 > 1 else 0
+            pad_w = min(14, (w0 - 1) // 2) if w0 > 1 else 0
+            x = F.pad(x, (pad_w, pad_w + pw - w0, pad_h, pad_h + ph - h0), 'reflect')  # 需要保证被2整除
             x = self.unet1.forward(x)
             x0 = self.unet2.forward(x,alpha)
             x = F.pad(x, (-20, -20, -20, -20))
@@ -614,7 +632,10 @@ class UpCunet3x(nn.Module):
             os._exit(233)
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(14,14+pw-w0,14,14+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(14, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(14, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         if (if_half):se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float16)
         else:se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float32)
@@ -712,7 +733,10 @@ class UpCunet3x(nn.Module):
         if(tile_mode==0):#不tile
             ph = ((h0 - 1) // 4 + 1) * 4
             pw = ((w0 - 1) // 4 + 1) * 4
-            x = F.pad(x, (14, 14 + pw - w0, 14, 14 + ph - h0), 'reflect')  # 需要保证被2整除
+            # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+            pad_h = min(14, (h0 - 1) // 2) if h0 > 1 else 0
+            pad_w = min(14, (w0 - 1) // 2) if w0 > 1 else 0
+            x = F.pad(x, (pad_w, pad_w + pw - w0, pad_h, pad_h + ph - h0), 'reflect')  # 需要保证被2整除
             x = self.unet1.forward(x)
             x0 = self.unet2.forward(x,alpha)
             x = F.pad(x, (-20, -20, -20, -20))
@@ -739,7 +763,10 @@ class UpCunet3x(nn.Module):
             os._exit(233)
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(14,14+pw-w0,14,14+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(14, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(14, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         if (if_half):se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float16)
         else:se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float32)
@@ -842,7 +869,10 @@ class UpCunet3x(nn.Module):
             crop_size = (((h0 - 1) // t4 * t4 + t4) // tile_mode, ((w0 - 1) // t4 * t4 + t4) // tile_mode)  # 5.6G
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(14,14+pw-w0,14,14+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(14, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(14, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         h1,w1=crop_size[0]+28,crop_size[1]+28
         n_patch=0
@@ -915,7 +945,10 @@ class UpCunet4x(nn.Module):
         if(tile_mode==0):#不tile
             ph = ((h0 - 1) // 2 + 1) * 2
             pw = ((w0 - 1) // 2 + 1) * 2
-            x = F.pad(x, (19, 19 + pw - w0, 19, 19 + ph - h0), 'reflect')  # 需要保证被2整除
+            # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+            pad_h = min(19, (h0 - 1) // 2) if h0 > 1 else 0
+            pad_w = min(19, (w0 - 1) // 2) if w0 > 1 else 0
+            x = F.pad(x, (pad_w, pad_w + pw - w0, pad_h, pad_h + ph - h0), 'reflect')  # 需要保证被2整除
             x = self.unet1.forward(x)
             x0 = self.unet2.forward(x,alpha)
             x1 = F.pad(x, (-20, -20, -20, -20))
@@ -946,7 +979,10 @@ class UpCunet4x(nn.Module):
             os._exit(233)
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(19,19+pw-w0,19,19+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(19, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(19, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         if (if_half):se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float16)
         else:se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float32)
@@ -1052,7 +1088,10 @@ class UpCunet4x(nn.Module):
         if(tile_mode==0):#不tile
             ph = ((h0 - 1) // 2 + 1) * 2
             pw = ((w0 - 1) // 2 + 1) * 2
-            x = F.pad(x, (19, 19 + pw - w0, 19, 19 + ph - h0), 'reflect')  # 需要保证被2整除
+            # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+            pad_h = min(19, (h0 - 1) // 2) if h0 > 1 else 0
+            pad_w = min(19, (w0 - 1) // 2) if w0 > 1 else 0
+            x = F.pad(x, (pad_w, pad_w + pw - w0, pad_h, pad_h + ph - h0), 'reflect')  # 需要保证被2整除
             x = self.unet1.forward(x)
             x0 = self.unet2.forward(x,alpha)
             x1 = F.pad(x, (-20, -20, -20, -20))
@@ -1083,7 +1122,10 @@ class UpCunet4x(nn.Module):
             os._exit(233)
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(19,19+pw-w0,19,19+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(19, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(19, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         if (if_half):se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float16)
         else:se_mean0=torch.zeros((n,64,1,1),device=x.device,dtype=torch.float32)
@@ -1193,7 +1235,10 @@ class UpCunet4x(nn.Module):
             crop_size=(((h0-1)//t2*t2+t2)//tile_mode,((w0-1)//t2*t2+t2)//tile_mode)#5.6G
         ph = ((h0 - 1) // crop_size[0] + 1) * crop_size[0]
         pw = ((w0 - 1) // crop_size[1] + 1) * crop_size[1]
-        x=F.pad(x,(19,19+pw-w0,19,19+ph-h0),'reflect')
+        # 动态计算 padding，确保不超过输入维度（reflect padding 限制）
+        pad_h = min(19, (h0 - 1) // 2) if h0 > 1 else 0
+        pad_w = min(19, (w0 - 1) // 2) if w0 > 1 else 0
+        x=F.pad(x,(pad_w,pad_w+pw-w0,pad_h,pad_h+ph-h0),'reflect')
         n,c,h,w=x.shape
         h1,w1=crop_size[0]+38,crop_size[1]+38
         n_patch=0
