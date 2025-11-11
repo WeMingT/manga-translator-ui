@@ -45,25 +45,44 @@ if errorlevel 1 (
 )
 
 REM 先检查系统是否已有conda（全局安装）
-where conda >nul 2>&1 && goto :found_system_conda
-goto :check_local_conda
+where conda >nul 2>&1
+if %ERRORLEVEL% neq 0 goto :check_local_conda
 
 :found_system_conda
 echo [OK] 检测到系统已安装 Conda
-for /f "delims=" %%i in ('where conda') do (
-    echo 位置: %%i
-    REM 检测Miniconda根目录
-    for %%p in ("%%~dpi..") do set "MINICONDA_ROOT=%%~fp"
-)
-call conda --version
-REM 如果检测到conda在system32，需要找到真实的Miniconda路径
-if "%MINICONDA_ROOT:~-11%"=="System32\.." (
-    REM 尝试从conda路径获取真实路径
-    for /f "delims=" %%i in ('conda info --base 2^>nul') do set "MINICONDA_ROOT=%%i"
-    if not "!MINICONDA_ROOT!"=="" (
-        echo 实际安装位置: !MINICONDA_ROOT!
+
+REM 直接使用 conda info --base 获取准确的根目录（最可靠的方法）
+for /f "delims=" %%i in ('conda info --base 2^>nul') do set "MINICONDA_ROOT=%%i"
+
+REM 如果 conda info --base 失败，尝试从 where 命令解析路径
+if "!MINICONDA_ROOT!"=="" (
+    for /f "delims=" %%i in ('where conda 2^>nul') do (
+        REM 只取第一个找到的conda.exe（Scripts目录下的）
+        if "!MINICONDA_ROOT!"=="" (
+            if "%%~xi"==".exe" (
+                for %%p in ("%%~dpi..") do set "MINICONDA_ROOT=%%~fp"
+            )
+        )
     )
 )
+
+REM 显示conda信息（添加错误处理避免闪退）
+if not "!MINICONDA_ROOT!"=="" (
+    echo 位置: !MINICONDA_ROOT!
+    call conda --version 2>nul
+    if !ERRORLEVEL! neq 0 (
+        echo [WARNING] 无法获取conda版本信息
+    )
+) else (
+    echo [WARNING] 无法确定conda安装路径，将尝试继续...
+    REM 如果无法获取路径，设置一个默认值避免后续出错
+    for /f "delims=" %%i in ('where conda 2^>nul') do (
+        set "MINICONDA_ROOT=%%~dpi.."
+        goto :found_conda_path
+    )
+    :found_conda_path
+)
+
 goto :check_git
 
 :check_local_conda
