@@ -644,6 +644,8 @@ echo [OK] 代码克隆完成
 
 REM ===== 步骤4: 创建Conda环境并安装依赖 =====
 echo.
+echo.
+echo ========================================
 echo [4/5] 创建Python环境并安装依赖...
 echo ========================================
 echo.
@@ -653,6 +655,7 @@ set CONDA_ENV_NAME=manga-env
 set CONDA_ENV_EXISTS=0
 
 REM 检查环境是否存在 - 使用 conda info --envs 避免编码错误
+echo 正在检查环境...
 call conda info --envs 2>nul | findstr /C:"%CONDA_ENV_NAME%" >nul 2>&1
 if %ERRORLEVEL% == 0 (
     set CONDA_ENV_EXISTS=1
