@@ -712,18 +712,13 @@ call conda info --envs 2>nul | findstr /C:"%CONDA_ENV_NAME%" >nul 2>&1
 if %ERRORLEVEL% == 0 (
     set CONDA_ENV_EXISTS=1
     echo [OK] 检测到现有conda环境: %CONDA_ENV_NAME%
-) else (
-    echo [INFO] 未检测到环境: %CONDA_ENV_NAME%
-)
-
-if %CONDA_ENV_EXISTS% == 1 (
     echo.
     echo 检测到现有Conda环境,是否重新创建?
     echo [1] 使用现有环境 (快速)
     echo [2] 重新创建环境 (全新安装)
     echo.
     set /p recreate_env="请选择 (1/2, 默认1): "
-    
+
     if "!recreate_env!"=="2" (
         echo 正在删除现有环境...
         call conda deactivate >nul 2>&1
@@ -737,31 +732,29 @@ if %CONDA_ENV_EXISTS% == 1 (
     )
 )
 
-if %CONDA_ENV_EXISTS% == 0 (
-    :create_env_directly
-    echo.
-    echo 正在创建Conda环境...
-    echo 环境名称: %CONDA_ENV_NAME%
-    echo Python版本: 3.12
-    echo.
-    
-    REM 清理可能存在的旧环境注册信息
-    echo 清理conda环境列表...
-    call conda env remove -n "%CONDA_ENV_NAME%" -y >nul 2>&1
-    
-    REM 接受Conda服务条款（避免交互式提示）
-    call conda config --set channel_priority flexible >nul 2>&1
-    call conda tos accept >nul 2>&1
-    
-    REM 创建命名环境
-    call conda create -n "%CONDA_ENV_NAME%" python=3.12 -y
-    if !ERRORLEVEL! neq 0 (
-        echo [ERROR] Conda环境创建失败
-        pause
-        exit /b 1
-    )
-    echo [OK] Conda环境创建完成
+REM 创建新环境
+echo.
+echo [INFO] 开始创建Conda环境...
+echo 环境名称: %CONDA_ENV_NAME%
+echo Python版本: 3.12
+echo.
+
+REM 清理可能存在的旧环境注册信息
+echo 清理conda环境列表...
+call conda env remove -n "%CONDA_ENV_NAME%" -y >nul 2>&1
+
+REM 接受Conda服务条款（避免交互式提示）
+call conda config --set channel_priority flexible >nul 2>&1
+call conda tos accept >nul 2>&1
+
+REM 创建命名环境
+call conda create -n "%CONDA_ENV_NAME%" python=3.12 -y
+if !ERRORLEVEL! neq 0 (
+    echo [ERROR] Conda环境创建失败
+    pause
+    exit /b 1
 )
+echo [OK] Conda环境创建完成
 
 :activate_env
 echo.
