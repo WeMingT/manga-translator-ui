@@ -83,13 +83,11 @@ if exist "%CONDA_ENV_PATH%\python.exe" (
     )
 
     REM 最后尝试手动设置PATH（兜底方案）
+    echo [INFO] 使用手动PATH激活方式...
     set "PATH=%CONDA_ENV_PATH%;%CONDA_ENV_PATH%\Library\mingw-w64\bin;%CONDA_ENV_PATH%\Library\usr\bin;%CONDA_ENV_PATH%\Library\bin;%CONDA_ENV_PATH%\Scripts;%CONDA_ENV_PATH%\bin;%PATH%"
     set "CONDA_PREFIX=%CONDA_ENV_PATH%"
     set "CONDA_DEFAULT_ENV=%CONDA_ENV_PATH%"
-    "%CONDA_ENV_PATH%\python.exe" --version >nul 2>&1
-    if %ERRORLEVEL% == 0 (
-        goto :activated_ok
-    )
+    goto :activated_ok
 )
 
 echo [ERROR] 无法激活环境
