@@ -75,22 +75,44 @@ if %USE_NAMED_ENV% == 1 (
     call conda activate "%CONDA_ENV_NAME%" 2>nul
     if %ERRORLEVEL% == 0 (
         echo [OK] 已激活命名环境: %CONDA_ENV_NAME%
+        goto :env_activated
     ) else (
-        echo [ERROR] 无法激活环境: %CONDA_ENV_NAME%
-        pause
-        exit /b 1
+        echo [WARNING] 无法激活命名环境: %CONDA_ENV_NAME%
     )
 ) else (
-    REM 激活路径环境（旧版本）
+    REM 激活路径环境（旧版本）- 使用多层降级策略
+    echo [INFO] 尝试激活路径环境（旧版本）...
+
+    REM 方法1: 使用activate.bat
+    if exist "%MINICONDA_ROOT%\Scripts\activate.bat" (
+        call "%MINICONDA_ROOT%\Scripts\activate.bat" "%CONDA_ENV_PATH%" 2>nul
+        if %ERRORLEVEL% == 0 (
+            echo [OK] 已激活路径环境（activate.bat方式）
+            goto :env_activated
+        )
+    )
+
+    REM 方法2: 使用conda activate
     call conda activate "%CONDA_ENV_PATH%" 2>nul
     if %ERRORLEVEL% == 0 (
-        echo [OK] 已激活路径环境（旧版本）
-    ) else (
-        echo [ERROR] 无法激活环境: %CONDA_ENV_PATH%
-        pause
-        exit /b 1
+        echo [OK] 已激活路径环境（conda activate方式）
+        goto :env_activated
     )
+
+    REM 方法3: 手动设置PATH（兜底方案）
+    echo [INFO] 使用手动PATH激活方式...
+    set "PATH=%CONDA_ENV_PATH%;%CONDA_ENV_PATH%\Library\mingw-w64\bin;%CONDA_ENV_PATH%\Library\usr\bin;%CONDA_ENV_PATH%\Library\bin;%CONDA_ENV_PATH%\Scripts;%CONDA_ENV_PATH%\bin;%PATH%"
+    set "CONDA_PREFIX=%CONDA_ENV_PATH%"
+    set "CONDA_DEFAULT_ENV=%CONDA_ENV_PATH%"
+    echo [OK] 已使用手动PATH方式激活环境
+    goto :env_activated
 )
+
+echo [ERROR] 无法激活环境
+pause
+exit /b 1
+
+:env_activated
 
 REM 检查是否有便携版 Git
 if exist "PortableGit\cmd\git.exe" (
