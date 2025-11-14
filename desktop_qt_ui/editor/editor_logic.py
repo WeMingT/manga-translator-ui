@@ -3,9 +3,10 @@ import os
 from typing import List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
-from PyQt6.QtWidgets import QFileDialog, QListView, QTreeView
+from PyQt6.QtWidgets import QFileDialog
 
 from services import get_config_service
+from widgets.folder_dialog import select_folders
 
 
 class EditorLogic(QObject):
@@ -43,27 +44,18 @@ class EditorLogic(QObject):
     def open_and_add_folder(self):
         """Opens a dialog to select folders (supports multiple selection) and adds all containing images to the list."""
         last_dir = self.config_service.get_config().app.last_open_dir
-        # 使用文件对话框的 Directory 模式，并启用多选
-        dialog = QFileDialog()
-        dialog.setFileMode(QFileDialog.FileMode.Directory)
-        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-        dialog.setDirectory(last_dir)
-        dialog.setWindowTitle("选择文件夹（可多选）")
-        
-        # 启用多选
-        file_view = dialog.findChild(QListView, 'listView')
-        if file_view:
-            file_view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
-        tree_view = dialog.findChild(QTreeView)
-        if tree_view:
-            tree_view.setSelectionMode(QTreeView.SelectionMode.ExtendedSelection)
-        
-        if dialog.exec():
-            folders = dialog.selectedFiles()
-            if folders:
-                # 添加所有选中的文件夹
-                for folder_path in folders:
-                    self.add_folder(folder_path)
+
+        # 使用自定义的现代化文件夹选择器
+        folders = select_folders(
+            parent=None,
+            start_dir=last_dir,
+            multi_select=True
+        )
+
+        if folders:
+            # 添加所有选中的文件夹
+            for folder_path in folders:
+                self.add_folder(folder_path)
 
     def add_files(self, files: List[str]):
         if not files:
