@@ -658,30 +658,35 @@ REM 检查环境是否存在 - 使用 conda info --envs 避免编码错误
 echo 正在检查环境...
 REM 使用 /B 选项进行精确匹配行首，避免误匹配路径中的文本
 call conda info --envs 2>nul | findstr /B /C:"%CONDA_ENV_NAME%" >nul 2>nul
-if !ERRORLEVEL! == 0 (
-    set CONDA_ENV_EXISTS=1
-    echo [OK] 检测到现有conda环境: %CONDA_ENV_NAME%
-    echo.
-    echo 检测到现有Conda环境,是否重新创建?
-    echo [1] 使用现有环境 (快速)
-    echo [2] 重新创建环境 (全新安装)
-    echo.
-    set /p recreate_env="请选择 (1/2, 默认1): "
+if !ERRORLEVEL! == 0 goto :env_exists
+goto :create_new_env
 
-    if "!recreate_env!"=="2" (
-        echo.
-        echo 正在删除现有环境...
-        call conda deactivate >nul 2>&1
-        call conda env remove -n "%CONDA_ENV_NAME%" -y >nul 2>&1
-        set CONDA_ENV_EXISTS=0
-        echo [OK] 环境已删除
-        echo.
-    ) else (
-        echo.
-        echo [OK] 使用现有环境
-        goto :activate_env
-    )
-)
+:env_exists
+set CONDA_ENV_EXISTS=1
+echo [OK] 检测到现有conda环境: %CONDA_ENV_NAME%
+echo.
+echo 检测到现有Conda环境,是否重新创建?
+echo [1] 使用现有环境 (快速)
+echo [2] 重新创建环境 (全新安装)
+echo.
+set /p recreate_env="请选择 (1/2, 默认1): "
+
+if "!recreate_env!"=="2" goto :delete_and_recreate
+
+REM 用户选择使用现有环境
+echo.
+echo [OK] 使用现有环境
+goto :activate_env
+
+:delete_and_recreate
+echo.
+echo 正在删除现有环境...
+call conda deactivate >nul 2>&1
+call conda env remove -n "%CONDA_ENV_NAME%" -y >nul 2>&1
+set CONDA_ENV_EXISTS=0
+echo [OK] 环境已删除
+echo.
+REM 删除后继续创建新环境
 
 REM 创建新环境
 :create_new_env
