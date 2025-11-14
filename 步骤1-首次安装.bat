@@ -668,12 +668,15 @@ if %ERRORLEVEL% == 0 (
     set /p recreate_env="请选择 (1/2, 默认1): "
 
     if "!recreate_env!"=="2" (
+        echo.
         echo 正在删除现有环境...
         call conda deactivate >nul 2>&1
         call conda env remove -n "%CONDA_ENV_NAME%" -y >nul 2>&1
         set CONDA_ENV_EXISTS=0
         echo [OK] 环境已删除
+        echo.
     ) else (
+        echo.
         echo [OK] 使用现有环境
         goto :activate_env
     )
@@ -714,10 +717,15 @@ if !ERRORLEVEL! == 0 (
     goto :env_activated
 )
 
-REM 激活失败
-echo [ERROR] 无法激活环境: %CONDA_ENV_NAME%
+REM 激活失败 - 环境可能已损坏，删除并提示重建
+echo [WARNING] 无法激活环境: %CONDA_ENV_NAME%
+echo 环境可能已损坏，将自动删除
 echo.
-echo 请重新运行此脚本创建环境
+call conda deactivate >nul 2>&1
+call conda env remove -n "%CONDA_ENV_NAME%" -y >nul 2>&1
+echo [OK] 已删除损坏的环境
+echo.
+echo 请重新运行此脚本以重新创建环境
 pause
 exit /b 1
 
