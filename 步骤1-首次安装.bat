@@ -656,8 +656,8 @@ set CONDA_ENV_EXISTS=0
 
 REM 检查环境是否存在 - 使用 conda info --envs 避免编码错误
 echo 正在检查环境...
-call conda info --envs 2>nul | findstr /C:"%CONDA_ENV_NAME%" >nul 2>&1
-if %ERRORLEVEL% == 0 (
+call conda info --envs 2>nul | findstr /C:"%CONDA_ENV_NAME%" >nul 2>nul
+if !ERRORLEVEL! == 0 (
     set CONDA_ENV_EXISTS=1
     echo [OK] 检测到现有conda环境: %CONDA_ENV_NAME%
     echo.
@@ -683,6 +683,7 @@ if %ERRORLEVEL% == 0 (
 )
 
 REM 创建新环境
+:create_new_env
 echo.
 echo [INFO] 开始创建Conda环境...
 echo 环境名称: %CONDA_ENV_NAME%
@@ -717,17 +718,29 @@ if !ERRORLEVEL! == 0 (
     goto :env_activated
 )
 
-REM 激活失败 - 环境可能已损坏，删除并提示重建
+REM 激活失败 - 环境可能已损坏，删除并重新创建
 echo [WARNING] 无法激活环境: %CONDA_ENV_NAME%
-echo 环境可能已损坏，将自动删除
+echo 环境可能已损坏，将自动删除并重新创建
 echo.
 call conda deactivate >nul 2>&1
-call conda env remove -n "%CONDA_ENV_NAME%" -y >nul 2>&1
+call conda env remove -n "%CONDA_ENV_NAME%" -y 2>nul
+
+REM 检查删除是否成功
+call conda info --envs 2>nul | findstr /C:"%CONDA_ENV_NAME%" >nul 2>&1
+if !ERRORLEVEL! == 0 (
+    echo [ERROR] 无法删除损坏的环境，可能被占用
+    echo 请关闭所有相关程序后重试
+    pause
+    exit /b 1
+)
+
 echo [OK] 已删除损坏的环境
 echo.
-echo 请重新运行此脚本以重新创建环境
-pause
-exit /b 1
+echo 正在重新创建环境...
+echo.
+
+REM 跳转到创建新环境的逻辑（不显示"[INFO] 开始创建Conda环境..."）
+goto :create_new_env
 
 :env_activated
 
