@@ -780,19 +780,34 @@ def prepare_environment(args):
         print('=' * 50)
         print(f'gfx 版本: {amd_gfx_version}')
         print('')
-        
+
         # AMD ROCm PyTorch 的 index URL
         amd_index_url = f"https://d2awnip2yjpvqn.cloudfront.net/v2/{amd_gfx_version}/"
-        
+
+        # 根据是否为更新模式决定版本要求
+        # 如果是首次安装（install-deps-only），锁定具体版本
+        # 如果是更新依赖（update-deps），安装最新版本
+        if args and hasattr(args, 'update_deps') and args.update_deps:
+            # 步骤4：更新到最新版本
+            torch_version = "torch>=2.9.0"
+            torchvision_version = "torchvision>=0.24.0"
+            torchaudio_version = "torchaudio>=2.9.0"
+            print('模式: 更新到最新版本')
+        else:
+            # 步骤1：首次安装，锁定完整版本（包含ROCm版本号）
+            torch_version = "torch==2.9.0+rocm7.10.0a20251031"
+            torchvision_version = "torchvision==0.24.0+rocm7.10.0a20251031"
+            torchaudio_version = "torchaudio==2.9.0+rocm7.10.0a20251031"
+            print('模式: 首次安装，锁定版本 2.9.0+rocm7.10.0a20251031')
+
         # 安装 AMD ROCm PyTorch
         print(f'正在从 AMD ROCm 源安装 PyTorch...')
         print(f'Index URL: {amd_index_url}')
         print('这可能需要几分钟时间...\n')
-        
+
         try:
             # 直接使用 run() 而不是 run_pip() 以完全控制参数顺序
-            # 指定最新稳定版本以确保兼容性
-            amd_pytorch_cmd = f'"{python}" -m pip install "torch>=2.9.0" "torchvision>=0.24.0" "torchaudio>=2.9.0" --index-url {amd_index_url} --no-cache-dir'
+            amd_pytorch_cmd = f'"{python}" -m pip install "{torch_version}" "{torchvision_version}" "{torchaudio_version}" --index-url {amd_index_url} --no-cache-dir'
             run(amd_pytorch_cmd, "正在安装 AMD ROCm PyTorch", "AMD ROCm PyTorch 安装失败", live=True)
             print('\n✓ AMD ROCm PyTorch 安装完成')
             print('\n⚠️  注意:')
@@ -893,6 +908,7 @@ def main():
     parser.add_argument("--frozen", action='store_true', help="跳过依赖检查(打包版本)")
     parser.add_argument("--install-deps-only", action='store_true', help="仅安装依赖,不启动UI")
     parser.add_argument("--reinstall-torch", action='store_true', help="重新安装PyTorch")
+    parser.add_argument("--update-deps", action='store_true', help="更新依赖到最新版本(步骤4使用)")
     parser.add_argument("--requirements", default='auto', help="依赖文件路径 (auto=自动选择, 或指定 requirements_gpu.txt/requirements_cpu.txt)")
     parser.add_argument("--ui", choices=['qt', 'tk'], default='tk', help="选择UI框架: qt(PyQt6) 或 tk(CustomTkinter)")
     parser.add_argument("--cli", action='store_true', help="使用命令行模式")
