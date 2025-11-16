@@ -405,10 +405,10 @@ class MainAppLogic(QObject):
                     "denoise_sigma": "降噪强度", "colorizer": "上色模型", "verbose": "详细日志",
                     "attempts": "重试次数", "max_requests_per_minute": "每分钟最大请求数", "ignore_errors": "忽略错误", "use_gpu": "使用 GPU",
                     "use_gpu_limited": "使用 GPU（受限）", "context_size": "上下文页数", "format": "输出格式",
-                    "overwrite": "覆盖已存在文件", "skip_no_text": "跳过无文本图像", "use_mtpe": "启用后期编辑(MTPE)",
+                    "overwrite": "覆盖已存在文件", "skip_no_text": "跳过无文本图像",
                     "save_text": "图片可编辑", "load_text": "导入翻译", "template": "导出原文",
-                    "prep_manual": "为手动排版做准备", "save_quality": "图像保存质量", "batch_size": "批量大小",
-                    "batch_concurrent": "并发批量处理", "generate_and_export": "导出翻译", "high_quality_batch_size": "高质量批次大小",
+                    "save_quality": "图像保存质量", "batch_size": "批量大小",
+                    "batch_concurrent": "并发批量处理", "generate_and_export": "导出翻译",
                     "last_output_path": "最后输出路径", "line_spacing": "行间距", "font_size": "字体大小",
                     "YOUDAO_APP_KEY": "有道翻译应用ID", "YOUDAO_SECRET_KEY": "有道翻译应用秘钥",
                     "BAIDU_APP_ID": "百度翻译 AppID", "BAIDU_SECRET_KEY": "百度翻译密钥",
@@ -1179,7 +1179,6 @@ class TranslationWorker(QObject):
             self.log_received.emit("--- [9] THREAD: Initializing translator...")
             translator_params = self.config_dict.get('cli', {})
             translator_params.update(self.config_dict)
-            translator_params['is_ui_mode'] = True
             
             
             font_filename = self.config_dict.get('render', {}).get('font_path')

@@ -112,18 +112,15 @@ class CliSettings(BaseModel):
     format: str = "不指定"
     overwrite: bool = True
     skip_no_text: bool = False
-    use_mtpe: bool = False
     save_text: bool = True
     load_text: bool = False
     template: bool = False
-    prep_manual: bool = False
     save_quality: int = 100
     batch_size: int = 1
     batch_concurrent: bool = False
     generate_and_export: bool = False
     colorize_only: bool = False
     upscale_only: bool = False  # 仅超分模式
-    high_quality_batch_size: int = 3
 
 class AppSection(BaseModel):
     last_open_dir: str = '.'

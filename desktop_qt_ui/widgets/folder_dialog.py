@@ -635,6 +635,9 @@ class FolderDialog(QDialog):
 
             # 更新按钮状态
             self._update_navigation_buttons()
+            
+            # 更新选择状态（如果没有选中任何文件夹，显示当前目录）
+            self._on_selection_changed()
 
     def _update_breadcrumb(self, path: str):
         """更新面包屑导航"""
@@ -780,13 +783,21 @@ class FolderDialog(QDialog):
 
     def _on_selection_changed(self):
         """选择改变时更新状态"""
-        indexes = self.folder_tree.selectionModel().selectedIndexes()
-        self.selected_folders = [self.fs_model.filePath(idx) for idx in indexes]
+        # 只获取第一列（名称列）的选中行，避免重复计数
+        selected_rows = self.folder_tree.selectionModel().selectedRows(0)
+        self.selected_folders = [self.fs_model.filePath(idx) for idx in selected_rows]
 
         count = len(self.selected_folders)
         if count == 0:
-            self.selection_label.setText("未选择")
-            self.ok_button.setEnabled(False)
+            # 没有选中任何文件夹时，显示当前目录
+            if self.history and self.history_index >= 0:
+                current_dir = self.history[self.history_index]
+                dir_name = os.path.basename(current_dir) or current_dir
+                self.selection_label.setText(f"将添加当前目录: {dir_name}")
+                self.ok_button.setEnabled(True)
+            else:
+                self.selection_label.setText("未选择")
+                self.ok_button.setEnabled(False)
         elif count == 1:
             folder_name = os.path.basename(self.selected_folders[0])
             self.selection_label.setText(f"已选择: {folder_name}")
@@ -797,6 +808,9 @@ class FolderDialog(QDialog):
 
     def get_selected_folders(self) -> List[str]:
         """获取选中的文件夹列表"""
+        # 如果没有选中任何文件夹，返回当前目录
+        if not self.selected_folders and self.history and self.history_index >= 0:
+            return [self.history[self.history_index]]
         return self.selected_folders
 
 
