@@ -188,6 +188,16 @@ class ConfigService(QObject):
                 # 获取当前配置
                 config_dict = self.current_config.dict()
                 
+                # 读取现有配置，保留favorite_folders
+                existing_favorites = None
+                if os.path.exists(save_path):
+                    try:
+                        with open(save_path, 'r', encoding='utf-8') as f:
+                            existing_config = json.load(f)
+                            existing_favorites = existing_config.get('app', {}).get('favorite_folders')
+                    except:
+                        pass
+                
                 # 只有保存到模板配置时才重置临时状态
                 is_default_config = save_path == self.default_config_path
                 if is_default_config:
@@ -196,9 +206,17 @@ class ConfigService(QObject):
                         config_dict['app'] = {}
                     config_dict['app']['last_open_dir'] = '.'
                     config_dict['app']['last_output_path'] = ''
+                    # 模板配置不保存favorite_folders
+                    config_dict['app'].pop('favorite_folders', None)
                     
                     if 'cli' in config_dict:
                         config_dict['cli']['verbose'] = False
+                else:
+                    # 用户配置保留favorite_folders
+                    if existing_favorites is not None:
+                        if 'app' not in config_dict:
+                            config_dict['app'] = {}
+                        config_dict['app']['favorite_folders'] = existing_favorites
                 
                 try:
                     os.makedirs(os.path.dirname(save_path), exist_ok=True)

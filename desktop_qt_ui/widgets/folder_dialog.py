@@ -255,13 +255,14 @@ class ShortcutFavoriteDelegate(QStyledItemDelegate):
 class FolderDialog(QDialog):
     """现代化文件夹选择对话框"""
 
-    def __init__(self, parent=None, start_dir: str = "", multi_select: bool = True):
+    def __init__(self, parent=None, start_dir: str = "", multi_select: bool = True, config_service=None):
         super().__init__(parent)
         self.multi_select = multi_select
         self.selected_folders: List[str] = []
         self.history: List[str] = []  # 导航历史
         self.history_index = -1  # 当前历史位置
         self.favorite_folders: List[str] = []  # 收藏的文件夹
+        self.config_service = config_service
 
         self.setWindowTitle("选择文件夹" + (" (可多选)" if multi_select else ""))
         self.setMinimumSize(1000, 650)
@@ -1162,15 +1163,30 @@ class FolderDialog(QDialog):
             config_path = os.path.join(project_root, "examples", "config.json")
         
         return config_path
+    
+    def _get_favorites_config_path(self) -> str:
+        """获取收藏文件夹配置文件路径（用户目录）"""
+        # 使用用户目录存储收藏，避免污染模板文件
+        user_config_dir = Path.home() / ".manga-translator-ui"
+        user_config_dir.mkdir(exist_ok=True)
+        return str(user_config_dir / "favorites.json")
 
     def _load_favorite_folders(self):
         """从配置文件加载收藏文件夹"""
         try:
-            config_path = self._get_config_path()
-            if os.path.exists(config_path):
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    self.favorite_folders = config.get('app', {}).get('favorite_folders', [])
+            if self.config_service:
+                # 使用config_service加载
+                config = self.config_service.get_config()
+                self.favorite_folders = config.app.favorite_folders or []
+            else:
+                # 降级方案：直接读取文件
+                config_path = self._get_config_path()
+                if os.path.exists(config_path):
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config_dict = json.load(f)
+                        self.favorite_folders = config_dict.get('app', {}).get('favorite_folders', [])
+                else:
+                    self.favorite_folders = []
         except Exception as e:
             print(f"加载收藏文件夹失败: {e}")
             self.favorite_folders = []
@@ -1178,32 +1194,40 @@ class FolderDialog(QDialog):
     def _save_favorite_folders(self):
         """保存收藏文件夹到配置文件"""
         try:
-            config_path = self._get_config_path()
-            
-            # 读取现有配置
-            config = {}
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path, 'r', encoding='utf-8') as f:
-                        config = json.load(f)
-                except:
-                    config = {}
-            
-            # 确保 app 键存在
-            if 'app' not in config:
-                config['app'] = {}
-            
-            # 确保 app 是字典类型
-            if not isinstance(config['app'], dict):
-                config['app'] = {}
-            
-            # 更新收藏文件夹
-            config['app']['favorite_folders'] = self.favorite_folders
-            
-            # 保存配置
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
+            if self.config_service:
+                # 使用config_service保存
+                config = self.config_service.get_config()
+                config.app.favorite_folders = self.favorite_folders
+                self.config_service.set_config(config)
+                self.config_service.save_config_file()
+            else:
+                # 降级方案：直接写入文件
+                config_path = self._get_config_path()
+                
+                # 读取现有配置
+                config_dict = {}
+                if os.path.exists(config_path):
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            config_dict = json.load(f)
+                    except:
+                        config_dict = {}
+                
+                # 确保 app 键存在
+                if 'app' not in config_dict:
+                    config_dict['app'] = {}
+                
+                # 确保 app 是字典类型
+                if not isinstance(config_dict['app'], dict):
+                    config_dict['app'] = {}
+                
+                # 更新收藏文件夹
+                config_dict['app']['favorite_folders'] = self.favorite_folders
+                
+                # 保存配置
+                os.makedirs(os.path.dirname(config_path), exist_ok=True)
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(config_dict, f, indent=2, ensure_ascii=False)
                 
         except Exception as e:
             print(f"保存收藏文件夹失败: {e}")
@@ -1250,7 +1274,7 @@ class FolderDialog(QDialog):
         self.folder_tree.viewport().update()
 
 
-def select_folders(parent=None, start_dir: str = "", multi_select: bool = True) -> Optional[List[str]]:
+def select_folders(parent=None, start_dir: str = "", multi_select: bool = True, config_service=None) -> Optional[List[str]]:
     """
     显示文件夹选择对话框
 
@@ -1258,11 +1282,12 @@ def select_folders(parent=None, start_dir: str = "", multi_select: bool = True) 
         parent: 父窗口
         start_dir: 起始目录
         multi_select: 是否支持多选
+        config_service: 配置服务实例
 
     Returns:
         选中的文件夹路径列表，如果取消则返回 None
     """
-    dialog = FolderDialog(parent, start_dir, multi_select)
+    dialog = FolderDialog(parent, start_dir, multi_select, config_service)
     if dialog.exec() == QDialog.DialogCode.Accepted:
         return dialog.get_selected_folders()
     return None

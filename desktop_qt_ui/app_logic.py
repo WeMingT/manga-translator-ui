@@ -497,7 +497,8 @@ class MainAppLogic(QObject):
         folders = select_folders(
             parent=None,
             start_dir=last_dir,
-            multi_select=True
+            multi_select=True,
+            config_service=self.config_service
         )
 
         if folders:

@@ -44,7 +44,7 @@
   "inpainter": {
     "inpainter": "lama_large",
     "inpainting_size": 2048,
-    "inpainting_precision": "fp32"
+    "inpainting_precision": "bf16"
   },
   "render": {
     "renderer": "default",
@@ -96,7 +96,7 @@
     "overwrite": true,
     "skip_no_text": false,
     "save_text": true,
-    "load_text": true,
+    "load_text": false,
     "template": false,
     "save_quality": 100,
     "batch_size": 3,
