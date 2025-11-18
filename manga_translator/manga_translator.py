@@ -2152,11 +2152,16 @@ class MangaTranslator:
                             json_path = os.path.splitext(image_name)[0] + '_translations.json' if image_name else 'unknown'
                             raise FileNotFoundError(f"Translation file not found or invalid: {json_path}")
                         
-                        # 设置字体大小
+                        # 设置字体大小和默认translation
                         for region in loaded_regions:
                             if not hasattr(region, 'font_size') or not region.font_size:
                                 box_height = np.max(region.lines[:,:,1]) - np.min(region.lines[:,:,1])
                                 region.font_size = min(int(box_height * 0.8), 128)
+                            
+                            # 如果translation为空或None，使用原文text作为默认值
+                            if not region.translation:
+                                region.translation = region.text
+                                logger.debug(f"Region translation is empty, using original text: {region.text[:50]}...")
                         
                         ctx.text_regions = loaded_regions
                         

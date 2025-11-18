@@ -292,7 +292,7 @@ def generate_original_text(
         if original_text.strip():
             items.append({
                 'original': original_text,
-                'translated': translated_text if translated_text else original_text  # 使用translation字段，如果为空则使用原文
+                'translated': translated_text  # 直接使用translation字段，即使为空
             })
 
     # 生成输出路径
@@ -966,10 +966,11 @@ def safe_update_large_json_from_text(
                 old_translation = region.get('translation', '')
                 new_translation = translations[original_text]
 
-                # 只有当翻译实际改变时才更新
+                # 总是更新translation字段，即使原文和译文相同
                 if old_translation != new_translation:
                     region['translation'] = new_translation
                     updated_count += 1
+                    logger.debug(f"更新翻译: '{original_text[:30]}...' -> '{new_translation[:30]}...'")
             else:
                 # 如果精确匹配失败，尝试模糊匹配
                 normalized = normalize_text(original_text)
@@ -981,7 +982,7 @@ def safe_update_large_json_from_text(
 
                     logger.debug(f"模糊匹配成功: '{original_text}' -> '{matched_original}', old='{old_translation}', new='{new_translation}'")
 
-                    # 只有当翻译实际改变时才更新
+                    # 总是更新translation字段，即使原文和译文相同
                     if old_translation != new_translation:
                         region['translation'] = new_translation
                         updated_count += 1
