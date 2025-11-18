@@ -845,9 +845,6 @@ def safe_update_large_json_from_text(
 
     # 2. 解析翻译内容
     logger.debug("Parsing translations from text content.")
-    logger.info(f"[DEBUG] TXT文件路径: {text_file_path}")
-    logger.info(f"[DEBUG] JSON文件路径: {json_file_path}")
-    logger.info(f"[DEBUG] 模板文件路径: {template_path}")
     translations = {}
     
     # 首先尝试直接解析为JSON（支持紧凑格式）
@@ -855,40 +852,28 @@ def safe_update_large_json_from_text(
         parsed_json = json.loads(text_content)
         if isinstance(parsed_json, dict):
             translations = parsed_json
-            logger.info(f"[DEBUG] 直接解析为JSON成功，找到 {len(translations)} 条翻译")
-            logger.info(f"[DEBUG] 前3条翻译: {list(translations.items())[:3]}")
+            logger.info(f"直接解析为JSON成功，找到 {len(translations)} 条翻译")
         else:
-            logger.info(f"[DEBUG] JSON解析成功但不是字典格式，尝试模板解析")
             raise ValueError("Not a dict")
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.info(f"[DEBUG] 直接JSON解析失败: {e}，尝试使用模板解析")
+    except (json.JSONDecodeError, ValueError):
         # 如果JSON解析失败，使用原来的模板解析逻辑
         # 移除前缀和后缀
-        logger.info(f"[DEBUG] 原始文本内容长度: {len(text_content)}")
-        logger.info(f"[DEBUG] Prefix: {repr(prefix[:50] if prefix else '')}")
-        logger.info(f"[DEBUG] Suffix: {repr(suffix[:50] if suffix else '')}")
         if prefix and text_content.startswith(prefix):
             text_content = text_content[len(prefix):]
         if suffix and text_content.endswith(suffix):
             text_content = text_content[:-len(suffix)]
 
         # 分割条目
-        logger.info(f"[DEBUG] Separator: {repr(separator[:50] if separator else '')}")
         if separator:
             # 尝试使用separator分割
             items = text_content.split(separator)
             # 如果只分割出1个item，可能是紧凑格式（没有换行），尝试用逗号分割
             if len(items) == 1 and ',' in text_content:
-                logger.info(f"[DEBUG] Separator分割失败，尝试用逗号分割紧凑格式")
                 # 使用正则表达式分割：匹配 "key": "value", 的模式
-                # 注意：这个正则会保留引号
                 items = re.split(r'",\s*"', text_content)
-                logger.info(f"[DEBUG] 逗号分割后得到 {len(items)} 个items")
         else:
             items = [text_content] if text_content.strip() else []
-        logger.info(f"[DEBUG] Found {len(items)} items in text file.")
-        if len(items) > 0:
-            logger.info(f"[DEBUG] First item: {repr(items[0][:100] if items[0] else '')}")
+        logger.debug(f"Found {len(items)} items in text file.")
 
         # 解析每个条目
         parts = re.split(f'({re.escape("<original>")}|{re.escape("<translated>")})', item_template)
@@ -906,20 +891,12 @@ def safe_update_large_json_from_text(
         
         # 添加结尾匹配，确保匹配到字符串末尾
         parser_regex_str += "$"
-
-        logger.info(f"[DEBUG] Item template: {repr(item_template)}")
-        logger.info(f"[DEBUG] Parser regex: {repr(parser_regex_str)}")
         parser_regex = re.compile(parser_regex_str, re.DOTALL)
 
-        matched_count = 0
-        for idx, item in enumerate(items):
+        for item in items:
             item_stripped = item.strip()
             if not item_stripped:
-                logger.info(f"[DEBUG] Item {idx}: 跳过空条目")
                 continue
-
-            if idx < 3:  # 打印前3个item的完整内容
-                logger.info(f"[DEBUG] Item {idx} 原始内容: {repr(item)}")
             
             match = parser_regex.search(item)
             if match:
@@ -927,26 +904,16 @@ def safe_update_large_json_from_text(
                     result = {}
                     for j, group_name in enumerate(group_order):
                         captured_string = match.group(j + 1)
-                        # 直接使用捕获的字符串
                         result[group_name] = captured_string
                     translations[result['original']] = result['translated']
-                    matched_count += 1
-                    if matched_count <= 3:  # 只打印前3个
-                        logger.info(f"[DEBUG] Item {idx} 匹配成功: original={repr(result['original'])}, translated={repr(result['translated'])}")
-                        logger.info(f"[DEBUG] Item {idx} 匹配的groups: {match.groups()}")
-                except (IndexError, KeyError) as e:
-                    logger.info(f"[DEBUG] Item {idx} 解析失败: {item[:100]}... Error: {e}")
+                except (IndexError, KeyError):
                     continue  # 跳过解析失败的条目
-            else:
-                logger.info(f"[DEBUG] Item {idx} 正则匹配失败: {repr(item[:100])}")
 
     if not translations:
         logger.warning(f"Could not parse any translations from '{os.path.basename(text_file_path)}'.")
-        logger.info(f"[DEBUG] 解析失败总结: 找到 {len(items)} 个条目，但没有成功解析任何翻译")
         return "错误：未能从TXT文件中解析出任何翻译内容"
 
     logger.info(f"解析出 {len(translations)} 条翻译")
-    logger.info(f"[DEBUG] 前3条翻译: {list(translations.items())[:3]}")
 
     # 2.5. 创建标准化映射（用于模糊匹配）
     def normalize_text(text):
