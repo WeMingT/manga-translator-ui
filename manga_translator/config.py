@@ -339,6 +339,8 @@ class DetectorConfig(BaseModel):
     """Threshold for bbox generation"""
     unclip_ratio: float = 2.3
     """How much to extend text skeleton to form bounding box"""
+    min_box_area_ratio: float = 0.0009
+    """Minimum detection box area ratio relative to total image pixels (default 0.0009 = 0.09%)"""
 
 class InpainterConfig(BaseModel):
     inpainter: Inpainter = Inpainter.lama_large
