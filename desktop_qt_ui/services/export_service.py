@@ -425,6 +425,8 @@ class ExportService:
             font_full_path = os.path.abspath(font_full_path)
             if os.path.exists(font_full_path):
                 translator_params['font_path'] = font_full_path
+                # 同时更新 config 中的 font_path
+                config['render']['font_path'] = font_full_path
                 self.logger.info(f"设置字体路径: {font_full_path}")
         
         # 提取输出格式

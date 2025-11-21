@@ -136,7 +136,6 @@ class MangaTranslator:
         
         self._batch_contexts = []  # 存储批量处理的上下文
         self._batch_configs = []   # 存储批量处理的配置
-        self.disable_memory_optimization = params.get('disable_memory_optimization', False)
         # batch_concurrent 会在 parse_init_params 中验证并设置
         self.batch_concurrent = params.get('batch_concurrent', False)
         
@@ -225,6 +224,7 @@ class MangaTranslator:
 
     def parse_init_params(self, params: dict):
         self.verbose = params.get('verbose', False)
+        # font_path 优先从配置文件读取，如果没有则使用命令行参数
         self.font_path = params.get('font_path', None)
         self.models_ttl = params.get('models_ttl', 0)
         self.batch_size = params.get('batch_size', 1)  # 添加批量大小参数
@@ -891,8 +891,8 @@ class MangaTranslator:
                 logger.error(f"Error saving inpainted.png debug image: {e}")
                 logger.debug(f"Exception details: {traceback.format_exc()}")
 
-        # 保存inpainted图片到新目录结构
-        if hasattr(ctx, 'image_name') and ctx.image_name and ctx.img_inpainted is not None:
+        # 保存inpainted图片到新目录结构（仅在save_text模式下，用于可编辑图片功能）
+        if self.save_text and hasattr(ctx, 'image_name') and ctx.image_name and ctx.img_inpainted is not None:
             self._save_inpainted_image(ctx.image_name, ctx.img_inpainted)
         # -- Rendering
         await self._report_progress('rendering')
@@ -1868,18 +1868,22 @@ class MangaTranslator:
     async def _run_text_rendering(self, config: Config, ctx: Context):
         current_time = time.time()
         self._model_usage_timestamps[("rendering", config.render.renderer)] = current_time
+        
+        # 优先使用配置文件中的 font_path，如果没有则使用命令行参数
+        font_path = config.render.font_path or self.font_path
+        
         if config.render.renderer == Renderer.none:
             output = ctx.img_inpainted
         # manga2eng currently only supports horizontal left to right rendering
         elif (config.render.renderer == Renderer.manga2Eng or config.render.renderer == Renderer.manga2EngPillow) and ctx.text_regions and LANGUAGE_ORIENTATION_PRESETS.get(ctx.text_regions[0].target_lang) == 'h':
             if config.render.renderer == Renderer.manga2EngPillow:
-                output = await dispatch_eng_render_pillow(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, self.font_path, config.render.line_spacing)
+                output = await dispatch_eng_render_pillow(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, font_path, config.render.line_spacing)
             else:
-                output = await dispatch_eng_render(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, self.font_path, config.render.line_spacing)
+                output = await dispatch_eng_render(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, font_path, config.render.line_spacing)
         else:
             # Request debug image for balloon_fill mode when verbose
             need_debug_img = self.verbose and config.render.layout_mode == 'balloon_fill'
-            result = await dispatch_rendering(ctx.img_inpainted, ctx.text_regions, self.font_path, config, ctx.img_rgb, return_debug_img=need_debug_img)
+            result = await dispatch_rendering(ctx.img_inpainted, ctx.text_regions, font_path, config, ctx.img_rgb, return_debug_img=need_debug_img)
             
             # Handle debug image if returned
             if need_debug_img and isinstance(result, tuple):
@@ -3351,8 +3355,8 @@ class MangaTranslator:
                 logger.error(f"Error saving inpainted.png debug image: {e}")
                 logger.debug(f"Exception details: {traceback.format_exc()}")
 
-        # 保存inpainted图片到新目录结构
-        if hasattr(ctx, 'image_name') and ctx.image_name and ctx.img_inpainted is not None:
+        # 保存inpainted图片到新目录结构（仅在save_text模式下，用于可编辑图片功能）
+        if self.save_text and hasattr(ctx, 'image_name') and ctx.image_name and ctx.img_inpainted is not None:
             self._save_inpainted_image(ctx.image_name, ctx.img_inpainted)
 
         # -- Rendering
@@ -3811,7 +3815,7 @@ class MangaTranslator:
                     # Colorize Only Mode: Skip rendering pipeline
                     if not self.colorize_only:
                         ctx = await self._complete_translation_pipeline(ctx, config)
-
+                    
                     # --- BEGIN SAVE LOGIC ---
                     if save_info and ctx.result:
                         try:
@@ -3820,6 +3824,8 @@ class MangaTranslator:
                             self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "HQ")
                         except Exception as save_err:
                             logger.error(f"Error saving high-quality result for {os.path.basename(ctx.image_name)}: {save_err}")
+                            import traceback
+                            logger.error(traceback.format_exc())
                     # --- END SAVE LOGIC ---
 
                     if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
@@ -3830,7 +3836,8 @@ class MangaTranslator:
                     ctx.success = True
                     
                     # ✅ 清理ctx中的大对象，只保留必要信息
-                    if hasattr(ctx, 'result'):
+                    # 注意：只有在保存文件后才清理result（API模式下save_info为None，需要保留result）
+                    if save_info and hasattr(ctx, 'result'):
                         ctx.result = None  # 保存后删除渲染结果
                     
                     # ✅ 清理中间处理图像（保留text_regions等元数据）
