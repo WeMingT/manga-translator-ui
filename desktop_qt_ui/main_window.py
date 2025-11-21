@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
     def _apply_theme(self, theme: str):
         """应用指定的主题"""
         import os
+        import sys
         
         # 主题文件映射
         theme_files = {
@@ -117,11 +118,30 @@ class MainWindow(QMainWindow):
         }
         
         stylesheet_file = theme_files.get(theme, 'modern.qss')
-        stylesheet_path = os.path.join(os.path.dirname(__file__), 'styles', stylesheet_file)
+        
+        # 适配打包环境和开发环境
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            # 打包环境：样式文件在 _internal/desktop_qt_ui/styles/
+            stylesheet_path = os.path.join(sys._MEIPASS, 'desktop_qt_ui', 'styles', stylesheet_file)
+            # 图标基础路径
+            icon_base_path = os.path.join(sys._MEIPASS, 'desktop_qt_ui', 'styles', 'icons')
+        else:
+            # 开发环境
+            stylesheet_path = os.path.join(os.path.dirname(__file__), 'styles', stylesheet_file)
+            # 图标基础路径
+            icon_base_path = os.path.join(os.path.dirname(__file__), 'styles', 'icons')
         
         try:
             with open(stylesheet_path, 'r', encoding='utf-8') as f:
                 stylesheet = f.read()
+                
+                # 替换样式表中的图标路径为绝对路径
+                # 将 desktop_qt_ui/styles/icons/ 替换为实际的绝对路径
+                stylesheet = stylesheet.replace(
+                    'desktop_qt_ui/styles/icons/',
+                    icon_base_path.replace('\\', '/') + '/'
+                )
+                
                 self.setStyleSheet(stylesheet)
         except FileNotFoundError:
             self.logger.warning(f"Stylesheet not found: {stylesheet_path}")

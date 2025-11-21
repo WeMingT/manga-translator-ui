@@ -21,6 +21,7 @@
 |------|------|
 | [安装指南](doc/INSTALLATION.md) | 详细安装步骤、系统要求、分卷下载说明 |
 | [使用教程](doc/USAGE.md) | 基础操作、翻译器选择、常用设置 |
+| [命令行模式](doc/CLI_USAGE.md) | 命令行使用指南、参数说明、批量处理 |
 | [API 配置](doc/API_CONFIG.md) | API Key 申请、配置教程 |
 | [功能特性](doc/FEATURES.md) | 完整功能列表、可视化编辑器详解 |
 | [工作流程](doc/WORKFLOWS.md) | 4 种工作流程、AI 断句、自定义模版 |
@@ -111,6 +112,8 @@
 
 ## 📖 使用教程
 
+### 🖥️ Qt 界面模式
+
 安装完成后，请查看使用教程了解如何翻译图片：
 
 **使用教程** → [doc/USAGE.md](doc/USAGE.md)
@@ -122,6 +125,36 @@
 4. 添加图片
 5. 选择翻译器
 6. 开始翻译
+
+### ⌨️ 命令行模式
+
+适合批量处理和自动化脚本：
+
+**命令行指南** → [doc/CLI_USAGE.md](doc/CLI_USAGE.md)
+
+快速开始：
+```bash
+# CLI 模式（推荐，使用 UI 层逻辑）
+python -m manga_translator cli -i manga.jpg
+
+# 或简写（默认 CLI 模式）
+python -m manga_translator -i manga.jpg
+
+# 翻译整个文件夹
+python -m manga_translator -i ./manga_folder/ -o ./output/
+
+# Web API 服务器模式
+python -m manga_translator web --host 127.0.0.1 --port 8000
+
+# Local 模式（旧版批量翻译）
+python -m manga_translator local -i manga.jpg --use-gpu
+
+# WebSocket 模式（实时通信服务）
+python -m manga_translator ws --host 127.0.0.1 --port 5003
+
+# 查看所有参数
+python -m manga_translator --help
+```
 
 ---
 

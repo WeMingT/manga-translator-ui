@@ -187,6 +187,8 @@ class RenderConfig(BaseModel):
     """Change text to lowercase"""
     no_hyphenation: bool = False
     """If renderer should be splitting up words using a hyphen character (-)"""
+    font_path: Optional[str] = None
+    """Path to font file for rendering. If not specified, uses default font."""
     font_color: Optional[str] = None
     """Overwrite the text fg/bg color detected by the OCR model. Use hex string without the "#" such as FFFFFF for a white foreground or FFFFFF:000000 to also have a black background around the text."""
     line_spacing: Optional[float] = None
