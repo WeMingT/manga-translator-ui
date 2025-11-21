@@ -988,7 +988,8 @@ class MangaTranslator:
                                         config.detector.unclip_ratio, config.detector.det_invert, config.detector.det_gamma_correct, config.detector.det_rotate,
                                         config.detector.det_auto_rotate,
                                         self.device, self.verbose,
-                                        config.detector.use_yolo_obb, config.detector.yolo_obb_conf, config.detector.yolo_obb_iou, config.detector.yolo_obb_overlap_threshold)
+                                        config.detector.use_yolo_obb, config.detector.yolo_obb_conf, config.detector.yolo_obb_iou, config.detector.yolo_obb_overlap_threshold,
+                                        config.detector.min_box_area_ratio)
         
         # 处理bbox调试图（如果检测器返回了）
         if self.verbose and result and len(result) == 3 and result[2] is not None:
