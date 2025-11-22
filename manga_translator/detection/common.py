@@ -126,8 +126,21 @@ class CommonDetector(InfererModule):
 
     def _remove_rotation(self, textlines, raw_mask, mask, img_w, img_h):
         raw_mask = np.ascontiguousarray(np.rot90(raw_mask))
+        
+        # mask 可能是 tuple（包含多个调试图片）或单个数组
         if mask is not None:
-            mask = np.ascontiguousarray(np.rot90(mask).astype(np.uint8))
+            if isinstance(mask, tuple):
+                # 如果是 tuple，对每个元素分别旋转
+                rotated_masks = []
+                for m in mask:
+                    if m is not None and hasattr(m, 'shape'):
+                        rotated_masks.append(np.ascontiguousarray(np.rot90(m).astype(np.uint8)))
+                    else:
+                        rotated_masks.append(m)
+                mask = tuple(rotated_masks)
+            else:
+                # 单个数组
+                mask = np.ascontiguousarray(np.rot90(mask).astype(np.uint8))
 
         for i, txtln in enumerate(textlines):
             rotated_pts = txtln.pts[:,[1,0]]
