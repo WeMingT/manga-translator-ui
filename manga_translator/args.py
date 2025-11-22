@@ -21,6 +21,8 @@ def create_parser():
                            help='使用 GPU')
     web_parser.add_argument('--models-ttl', default=0, type=int,
                            help='上次使用后将模型保留在内存中的时间（秒）（0 表示永远）')
+    web_parser.add_argument('--retry-attempts', default=None, type=int,
+                           help='翻译失败时的重试次数（-1 表示无限重试，None 表示使用 API 传入的配置）')
     web_parser.add_argument('-v', '--verbose', action='store_true',
                            help='显示详细日志')
     
@@ -49,6 +51,8 @@ def create_parser():
                           help='WebSocket 模式的服务器 URL（默认：ws://localhost:5000）')
     ws_parser.add_argument('--models-ttl', default=0, type=int,
                           help='上次使用后将模型保留在内存中的时间（秒）（0 表示永远）')
+    ws_parser.add_argument('--retry-attempts', default=None, type=int,
+                          help='翻译失败时的重试次数（-1 表示无限重试，None 表示使用 API 传入的配置）')
     ws_parser.add_argument('-v', '--verbose', action='store_true',
                           help='显示详细日志')
     ws_parser.add_argument('--use-gpu', action='store_true',
@@ -64,6 +68,8 @@ def create_parser():
                               help='用于保护内部 API 服务器通信的 Nonce')
     shared_parser.add_argument('--models-ttl', default=0, type=int,
                               help='模型在内存中的 TTL（秒）（0 表示永远）')
+    shared_parser.add_argument('--retry-attempts', default=None, type=int,
+                              help='翻译失败时的重试次数（-1 表示无限重试，None 表示使用 API 传入的配置）')
     shared_parser.add_argument('-v', '--verbose', action='store_true',
                               help='显示详细日志')
     shared_parser.add_argument('--use-gpu', action='store_true',
