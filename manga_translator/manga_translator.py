@@ -3058,7 +3058,9 @@ class MangaTranslator:
                 translator = GeminiHighQualityTranslator()
 
             translator.parse_args(config.translator)
-            translator.attempts = self.attempts
+            # 只有当 self.attempts 不是默认值时才覆盖（允许 API 传入的 config.translator.attempts 生效）
+            if self.attempts != -1:
+                translator.attempts = self.attempts
 
             # 为所有翻译器构建和设置文本上下文（包括HQ翻译器）
             done_pages = self.all_page_translations

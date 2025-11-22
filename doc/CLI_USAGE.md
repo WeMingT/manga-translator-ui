@@ -293,6 +293,9 @@ python -m manga_translator web --host 0.0.0.0 --port 8000 --use-gpu
 
 # 设置模型 TTL（模型在最后一次使用后 300 秒后卸载）
 python -m manga_translator web --models-ttl 300
+
+# 强制重试次数（忽略 API 传入的配置）
+python -m manga_translator web --retry-attempts 3
 ```
 
 **架构说明**：
@@ -307,6 +310,7 @@ python -m manga_translator web --models-ttl 300
 - `--port` - 服务器端口（默认：8000）
 - `--use-gpu` - 使用 GPU 加速
 - `--models-ttl` - 模型在内存中的保留时间（秒，0 表示永远，默认：0）
+- `--retry-attempts` - 翻译失败时的重试次数（-1 表示无限重试，None 表示使用 API 传入的配置，默认：None）
 - `-v, --verbose` - 显示详细日志
 
 **API 端点**：
@@ -812,21 +816,50 @@ python -m manga_translator web --models-ttl 1800
 - 模型卸载后，下次请求会重新加载，可能需要几秒到几十秒
 - 该参数同样适用于 `ws` 和 `shared` 模式
 
+### 重试次数控制
+
+`--retry-attempts` 参数控制翻译失败时的重试行为：
+
+```bash
+# 不指定（使用 API 传入的 config.translator.attempts）
+python -m manga_translator web
+
+# 强制无限重试（忽略 API 配置）
+python -m manga_translator web --retry-attempts -1
+
+# 强制最多重试 3 次（忽略 API 配置）
+python -m manga_translator web --retry-attempts 3
+
+# 强制不重试（忽略 API 配置）
+python -m manga_translator web --retry-attempts 0
+```
+
+**优先级**：
+1. **命令行 `--retry-attempts`**（如果指定）：最高优先级，会覆盖 API 传入的配置
+2. **API 传入的 `config.translator.attempts`**：次优先级
+3. **默认值 -1**（无限重试）：最低优先级
+
+**使用建议**：
+- **生产环境**：建议设置为固定值（如 `3`），避免无限重试导致资源浪费
+- **开发测试**：可以使用默认值（`None`），允许 API 灵活控制
+- **稳定性优先**：设置为 `-1`（无限重试），确保翻译最终成功
+
 ### WebSocket 模式和 Shared 模式
 
-这两种模式也支持 `--models-ttl` 参数：
+这两种模式也支持 `--models-ttl` 和 `--retry-attempts` 参数：
 
 ```bash
 # WebSocket 模式
-python -m manga_translator ws --models-ttl 300
+python -m manga_translator ws --models-ttl 300 --retry-attempts 3
 
 # Shared 模式（API 实例）
-python -m manga_translator shared --models-ttl 300
+python -m manga_translator shared --models-ttl 300 --retry-attempts 3
 ```
 
 **参数说明**：
 - `--nonce` - 用于保护内部通信的 Nonce
 - `--models-ttl` - 模型在内存中的保留时间（秒，0 表示永远）
+- `--retry-attempts` - 翻译失败时的重试次数（-1 表示无限重试，None 表示使用 API 传入的配置）
 
 **使用场景**：
 - 作为 Web 服务器的后端翻译实例

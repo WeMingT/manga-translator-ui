@@ -154,6 +154,10 @@ async def get_ctx(req: Request, config: Config, image: str|bytes, workflow: str 
     translator_params['use_gpu_limited'] = server_config.get('use_gpu_limited', False)
     translator_params['verbose'] = server_config.get('verbose', False)
     translator_params['models_ttl'] = server_config.get('models_ttl', 0)
+    # 如果命令行指定了 retry_attempts，则使用它（忽略 API 传入的配置）
+    retry_attempts = server_config.get('retry_attempts', None)
+    if retry_attempts is not None:
+        translator_params['attempts'] = retry_attempts
     
     # 创建翻译器
     translator = MangaTranslator(params=translator_params)
@@ -217,6 +221,10 @@ async def while_streaming(req: Request, transform, config: Config, image: bytes 
             translator_params['use_gpu_limited'] = server_config.get('use_gpu_limited', False)
             translator_params['verbose'] = server_config.get('verbose', False)
             translator_params['models_ttl'] = server_config.get('models_ttl', 0)
+            # 如果命令行指定了 retry_attempts，则使用它（忽略 API 传入的配置）
+            retry_attempts = server_config.get('retry_attempts', None)
+            if retry_attempts is not None:
+                translator_params['attempts'] = retry_attempts
             
             # 调试：打印配置
             print(f"[STREAMING] server_config={server_config}")
@@ -334,6 +342,10 @@ async def get_batch_ctx(req: Request, config: Config, images: list[str|bytes], b
     translator_params['use_gpu_limited'] = server_config.get('use_gpu_limited', False)
     translator_params['verbose'] = server_config.get('verbose', False)
     translator_params['models_ttl'] = server_config.get('models_ttl', 0)
+    # 如果命令行指定了 retry_attempts，则使用它（忽略 API 传入的配置）
+    retry_attempts = server_config.get('retry_attempts', None)
+    if retry_attempts is not None:
+        translator_params['attempts'] = retry_attempts
     
     # 创建翻译器
     translator = MangaTranslator(params=translator_params)
