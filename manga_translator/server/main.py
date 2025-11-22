@@ -34,6 +34,31 @@ server_config = {
     'retry_attempts': None,
 }
 
+# 默认配置文件路径
+DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'examples', 'config.json')
+
+def load_default_config() -> Config:
+    """加载默认配置文件"""
+    if os.path.exists(DEFAULT_CONFIG_PATH):
+        try:
+            with open(DEFAULT_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config_json = f.read()
+            return Config.parse_raw(config_json)
+        except Exception as e:
+            print(f"[WARNING] Failed to load default config from {DEFAULT_CONFIG_PATH}: {e}")
+            return Config()
+    else:
+        print(f"[WARNING] Default config file not found: {DEFAULT_CONFIG_PATH}")
+        return Config()
+
+def parse_config(config_str: str) -> Config:
+    """解析配置，如果为空则使用默认配置"""
+    if not config_str or config_str.strip() in ('{}', ''):
+        print("[INFO] No config provided, using default config from examples/config.json")
+        return load_default_config()
+    else:
+        return Config.parse_raw(config_str)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -110,21 +135,21 @@ async def stream_image(req: Request, data: TranslateRequest) -> StreamingRespons
 @app.post("/translate/with-form/json", response_model=TranslationResponse, tags=["api", "form"],response_description="json strucure inspired by the ichigo translator extension")
 async def json_form(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     ctx = await get_ctx(req, conf, img, "save_json")
     return to_translation(ctx)
 
 @app.post("/translate/with-form/bytes", response_class=StreamingResponse, tags=["api", "form"],response_description="custom byte structure for decoding look at examples in 'examples/response.*'")
 async def bytes_form(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     ctx = await get_ctx(req, conf, img, "save_json")
     return StreamingResponse(content=to_translation(ctx).to_bytes())
 
 @app.post("/translate/with-form/image", response_description="the result image", tags=["api", "form"],response_class=StreamingResponse)
 async def image_form(req: Request, image: UploadFile = File(...), config: str = Form("{}")) -> StreamingResponse:
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     ctx = await get_ctx(req, conf, img, "normal")
     
     if not ctx.result:
@@ -139,7 +164,7 @@ async def image_form(req: Request, image: UploadFile = File(...), config: str = 
 @app.post("/translate/with-form/json/stream", response_class=StreamingResponse, tags=["api", "form"],response_description="A stream over elements with strucure(1byte status, 4 byte size, n byte data) status code are 0,1,2,3,4 0 is result data, 1 is progress report, 2 is error, 3 is waiting queue position, 4 is waiting for translator instance")
 async def stream_json_form(req: Request, image: UploadFile = File(...), config: str = Form("{}")) -> StreamingResponse:
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     # 标记这是Web前端调用，用于占位符优化
     conf._is_web_frontend = True
     return await while_streaming(req, transform_to_json, conf, img, "save_json")
@@ -149,14 +174,14 @@ async def stream_json_form(req: Request, image: UploadFile = File(...), config: 
 @app.post("/translate/with-form/bytes/stream", response_class=StreamingResponse,tags=["api", "form"], response_description="A stream over elements with strucure(1byte status, 4 byte size, n byte data) status code are 0,1,2,3,4 0 is result data, 1 is progress report, 2 is error, 3 is waiting queue position, 4 is waiting for translator instance")
 async def stream_bytes_form(req: Request, image: UploadFile = File(...), config: str = Form("{}"))-> StreamingResponse:
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     return await while_streaming(req, transform_to_bytes, conf, img, "save_json")
 
 @app.post("/translate/with-form/image/stream", response_class=StreamingResponse, tags=["api", "form"], response_description="Standard streaming endpoint - returns complete image data. Suitable for API calls and scripts.")
 async def stream_image_form(req: Request, image: UploadFile = File(...), config: str = Form("{}")) -> StreamingResponse:
     """通用流式端点：返回完整图片数据，适用于API调用和comicread脚本"""
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     # 标记为通用模式，不使用占位符优化
     conf._web_frontend_optimized = False
     return await while_streaming(req, transform_to_image, conf, img, "normal")
@@ -165,7 +190,7 @@ async def stream_image_form(req: Request, image: UploadFile = File(...), config:
 async def stream_image_form_web(req: Request, image: UploadFile = File(...), config: str = Form("{}")) -> StreamingResponse:
     """Web前端专用端点：使用占位符优化，提供极速体验"""
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     # 标记为Web前端优化模式，使用占位符优化
     conf._web_frontend_optimized = True
     return await while_streaming(req, transform_to_image, conf, img, "normal")
@@ -245,7 +270,7 @@ async def export_original(req: Request, image: UploadFile = File(...), config: s
     import zipfile
     
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     
     # 使用指定的 workflow 进行处理
     ctx = await get_ctx(req, conf, img, workflow)
@@ -332,7 +357,7 @@ async def export_translated(req: Request, image: UploadFile = File(...), config:
     import zipfile
     
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     
     # 使用指定的 workflow 进行处理
     ctx = await get_ctx(req, conf, img, workflow)
@@ -414,7 +439,7 @@ async def export_translated(req: Request, image: UploadFile = File(...), config:
 async def upscale_only(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     """仅超分（图片超分辨率）"""
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     ctx = await get_ctx(req, conf, img, "upscale_only")
     
     if ctx.result:
@@ -429,7 +454,7 @@ async def upscale_only(req: Request, image: UploadFile = File(...), config: str 
 async def colorize_only(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     """仅上色（黑白图片上色）"""
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     ctx = await get_ctx(req, conf, img, "colorize_only")
     
     if ctx.result:
@@ -450,7 +475,7 @@ async def import_json_and_render(req: Request, image: UploadFile = File(...), js
     
     img_bytes = await image.read()
     json_content = await json_file.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     
     # 保存 JSON 到临时文件
     work_dir = get_work_dir()
@@ -517,7 +542,7 @@ async def import_txt_and_render(req: Request, image: UploadFile = File(...), txt
     img_bytes = await image.read()
     txt_content = await txt_file.read()
     json_content = await json_file.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     
     # 创建工作目录
     work_dir = get_work_dir()
@@ -606,7 +631,7 @@ async def import_json_and_render_stream(req: Request, image: UploadFile = File(.
     
     img = await image.read()
     json_content = await json_file.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     
     # 保存 JSON 到临时文件
     work_dir = get_work_dir()
@@ -651,7 +676,7 @@ async def import_txt_and_render_stream(req: Request, image: UploadFile = File(..
     img = await image.read()
     txt_content = await txt_file.read()
     json_content = await json_file.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     
     # 创建工作目录
     work_dir = get_work_dir()
@@ -714,28 +739,28 @@ async def import_txt_and_render_stream(req: Request, image: UploadFile = File(..
 async def export_original_stream(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     """导出原文（流式，支持进度）"""
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     return await while_streaming(req, transform_to_json, conf, img, "export_original")
 
 @app.post("/translate/export/translated/stream", response_class=StreamingResponse, tags=["api", "export", "stream"])
 async def export_translated_stream(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     """导出译文（流式，支持进度）"""
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     return await while_streaming(req, transform_to_json, conf, img, "save_json")
 
 @app.post("/translate/upscale/stream", response_class=StreamingResponse, tags=["api", "process", "stream"])
 async def upscale_only_stream(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     """仅超分（流式，支持进度）"""
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     return await while_streaming(req, transform_to_image, conf, img, "upscale_only")
 
 @app.post("/translate/colorize/stream", response_class=StreamingResponse, tags=["api", "process", "stream"])
 async def colorize_only_stream(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     """仅上色（流式，支持进度）"""
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     return await while_streaming(req, transform_to_image, conf, img, "colorize_only")
 
 
@@ -748,7 +773,7 @@ async def translate_complete(req: Request, image: UploadFile = File(...), config
     from fastapi.responses import Response
     
     img = await image.read()
-    conf = Config.parse_raw(config)
+    conf = parse_config(config)
     
     # 执行翻译
     ctx = await get_ctx(req, conf, img, workflow)
