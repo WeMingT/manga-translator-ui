@@ -25,23 +25,10 @@ def main():
     if args.mode == 'web':
         # Web API 服务器模式
         logger.info('Starting Web API server')
-        from manga_translator.server.main import main as web_main, init_translator, server_config
+        from manga_translator.server.main import main as web_main
         
-        # 设置服务器配置
-        server_config['use_gpu'] = args.use_gpu
-        server_config['use_gpu_limited'] = getattr(args, 'use_gpu_limited', False)
-        server_config['verbose'] = args.verbose
-        print(f"[SERVER CONFIG] use_gpu={server_config['use_gpu']}, use_gpu_limited={server_config['use_gpu_limited']}, verbose={server_config['verbose']}")
-        
-        # 初始化翻译器
-        init_translator(use_gpu=args.use_gpu, verbose=args.verbose)
-        
-        # 启动服务器
-        import uvicorn
-        from manga_translator.server.main import app
-        print(f"Starting Manga Translator API Server on http://{args.host}:{args.port}")
-        print(f"API documentation: http://{args.host}:{args.port}/docs")
-        uvicorn.run(app, host=args.host, port=args.port)
+        # 调用 web_main 来正确设置所有配置
+        web_main(args)
     
     elif args.mode == 'local':
         # Local 模式（命令行翻译）
