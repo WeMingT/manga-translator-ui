@@ -291,7 +291,8 @@ class MainView(QWidget):
             # 跳过这些选项，因为已经用下拉框替代或不需要在UI中显示
             # realcugan_model 将通过 upscale_ratio 动态下拉框处理
             # batch_concurrent 并发处理已隐藏
-            if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export", "cli.colorize_only", "cli.upscale_only", "upscale.realcugan_model", "cli.batch_concurrent"]:
+            # gimp_font 已废弃，使用 font_path 代替
+            if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export", "cli.colorize_only", "cli.upscale_only", "upscale.realcugan_model", "cli.batch_concurrent", "render.gimp_font"]:
                 continue
 
             label_text = key
@@ -349,7 +350,29 @@ class MainView(QWidget):
                 container = QWidget()
                 hbox = QHBoxLayout(container)
                 hbox.setContentsMargins(0, 0, 0, 0)
-                combo = QComboBox()
+                
+                # 创建自定义ComboBox,在下拉时刷新提示词列表
+                class RefreshablePromptComboBox(QComboBox):
+                    def __init__(self, controller_ref, parent=None):
+                        super().__init__(parent)
+                        self.controller_ref = controller_ref
+                    
+                    def showPopup(self):
+                        current_text = self.currentText()
+                        self.clear()
+                        prompt_files = self.controller_ref.get_hq_prompt_options()
+                        if prompt_files:
+                            self.addItems(prompt_files)
+                        # 恢复之前选择的值
+                        if current_text:
+                            index = self.findText(current_text)
+                            if index >= 0:
+                                self.setCurrentIndex(index)
+                            else:
+                                self.setCurrentText(current_text)
+                        super().showPopup()
+                
+                combo = RefreshablePromptComboBox(self.controller)
                 prompt_files = self.controller.get_hq_prompt_options()
                 if prompt_files:
                     combo.addItems(prompt_files)
