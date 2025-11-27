@@ -80,12 +80,12 @@ def run(command, desc=None, errdesc=None, custom_env=None, live=False):
         message = f"""{errdesc or '命令执行错误'}.
 命令: {command}
 错误代码: {result.returncode}
-stdout: {result.stdout.decode(encoding="utf8", errors="ignore") if len(result.stdout) > 0 else '<empty>'}
-stderr: {result.stderr.decode(encoding="utf8", errors="ignore") if len(result.stderr) > 0 else '<empty>'}
+stdout: {result.stdout if len(result.stdout) > 0 else '<empty>'}
+stderr: {result.stderr if len(result.stderr) > 0 else '<empty>'}
 """
         raise RuntimeError(message)
 
-    return result.stdout.decode(encoding="utf8", errors="ignore")
+    return result.stdout
 
 
 def run_pip(args, desc=None):
