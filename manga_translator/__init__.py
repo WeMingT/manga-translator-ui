@@ -4,4 +4,11 @@ from dotenv import load_dotenv
 colorama.init(autoreset=True)
 load_dotenv()
 
-from .manga_translator import *
+# 延迟导入，避免在 --help 时加载大型库
+def __getattr__(name):
+    """延迟导入 MangaTranslator 等类"""
+    if name in ['MangaTranslator', 'Config', 'Context']:
+        from .manga_translator import MangaTranslator, Config, Context
+        globals()[name] = locals()[name]
+        return locals()[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

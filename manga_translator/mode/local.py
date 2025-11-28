@@ -50,7 +50,7 @@ def parse_args():
     return parser.parse_args()
 
 
-async def translate_files(input_paths, output_dir, config_service, verbose=False, overwrite=False):
+async def translate_files(input_paths, output_dir, config_service, verbose=False, overwrite=False, args=None):
     """翻译文件（使用 UI 层的逻辑）"""
     
     # 延迟导入，避免 --help 时加载所有模块
@@ -66,9 +66,17 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     else:
         set_log_level(logging.INFO)
     
-    # 确保 manga_translator 的日志也输出
+    # 确保 manga_translator 的日志也输出到控制台
     manga_logger = logging.getLogger('manga_translator')
-    manga_logger.setLevel(logging.INFO)
+    manga_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    
+    # 添加控制台 handler（如果还没有）
+    if not any(isinstance(h, logging.StreamHandler) for h in manga_logger.handlers):
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
+        formatter = logging.Formatter('[%(name)s] %(message)s')
+        console_handler.setFormatter(formatter)
+        manga_logger.addHandler(console_handler)
     
     logger = get_logger('local')
     
@@ -90,6 +98,22 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         cli_config['overwrite'] = True
     else:
         overwrite = cli_config.get('overwrite', False)
+    
+    # use_gpu: 命令行参数优先
+    if hasattr(args, 'use_gpu') and args.use_gpu is not None:
+        cli_config['use_gpu'] = args.use_gpu
+    
+    # format: 命令行参数优先
+    if hasattr(args, 'format') and args.format is not None:
+        cli_config['format'] = args.format
+    
+    # batch_size: 命令行参数优先
+    if hasattr(args, 'batch_size') and args.batch_size is not None:
+        cli_config['batch_size'] = args.batch_size
+    
+    # attempts: 命令行参数优先
+    if hasattr(args, 'attempts') and args.attempts is not None:
+        cli_config['attempts'] = args.attempts
     
     config_dict['cli'] = cli_config
     
@@ -142,7 +166,12 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     
     # 准备翻译参数（像 UI 一样）
     translator_params = config_dict.get('cli', {}).copy()
+    # 保存 cli 中的关键参数，避免被覆盖
+    cli_attempts = translator_params.get('attempts', -1)
     translator_params.update(config_dict)
+    # 恢复 cli 参数（如果 config_dict 中没有 attempts）
+    if 'attempts' not in config_dict:
+        translator_params['attempts'] = cli_attempts
     
     # 处理 font_path
     font_filename = config_dict.get('render', {}).get('font_path')
@@ -154,7 +183,9 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
             config_dict['render']['font_path'] = font_full_path
     
     # 创建翻译器
+    print(f"🔧 初始化翻译器...")
     translator = MangaTranslator(params=translator_params)
+    print(f"✅ 翻译器初始化完成")
     
     # 创建 Config 对象
     explicit_keys = {'render', 'upscale', 'translator', 'detector', 'colorizer', 'inpainter', 'ocr'}
@@ -162,6 +193,14 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     for key in ['filter_text', 'kernel_size', 'mask_dilation_offset', 'force_simple_sort']:
         if key in config_dict:
             config_for_translate[key] = config_dict[key]
+    
+    # 将 CLI 配置中的 attempts 复制到 translator 配置中（像 UI 一样）
+    if 'translator' in config_for_translate:
+        translator_config = config_for_translate['translator'].copy()
+        cli_attempts = cli_config.get('attempts', -1)
+        translator_config['attempts'] = cli_attempts
+        config_for_translate['translator'] = translator_config
+        logger.info(f"Setting translator attempts to: {cli_attempts} (from CLI config)")
     
     manga_config = Config(**config_for_translate)
     
@@ -233,7 +272,12 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         print(f"   overwrite: {save_info['overwrite']}")
         print(f"   input_folders: {save_info['input_folders']}")
         print()
+        print(f"⏳ 开始批量翻译（这可能需要几分钟，请耐心等待）...")
         logger.info(f"开始批量翻译，save_info={save_info}")
+        
+        import sys
+        sys.stdout.flush()  # 强制刷新输出
+        
         contexts = await translator.translate_batch(images_with_configs, save_info=save_info)
         
         # 统计结果（像 UI 一样）
@@ -331,7 +375,8 @@ async def run_local_mode(args):
             args.output if hasattr(args, 'output') else None,
             config_service,
             verbose=args.verbose if hasattr(args, 'verbose') else False,
-            overwrite=args.overwrite if hasattr(args, 'overwrite') else False
+            overwrite=args.overwrite if hasattr(args, 'overwrite') else False,
+            args=args
         )
     except KeyboardInterrupt:
         print("\n\n⚠️  用户取消")
