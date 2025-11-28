@@ -62,6 +62,10 @@ tiktoken==0.11.0
 timm==1.0.19
 transformers==4.55.2
 tqdm==4.67.1
+# accelerate - 可选依赖，用于 Qwen2 模型的自动设备映射，提升大模型加载性能
+# accelerate==1.2.1
+# bitsandbytes - 可选依赖，仅在使用 Qwen2BigTranslator (7B模型) 时需要
+# bitsandbytes==0.45.0
 uvicorn==0.35.0
 websockets==14.2
 xformers==0.0.32.post2  # 从 https://download.pytorch.org/whl/cu129 下载

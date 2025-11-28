@@ -2127,7 +2127,9 @@ class MangaTranslator:
             batch_size = 1
         
         # === 步骤3: 批量处理模式 ===
-        logger.debug(f'Starting batch translation: {len(images_with_configs)} images, batch size: {batch_size}')
+        logger.info(f'Starting batch translation: {len(images_with_configs)} images, batch size: {batch_size}')
+        import sys
+        
         results = []
         total_images = len(images_with_configs)
 
@@ -2399,6 +2401,7 @@ class MangaTranslator:
         """
         执行翻译之前的所有步骤（彩色化、上采样、检测、OCR、文本行合并）
         """
+        
         ctx = Context()
         ctx.input = image
         ctx.result = None
@@ -2417,8 +2420,10 @@ class MangaTranslator:
 
         # preload and download models (not strictly necessary, remove to lazy load)
         logger.debug(f'[DEBUG-2] Checking model load: models_ttl={self.models_ttl}, _models_loaded={self._models_loaded}')
+        
         if ( self.models_ttl == 0 and not self._models_loaded ):
             logger.info('Loading models')
+            
             if config.upscale.upscale_ratio:
                 # 传递超分配置参数
                 upscaler_kwargs = {}
@@ -2428,12 +2433,18 @@ class MangaTranslator:
                     if config.upscale.tile_size is not None:
                         upscaler_kwargs['tile_size'] = config.upscale.tile_size
                 await prepare_upscaling(config.upscale.upscaler, **upscaler_kwargs)
+            
             await prepare_detection(config.detector.detector)
+            
             await prepare_ocr(config.ocr.ocr, self.device)
+            
             await prepare_inpainting(config.inpainter.inpainter, self.device)
+            
             await prepare_translation(config.translator.translator_gen)
+            
             if config.colorizer.colorizer != Colorizer.none:
                 await prepare_colorization(config.colorizer.colorizer)
+            
             self._models_loaded = True  # 标记模型已加载
             logger.info('[DEBUG-2] Models loaded and flag set to True')
         else:

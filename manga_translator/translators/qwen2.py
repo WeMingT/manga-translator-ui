@@ -55,16 +55,39 @@ class Qwen2Translator(OfflineTranslator, ConfigGPT):
         from transformers import (
             AutoModelForCausalLM,
             AutoTokenizer,
-            BitsAndBytesConfig
         )
         self.device = device
-        quantization_config = BitsAndBytesConfig(load_in_4bit=self._IS_4_BIT)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self._TRANSLATOR_MODEL,
-            torch_dtype="auto",
-            quantization_config=quantization_config,
-            device_map="auto"
-        )
+        
+        # Only use quantization if needed and bitsandbytes is available
+        quantization_config = None
+        if self._IS_4_BIT:
+            try:
+                from transformers import BitsAndBytesConfig
+                quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+            except ImportError:
+                self.logger.warning("bitsandbytes not found. Loading model without quantization. "
+                                  "Install with: pip install bitsandbytes")
+        
+        # Try to use device_map="auto" if accelerate is available, otherwise use manual device placement
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self._TRANSLATOR_MODEL,
+                torch_dtype="auto",
+                quantization_config=quantization_config,
+                device_map="auto"
+            )
+        except Exception as e:
+            if "accelerate" in str(e).lower():
+                self.logger.warning("accelerate not found. Loading model without automatic device mapping. "
+                                  "Install with: pip install accelerate")
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self._TRANSLATOR_MODEL,
+                    torch_dtype="auto",
+                    quantization_config=quantization_config
+                )
+                self.model.to(device)
+            else:
+                raise
         self.model.eval()
         self.tokenizer = AutoTokenizer.from_pretrained(self._TRANSLATOR_MODEL)
 
