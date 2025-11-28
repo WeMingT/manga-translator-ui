@@ -38,6 +38,14 @@ def create_parser():
                              help='显示详细日志')
     local_parser.add_argument('--overwrite', action='store_true',
                              help='覆盖已存在的文件')
+    local_parser.add_argument('--use-gpu', action='store_true', default=None,
+                             help='使用 GPU 加速（覆盖配置文件）')
+    local_parser.add_argument('--format', default=None,
+                             help='输出格式：png/jpg/webp（覆盖配置文件）')
+    local_parser.add_argument('--batch-size', type=int, default=None,
+                             help='批量处理大小（覆盖配置文件）')
+    local_parser.add_argument('--attempts', type=int, default=None,
+                             help='翻译失败重试次数，-1表示无限重试（覆盖配置文件）')
     
     # ===== WebSocket 模式 =====
     ws_parser = subparsers.add_parser('ws', help='WebSocket 模式')
@@ -81,17 +89,19 @@ def create_parser():
 def parse_args():
     """解析命令行参数"""
     parser = create_parser()
+    
+    # 如果第一个参数不是模式，默认使用 local 模式
+    if len(sys.argv) > 1 and sys.argv[1] not in ['web', 'local', 'ws', 'shared']:
+        # 检查是否有 -i 参数（local 模式的必需参数）
+        if '-i' in sys.argv or '--input' in sys.argv:
+            # 在第一个参数前插入 'local'
+            sys.argv.insert(1, 'local')
+    
     args = parser.parse_args()
     
-    # 如果没有指定模式，默认使用 cli 模式
+    # 如果还是没有模式，显示帮助
     if args.mode is None:
-        # 检查是否有 -i 参数（CLI 模式的必需参数）
-        if '-i' in sys.argv or '--input' in sys.argv:
-            # 重新解析为 cli 模式
-            sys.argv.insert(1, 'cli')
-            args = parser.parse_args()
-        else:
-            parser.print_help()
-            sys.exit(1)
+        parser.print_help()
+        sys.exit(1)
     
     return args

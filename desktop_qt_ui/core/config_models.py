@@ -75,7 +75,6 @@ class RenderSettings(BaseModel):
     direction: str = "auto"
     uppercase: bool = False
     lowercase: bool = False
-    gimp_font: str = "Arial-Unicode-Regular.ttf"
     font_path: str = "Arial-Unicode-Regular.ttf"
     no_hyphenation: bool = False
     font_color: Optional[str] = None

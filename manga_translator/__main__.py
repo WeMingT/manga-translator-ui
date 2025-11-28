@@ -7,14 +7,23 @@ Manga Translator - 命令行入口
 import sys
 import asyncio
 import logging
+import warnings
+
+# 隐藏第三方库的警告
+warnings.filterwarnings('ignore', message='.*Triton.*')
+warnings.filterwarnings('ignore', message='.*triton.*')
+warnings.filterwarnings('ignore', message='.*pkg_resources.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='ctranslate2')
 
 def main():
     """主函数"""
     from manga_translator.args import parse_args
-    from manga_translator.utils import init_logging, set_log_level, get_logger
     
     # 解析参数
     args = parse_args()
+    
+    # 延迟导入日志工具，避免加载大型库
+    from manga_translator.utils.log import init_logging, set_log_level, get_logger
     
     # 初始化日志
     init_logging()

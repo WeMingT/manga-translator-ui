@@ -67,11 +67,16 @@ python -m manga_translator -i <输入> [选项]
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `-o`, `--dest` | 输出路径 | 同目录 |
-| `--config-file` | 配置文件路径 | 自动查找 |
+| `-o`, `--output` | 输出路径 | 同目录 |
+| `--config` | 配置文件路径 | 自动查找 |
 | `-v`, `--verbose` | 详细日志 | 关闭 |
-| `--use-gpu` | 使用 GPU | 配置文件 |
 | `--overwrite` | 覆盖已存在文件 | 关闭 |
+| `--use-gpu` | 使用 GPU 加速 | 配置文件 |
+| `--format` | 输出格式（png/jpg/webp） | 配置文件 |
+| `--batch-size` | 批量处理大小 | 配置文件 |
+| `--attempts` | 翻译失败重试次数（-1=无限） | 配置文件 |
+
+**注意**：命令行参数会覆盖配置文件中的对应设置。
 
 ---
 
@@ -92,31 +97,88 @@ python -m manga_translator -i manga.jpg --config my_config.json
 
 ### 配置文件内容
 
-配置文件包含所有翻译设置：
+配置文件包含所有翻译设置。完整的配置示例请参考 `examples/config-example.json`。
+
+**基本配置示例**：
 
 ```json
 {
   "translator": {
     "translator": "openai_hq",
-    "target_lang": "CHS"
+    "target_lang": "CHS",
+    "no_text_lang_skip": false,
+    "gpt_config": "examples/gpt_config-example.yaml",
+    "high_quality_prompt_path": "dict/prompt_example.json",
+    "max_requests_per_minute": 0
   },
   "detector": {
     "detector": "default",
-    "detection_size": 2048
+    "detection_size": 2048,
+    "text_threshold": 0.5,
+    "box_threshold": 0.5,
+    "unclip_ratio": 2.5,
+    "use_yolo_obb": true,
+    "min_box_area_ratio": 0.0008
   },
   "ocr": {
-    "ocr": "48px"
+    "ocr": "48px",
+    "use_hybrid_ocr": false,
+    "secondary_ocr": "mocr",
+    "min_text_length": 0,
+    "prob": 0.1
+  },
+  "inpainter": {
+    "inpainter": "lama_large",
+    "inpainting_size": 2048,
+    "inpainting_precision": "fp32"
   },
   "render": {
     "renderer": "default",
-    "font_path": "Arial-Unicode-Regular.ttf"
+    "alignment": "auto",
+    "direction": "auto",
+    "font_path": "Arial-Unicode-Regular.ttf",
+    "layout_mode": "smart_scaling",
+    "disable_font_border": false,
+    "font_size_offset": 0,
+    "stroke_width": 0.07,
+    "check_br_and_retry": false
+  },
+  "upscale": {
+    "upscaler": "realcugan",
+    "upscale_ratio": null,
+    "realcugan_model": null,
+    "tile_size": 600
+  },
+  "colorizer": {
+    "colorizer": "none",
+    "colorization_size": 2048,
+    "denoise_sigma": 30
   },
   "cli": {
     "use_gpu": true,
-    "verbose": false
-  }
+    "verbose": false,
+    "attempts": -1,
+    "ignore_errors": false,
+    "context_size": 3,
+    "format": "不指定",
+    "overwrite": true,
+    "skip_no_text": false,
+    "save_text": false,
+    "load_text": false,
+    "template": false,
+    "save_quality": 100,
+    "batch_size": 3
+  },
+  "filter_text": null,
+  "kernel_size": 3,
+  "mask_dilation_offset": 70
 }
 ```
+
+**配置说明**：
+- 完整的配置结构请参考 `examples/config-example.json`
+- 所有参数的详细说明请参考 [设置说明文档](SETTINGS.md)
+- 可以只配置需要修改的部分，其他使用默认值
 
 ### 命令行参数优先级
 
