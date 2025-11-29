@@ -94,6 +94,12 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
                 config_data['font_color'] = f'#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}'
             except (IndexError, TypeError):
                 config_data.pop('font_color')
+        
+        # ✅ 修复：将后端参数名映射回RenderConfig期望的字段名
+        if 'text_stroke_width' in config_data:
+            config_data['stroke_width'] = config_data.pop('text_stroke_width')
+        if 'text_stroke_color' in config_data:
+            config_data['bg_color'] = config_data.pop('text_stroke_color')
 
         config_obj = Config(render=RenderConfig(**config_data)) if config_data else Config()
         line_spacing_from_params = render_params.get('line_spacing')
