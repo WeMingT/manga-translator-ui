@@ -35,6 +35,10 @@
   - 添加批次间内存清理逻辑，预期减少 20-30% 内存占用
   - CLI 和 UI 模式改为按批次加载图片，避免一次性加载所有图片到内存
   - 对于 100 张图片的批量处理，内存占用从 5GB 降低到 150MB（节省 97%）
+  - **修复导出模式的内存清理问题**
+    - 导出原文模式现在会在批次完成后清理内存
+    - 导出翻译模式现在会在批次完成后清理内存（标准和高质量模式）
+    - 确保所有翻译模式（单文件、批量、高质量、导出原文、导出翻译、仅上色、仅超分）都会正确清理内存
 
 ### AMD GPU 支持优化
 - **更新 AMD ROCm PyTorch 支持策略**
@@ -52,6 +56,15 @@
   - 普通翻译模式：检查输出图片文件是否存在
   - 跳过已存在的文件，显示清晰的日志信息
 
+### 文件处理优化
+- **修复递归文件夹排序问题**
+  - 修改自然排序逻辑，使用完整路径而不是只使用文件名
+  - 确保子文件夹按正确顺序处理（第1话、第2话、第10话）
+  - 解决大文件夹包含多个小文件夹时的排序混乱问题
+- **统一 CLI 和 UI 模式的文件处理顺序**
+  - CLI 模式现在使用与 UI 模式相同的自然排序逻辑
+  - 先对文件夹进行自然排序，再对每个文件夹内的图片排序
+
 ### 界面修复
 - **修复文件夹选择对话框样式问题**
   - 修复了深色主题下 hover 状态文字不可见的问题
@@ -66,9 +79,10 @@
 
 ### 代码变更
 - `manga_translator/detection/__init__.py`: 修复 YOLO 检测器调用时的参数传递
-- `manga_translator/manga_translator.py`: 添加批次间内存清理逻辑，添加 overwrite 预检查逻辑
-- `manga_translator/mode/local.py`: CLI 模式按批次加载图片
+- `manga_translator/manga_translator.py`: 添加批次间内存清理逻辑，添加 overwrite 预检查逻辑，修复导出模式内存清理
+- `manga_translator/mode/local.py`: CLI 模式按批次加载图片，统一文件排序逻辑
 - `desktop_qt_ui/app_logic.py`: UI 模式按批次加载图片，添加 404 错误处理
+- `desktop_qt_ui/services/file_service.py`: 修复递归文件夹的自然排序逻辑
 - `manga_translator/translators/openai_hq.py`: 检测 HTML 404 错误响应
 - `desktop_qt_ui/editor/text_renderer_backend.py`: 修复描边宽度参数映射
 - `desktop_qt_ui/editor/editor_controller.py`: 修复描边宽度参数传递
@@ -76,6 +90,7 @@
 - `packaging/launch.py`: 添加 `--trusted-host` 参数，注释掉 gfx101X-dgpu 和 gfx103X-dgpu 的自动检测
 - `requirements_amd.txt`: 更新显卡支持说明和示例命令
 - `README.md`: 更新 AMD GPU 支持范围说明
+- `doc/INSTALLATION.md`: 更新系统要求和推荐翻译器说明
 
 ### 影响范围
 - 使用 AMD RX 5000/6000 系列显卡的用户将自动使用 CPU 版本
