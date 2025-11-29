@@ -2132,6 +2132,71 @@ class MangaTranslator:
         
         results = []
         total_images = len(images_with_configs)
+        
+        # ✅ 预检查：如果overwrite=False，过滤掉已存在的文件
+        if save_info and not save_info.get('overwrite', True):
+            filtered_images = []
+            skipped_count = 0
+            
+            for image, config in images_with_configs:
+                image_name = image.name if hasattr(image, 'name') else None
+                if image_name:
+                    # 检查输出文件是否已存在
+                    output_path = self._calculate_output_path(image_name, save_info)
+                    
+                    # 检查图片文件
+                    if os.path.exists(output_path):
+                        logger.info(f"⏭️  Skipping existing file: {os.path.basename(output_path)}")
+                        skipped_count += 1
+                        # 创建一个已跳过的上下文
+                        ctx = Context()
+                        ctx.image_name = image_name
+                        ctx.success = True
+                        ctx.skipped = True
+                        results.append(ctx)
+                        continue
+                    
+                    # 检查导出原文/翻译的TXT文件（如果启用）
+                    if self.template and self.save_text:
+                        # 导出原文模式 - 使用path_manager获取正确路径
+                        from .utils.path_manager import get_original_txt_path
+                        txt_path = get_original_txt_path(image_name, create_dir=False)
+                        if os.path.exists(txt_path):
+                            logger.info(f"⏭️  Skipping existing original text file: {os.path.basename(txt_path)}")
+                            skipped_count += 1
+                            ctx = Context()
+                            ctx.image_name = image_name
+                            ctx.success = True
+                            ctx.skipped = True
+                            results.append(ctx)
+                            continue
+                    
+                    if self.generate_and_export:
+                        # 导出翻译模式 - 使用path_manager获取正确路径
+                        from .utils.path_manager import get_translated_txt_path
+                        txt_path = get_translated_txt_path(image_name, create_dir=False)
+                        if os.path.exists(txt_path):
+                            logger.info(f"⏭️  Skipping existing translated text file: {os.path.basename(txt_path)}")
+                            skipped_count += 1
+                            ctx = Context()
+                            ctx.image_name = image_name
+                            ctx.success = True
+                            ctx.skipped = True
+                            results.append(ctx)
+                            continue
+                
+                filtered_images.append((image, config))
+            
+            if skipped_count > 0:
+                logger.info(f"📊 Skipped {skipped_count} existing files, processing {len(filtered_images)} remaining files")
+            
+            images_with_configs = filtered_images
+            total_images = len(images_with_configs)
+            
+            # 如果所有文件都已存在，直接返回
+            if total_images == 0:
+                logger.info("✅ All files already exist, nothing to process")
+                return results
 
         # 分批处理所有图片
         for batch_start in range(0, total_images, batch_size):
