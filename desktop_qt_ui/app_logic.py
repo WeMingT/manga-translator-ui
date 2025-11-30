@@ -1635,27 +1635,33 @@ class TranslationWorker(QObject):
 
                 # 输出批量处理信息
                 total_images = len(self.files)
-                total_batches = (total_images + batch_size - 1) // batch_size if batch_size > 0 else 1
-                self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=total_batches))
+                # 前端分批加载的批次大小（用于内存管理）
+                frontend_batch_size = 10  # 每次最多加载10张图片到内存
+                total_frontend_batches = (total_images + frontend_batch_size - 1) // frontend_batch_size
+                
+                # 计算后端总批次数（用于显示统一的进度）
+                backend_total_batches = (total_images + batch_size - 1) // batch_size if batch_size > 0 else total_images
+                
+                self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
                 self.log_received.emit(self._t("🔧 Translation workflow: {mode}", mode=workflow_mode))
                 self.log_received.emit(self._t("📁 Output directory: {dir}", dir=self.output_folder))
                 if workflow_tip:
                     self.log_received.emit(workflow_tip)
 
-                # ✅ 按批次加载图片，避免一次性加载所有图片到内存
-                self.log_received.emit(self._t("🚀 Starting translation (loading images in batches to save memory)..."))
+                # 按批次加载和处理图片（节省内存）
+                self.log_received.emit(self._t("🚀 Starting translation..."))
                 
                 all_contexts = []
-                for batch_num in range(total_batches):
+                processed_images_count = 0  # 已处理的图片总数
+                
+                for frontend_batch_num in range(total_frontend_batches):
                     if not self._is_running: raise asyncio.CancelledError("Task stopped by user.")
                     
-                    batch_start = batch_num * batch_size
-                    batch_end = min(batch_start + batch_size, total_images)
+                    batch_start = frontend_batch_num * frontend_batch_size
+                    batch_end = min(batch_start + frontend_batch_size, total_images)
                     current_batch_files = self.files[batch_start:batch_end]
                     
-                    self.log_received.emit(self._t("\n📦 Processing batch {current}/{total} (images {start}-{end})...", current=batch_num + 1, total=total_batches, start=batch_start + 1, end=batch_end))
-                    
-                    # 加载当前批次的图片
+                    # 加载当前批次的图片（静默加载，不显示前端批次信息）
                     images_with_configs = []
                     for file_path in current_batch_files:
                         if not self._is_running: raise asyncio.CancelledError("Task stopped by user.")
@@ -1678,11 +1684,17 @@ class TranslationWorker(QObject):
                             all_contexts.append(error_ctx)
                     
                     if images_with_configs:
-                        # 处理当前批次
-                        batch_contexts = await translator.translate_batch(images_with_configs, save_info=save_info)
+                        # 传递全局偏移量给后端，让后端显示正确的全局图片编号
+                        batch_contexts = await translator.translate_batch(
+                            images_with_configs, 
+                            save_info=save_info,
+                            global_offset=processed_images_count,  # 传递已处理的图片数
+                            global_total=total_images  # 传递总图片数
+                        )
                         all_contexts.extend(batch_contexts)
+                        processed_images_count += len(images_with_configs)
                         
-                        # ✅ 批次处理完成后，立即清理图片对象
+                        # 批次处理完成后，立即清理图片对象
                         for image, _ in images_with_configs:
                             if hasattr(image, 'close'):
                                 try:
@@ -1694,8 +1706,6 @@ class TranslationWorker(QObject):
                         # 强制垃圾回收
                         import gc
                         gc.collect()
-                        
-                        self.log_received.emit(f"✅ 批次 {batch_num + 1} 完成，已清理内存")
                 
                 contexts = all_contexts
 
