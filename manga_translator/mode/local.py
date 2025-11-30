@@ -295,15 +295,19 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         sys.stdout.flush()  # 强制刷新输出
         
         # ✅ 按批次加载和处理图片
+        # 前端分批加载的批次大小（用于内存管理）
+        frontend_batch_size = 10  # 每次最多加载10张图片到内存
+        total_frontend_batches = (total_images + frontend_batch_size - 1) // frontend_batch_size
+        
         all_contexts = []
-        for batch_num in range(total_batches):
-            batch_start = batch_num * batch_size
-            batch_end = min(batch_start + batch_size, total_images)
+        processed_images_count = 0  # 已处理的图片总数
+        
+        for frontend_batch_num in range(total_frontend_batches):
+            batch_start = frontend_batch_num * frontend_batch_size
+            batch_end = min(batch_start + frontend_batch_size, total_images)
             current_batch_paths = file_paths_with_configs[batch_start:batch_end]
             
-            print(f"\n📦 处理批次 {batch_num + 1}/{total_batches} (图片 {batch_start + 1}-{batch_end})...")
-            
-            # 加载当前批次的图片
+            # 加载当前批次的图片（静默加载，不显示前端批次信息）
             images_with_configs = []
             for file_path, config in current_batch_paths:
                 try:
@@ -323,9 +327,15 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                     all_contexts.append(error_ctx)
             
             if images_with_configs:
-                # 处理当前批次（translate_batch内部会进一步分批）
-                batch_contexts = await translator.translate_batch(images_with_configs, save_info=save_info)
+                # 传递全局偏移量给后端，让后端显示正确的全局图片编号
+                batch_contexts = await translator.translate_batch(
+                    images_with_configs, 
+                    save_info=save_info,
+                    global_offset=processed_images_count,  # 传递已处理的图片数
+                    global_total=total_images  # 传递总图片数
+                )
                 all_contexts.extend(batch_contexts)
+                processed_images_count += len(images_with_configs)
                 
                 # ✅ 批次处理完成后，立即清理图片对象
                 for image, _ in images_with_configs:
@@ -339,8 +349,6 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                 # 强制垃圾回收
                 import gc
                 gc.collect()
-                
-                print(f"✅ 批次 {batch_num + 1} 完成，已清理内存")
         
         contexts = all_contexts
         

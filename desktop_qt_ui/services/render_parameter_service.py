@@ -390,10 +390,16 @@ class RenderParameterService:
         params = self.get_region_parameters(region_index, region_data)
         
         # 转换为后端可识别的格式
+        # 如果font_path为空，使用配置服务中的默认字体
+        font_path_to_use = params.font_path
+        if not font_path_to_use:
+            default_params = self.get_default_parameters()
+            font_path_to_use = default_params.font_path
+        
         backend_params = {
             # 字体参数
             'font_size': params.font_size,
-            'font_path': params.font_path,
+            'font_path': font_path_to_use,
             'bold': params.bold,
             'italic': params.italic,
             'font_weight': params.font_weight,
