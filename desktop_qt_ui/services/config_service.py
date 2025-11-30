@@ -206,6 +206,18 @@ class ConfigService(QObject):
                 # 只有保存到模板配置时才重置临时状态（仅开发环境）
                 is_default_config = save_path == self.default_config_path
                 if is_default_config and not hasattr(sys, '_MEIPASS'):
+                    # 读取现有模板配置，保留某些字段
+                    existing_font_path = None
+                    existing_prompt_path = None
+                    if os.path.exists(save_path):
+                        try:
+                            with open(save_path, 'r', encoding='utf-8') as f:
+                                existing_template = json.load(f)
+                                existing_font_path = existing_template.get('render', {}).get('font_path')
+                                existing_prompt_path = existing_template.get('translator', {}).get('high_quality_prompt_path')
+                        except:
+                            pass
+                    
                     # 重置临时UI状态为默认值
                     if 'app' not in config_dict:
                         config_dict['app'] = {}
@@ -218,6 +230,17 @@ class ConfigService(QObject):
                     
                     if 'cli' in config_dict:
                         config_dict['cli']['verbose'] = False
+                    
+                    # 保留模板配置中的字体路径和提示词路径（不覆盖用户的个人设置）
+                    if existing_font_path is not None:
+                        if 'render' not in config_dict:
+                            config_dict['render'] = {}
+                        config_dict['render']['font_path'] = existing_font_path
+                    
+                    if existing_prompt_path is not None:
+                        if 'translator' not in config_dict:
+                            config_dict['translator'] = {}
+                        config_dict['translator']['high_quality_prompt_path'] = existing_prompt_path
                 else:
                     # 用户配置保留favorite_folders（但如果当前配置已经有新值，就不覆盖）
                     if existing_favorites is not None:

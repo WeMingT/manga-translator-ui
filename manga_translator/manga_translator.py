@@ -2084,7 +2084,7 @@ class MangaTranslator:
 
         self.add_progress_hook(ph)
 
-    async def translate_batch(self, images_with_configs: List[tuple], batch_size: int = None, image_names: List[str] = None, save_info: dict = None) -> List[Context]:
+    async def translate_batch(self, images_with_configs: List[tuple], batch_size: int = None, image_names: List[str] = None, save_info: dict = None, global_offset: int = 0, global_total: int = None) -> List[Context]:
         """
         批量翻译多张图片，在翻译阶段进行批量处理以提高效率
         
@@ -2093,11 +2093,16 @@ class MangaTranslator:
             batch_size: 批量大小，如果为None则使用实例的batch_size
             image_names: 已弃用的参数，保留用于兼容性
             save_info: 保存配置，包含output_folder、input_folders、format等
+            global_offset: 全局偏移量，用于显示正确的图片编号（前端分批加载时使用）
+            global_total: 全局总图片数，用于显示正确的总批次数（前端分批加载时使用）
             
         Returns:
             List of Context objects with translation results
         """
         batch_size = batch_size or self.batch_size
+        
+        # 如果提供了全局总数，使用它来计算总批次数；否则使用当前批次的图片数
+        display_total = global_total if global_total is not None else len(images_with_configs)
         
         # === 步骤1: 检查是否需要使用高质量翻译模式 ===
         if images_with_configs:
@@ -2110,7 +2115,7 @@ class MangaTranslator:
 
                 if is_hq_translator and not is_import_export_mode:
                     logger.info(f"检测到高质量翻译器 {translator_type}，自动启用高质量翻译模式")
-                    return await self._translate_batch_high_quality(images_with_configs, save_info)
+                    return await self._translate_batch_high_quality(images_with_configs, save_info, global_offset, global_total)
                 
                 if is_hq_translator and is_import_export_mode:
                     logger.warning("检测到导入/导出翻译模式，高质量翻译流程将被跳过，将使用标准流程进行渲染。")
@@ -2197,7 +2202,13 @@ class MangaTranslator:
             batch_end = min(batch_start + batch_size, total_images)
             current_batch_images = images_with_configs[batch_start:batch_end]
 
-            logger.info(f"Processing rolling batch {batch_start//batch_size + 1}/{(total_images + batch_size - 1)//batch_size} (images {batch_start+1}-{batch_end})")
+            # 计算全局图片编号（考虑前端分批加载的偏移量）
+            global_batch_start = global_offset + batch_start + 1
+            global_batch_end = global_offset + batch_end
+            global_batch_num = (global_offset + batch_start) // batch_size + 1
+            global_total_batches = (display_total + batch_size - 1) // batch_size
+            
+            logger.info(f"Processing rolling batch {global_batch_num}/{global_total_batches} (images {global_batch_start}-{global_batch_end})")
 
             # --- 阶段1: 预处理（检测、OCR、文本行合并） ---
             preprocessed_contexts = []
@@ -3782,14 +3793,23 @@ class MangaTranslator:
         except Exception as e:
             logger.error(f"Failed to update translation map: {e}")
 
-    async def _translate_batch_high_quality(self, images_with_configs: List[tuple], save_info: dict = None) -> List[Context]:
+    async def _translate_batch_high_quality(self, images_with_configs: List[tuple], save_info: dict = None, global_offset: int = 0, global_total: int = None) -> List[Context]:
         """
         高质量翻译模式：按批次滚动处理，每批独立完成预处理、翻译、渲染全流程。
         如果提供了save_info，则在每批处理后直接保存。
+        
+        Args:
+            images_with_configs: List of (image, config) tuples
+            save_info: 保存配置
+            global_offset: 全局偏移量，用于显示正确的图片编号
+            global_total: 全局总图片数，用于显示正确的总批次数
         """
         batch_size = self.batch_size if self.batch_size > 1 else 3  # 统一使用batch_size参数
         logger.info(f"Starting high quality translation in rolling batch mode with batch size: {batch_size}")
         results = []
+        
+        # 如果提供了全局总数，使用它来计算总批次数；否则使用当前批次的图片数
+        display_total = global_total if global_total is not None else len(images_with_configs)
         
         # ✅ 预检查：如果overwrite=False，过滤掉已存在的文件
         if save_info and not save_info.get('overwrite', True):
@@ -3855,7 +3875,13 @@ class MangaTranslator:
             batch_end = min(batch_start + batch_size, total_images)
             current_batch_images = images_with_configs[batch_start:batch_end]
 
-            logger.info(f"Processing rolling batch {batch_start//batch_size + 1}/{(total_images + batch_size - 1)//batch_size} (images {batch_start+1}-{batch_end})")
+            # 计算全局图片编号（考虑前端分批加载的偏移量）
+            global_batch_start = global_offset + batch_start + 1
+            global_batch_end = global_offset + batch_end
+            global_batch_num = (global_offset + batch_start) // batch_size + 1
+            global_total_batches = (display_total + batch_size - 1) // batch_size
+            
+            logger.info(f"Processing rolling batch {global_batch_num}/{global_total_batches} (images {global_batch_start}-{global_batch_end})")
 
             # 阶段一：预处理当前批次
             preprocessed_contexts = []
