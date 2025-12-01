@@ -403,52 +403,12 @@ class MainWindow(QMainWindow):
         """
         import os
 
-        # 使用app_logic的_resolve_input_files来获取正确的文件列表
-        # 这样可以正确处理文件夹展开和文件移除
-        expanded_files = self.app_logic._resolve_input_files()
+        # 获取完整的文件夹树结构
+        tree_structure = self.app_logic.get_folder_tree_structure()
+        expanded_files = tree_structure['files']
+        folder_tree = tree_structure['tree']
         
-        # 构建 folder_map，映射到用户添加的顶层文件夹
-        # 同时收集所有中间文件夹，以便构建完整的树结构
-        folder_map = {}
-        all_intermediate_folders = set()  # 存储所有中间文件夹
-        
-        for file_path in expanded_files:
-            # 查找文件所属的顶层文件夹（用户添加的文件夹）
-            top_folder = None
-            for source_path in self.app_logic.source_files:
-                if os.path.isdir(source_path):
-                    # 检查文件是否在这个文件夹下
-                    norm_source = os.path.normpath(source_path)
-                    norm_file = os.path.normpath(file_path)
-                    if norm_file.startswith(norm_source + os.sep):
-                        top_folder = norm_source
-                        
-                        # 收集从顶层文件夹到文件之间的所有中间文件夹
-                        current_path = os.path.dirname(norm_file)
-                        while current_path != norm_source and current_path:
-                            all_intermediate_folders.add(current_path)
-                            current_path = os.path.dirname(current_path)
-                        all_intermediate_folders.add(norm_source)
-                        break
-            
-            # 如果找到顶层文件夹，映射到它；否则映射到直接父文件夹
-            if top_folder:
-                folder_map[file_path] = top_folder
-            else:
-                # 单独添加的文件，映射到其父文件夹
-                parent_dir = os.path.dirname(file_path)
-                folder_map[file_path] = parent_dir
-                all_intermediate_folders.add(parent_dir)
-        
-        # DEBUG: 打印 folder_map 和中间文件夹
-        self.logger.debug(f"[DEBUG main_window] folder_map content:")
-        for file_path, folder in folder_map.items():
-            self.logger.debug(f"  {file_path} -> {folder}")
-        self.logger.debug(f"[DEBUG main_window] all_intermediate_folders: {all_intermediate_folders}")
-        
-        self.logger.info(f"Entering editor mode: {len(expanded_files)} files from source_files")
-        self.logger.debug(f"Source files: {self.app_logic.source_files}")
-        self.logger.debug(f"Expanded files (first 5): {expanded_files[:5] if len(expanded_files) > 5 else expanded_files}")
+        self.logger.info(f"Entering editor mode with {len(expanded_files)} files")
 
         # 传递翻译后的图片列表给编辑器
         # 从file_to_folder_map获取翻译后的图片路径
@@ -478,12 +438,11 @@ class MainWindow(QMainWindow):
                     translated_files.append(translated_file)
                     translated_folder_map[translated_file] = output_folder
 
-        # 始终使用源文件的 folder_map，这样编辑器视图和主页视图显示相同的文件夹结构
-        # 编辑器视图显示的是源文件列表，所以应该使用源文件的文件夹映射
+        # 传递完整的树结构给编辑器
         self.editor_logic.load_file_lists(
             source_files=expanded_files, 
             translated_files=translated_files,
-            folder_map=folder_map
+            folder_tree=folder_tree
         )
 
         # 如果指定了要加载的文件，加载第一个翻译后的文件

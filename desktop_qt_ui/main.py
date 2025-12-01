@@ -24,8 +24,11 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         if os.path.exists(onnx_capi_dir):
             os.add_dll_directory(onnx_capi_dir)
 
-# 抑制 xformers/triton 警告
+# 抑制第三方库的警告
 warnings.filterwarnings('ignore', message='.*Triton.*')
+warnings.filterwarnings('ignore', message='.*triton.*')
+warnings.filterwarnings('ignore', message='.*pkg_resources.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='ctranslate2')
 warnings.filterwarnings('ignore', module='xformers')
 
 from PyQt6.QtWidgets import QApplication

@@ -259,258 +259,144 @@ python -m desktop-ui.main
 
 ---
 
-## 安装方式四：Docker部署
+## 安装方式四：Docker 镜像部署（实验性）
 
-适合需要容器化部署或在服务器上运行的用户。
+适合使用宝塔面板、Portainer 等 Docker 管理工具的用户。
 
-### 前提条件
+### 镜像地址
 
-- 已安装 Docker
-- （可选）已安装 Docker Compose
-- （GPU版本）已安装 NVIDIA Container Toolkit
+- **CPU 版本**：`hgmzhn/manga-translator:latest-cpu`
+- **GPU 版本**：`hgmzhn/manga-translator:latest-gpu`
+
+### 端口映射
+
+- **容器端口**：`8000`
+- **主机端口**：`8000`（可自定义）
 
 ### 环境变量配置
 
-Docker部署支持通过环境变量配置服务器参数：
+> 💡 **提示**：所有环境变量都是可选的，程序会使用合理的默认值。
 
-| 环境变量 | 说明 | 默认值 | 示例 |
-|---------|------|--------|------|
-| `MT_WEB_HOST` | 服务器监听地址 | `127.0.0.1` | `0.0.0.0` |
-| `MT_WEB_PORT` | 服务器端口 | `8000` | `8080` |
-| `MT_USE_GPU` | 是否使用GPU | `false` | `true` |
-| `MT_MODELS_TTL` | 模型存活时间（秒） | `0`（永久） | `300` |
-| `MT_RETRY_ATTEMPTS` | 翻译重试次数 | `-1`（无限） | `3` |
-| `MT_VERBOSE` | 详细日志 | `false` | `true` |
-| `MANGA_TRANSLATOR_ADMIN_PASSWORD` | 管理员密码（首次启动自动设置） | 无 | `your_password` |
+#### 基础配置（可选）
 
-**管理员密码说明**：
-- 首次启动时，如果设置了 `MANGA_TRANSLATOR_ADMIN_PASSWORD` 环境变量，会自动设置为管理员密码
-- 密码至少需要 6 位字符
-- 密码会保存到 `admin_config.json`，后续启动不再读取环境变量
-- 如需修改密码，请在管理面板中使用"更改管理员密码"功能
+| 变量名 | 示例值 | 默认值 | 说明 |
+|--------|--------|--------|------|
+| `MT_WEB_HOST` | `0.0.0.0` | `0.0.0.0` | 监听地址（0.0.0.0 允许外部访问，127.0.0.1 仅本地访问） |
+| `MT_WEB_PORT` | `8000` | `8000` | 服务端口 |
+| `MT_USE_GPU` | `true` | `false` | 是否使用 GPU（仅 GPU 版本镜像需要设置） |
+| `MT_MODELS_TTL` | `300` | `0` | 模型在内存中的存活时间（秒），0 表示永久保留 |
+| `MT_RETRY_ATTEMPTS` | `-1` | `None` | 翻译失败重试次数，-1 表示无限重试 |
+| `MT_VERBOSE` | `true` | `false` | 是否显示详细日志 |
+| `MANGA_TRANSLATOR_ADMIN_PASSWORD` | `your_password` | 无 | 管理员密码（至少 6 位，不设置则无法访问管理界面） |
 
-### 方式1：使用Docker命令
+#### API Keys 配置（根据使用的翻译器选择）
 
-#### CPU版本
+**OpenAI 系列**：
+| 变量名 | 说明 |
+|--------|------|
+| `OPENAI_API_KEY` | OpenAI API Key（用于 openai、openai_hq 翻译器） |
+| `OPENAI_MODEL` | OpenAI 模型名称（可选，默认 gpt-4o） |
+| `OPENAI_API_BASE` | OpenAI API 基础 URL（可选，默认官方地址，可用于自定义端点） |
+| `OPENAI_HTTP_PROXY` | OpenAI HTTP 代理（可选） |
+| `OPENAI_GLOSSARY_PATH` | OpenAI 术语表路径（可选，默认 ./dict/mit_glossary.txt） |
 
-```bash
-# 拉取镜像
-docker pull your-registry/manga-translator:latest
+**Google Gemini 系列**：
+| 变量名 | 说明 |
+|--------|------|
+| `GEMINI_API_KEY` | Google Gemini API Key（用于 gemini、gemini_hq 翻译器） |
+| `GEMINI_MODEL` | Gemini 模型名称（可选，默认 gemini-1.5-flash-002） |
+| `GEMINI_API_BASE` | Gemini API 基础 URL（可选，默认官方地址） |
 
-# 运行容器（带管理员密码）
-docker run -d \
-  --name manga-translator \
-  -p 8000:8000 \
-  -e MT_WEB_HOST=0.0.0.0 \
-  -e MT_WEB_PORT=8000 \
-  -e MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password \
-  -v $(pwd)/fonts:/app/fonts \
-  -v $(pwd)/dict:/app/dict \
-  -v $(pwd)/result:/app/result \
-  your-registry/manga-translator:latest
-```
+**其他商业翻译服务**：
+| 变量名 | 说明 |
+|--------|------|
+| `DEEPL_AUTH_KEY` | DeepL API Key |
+| `GROQ_API_KEY` | Groq API Key |
+| `GROQ_MODEL` | Groq 模型名称（可选，默认 mixtral-8x7b-32768） |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key |
+| `DEEPSEEK_API_BASE` | DeepSeek API 基础 URL（可选，默认官方地址） |
+| `DEEPSEEK_MODEL` | DeepSeek 模型名称（可选，默认 deepseek-chat） |
+| `TOGETHER_API_KEY` | Together AI API Key |
+| `TOGETHER_VL_MODEL` | Together AI 视觉模型（可选，默认 Qwen/Qwen2.5-VL-72B-Instruct） |
 
-#### GPU版本
+**国内翻译服务**：
+| 变量名 | 说明 |
+|--------|------|
+| `BAIDU_APP_ID` | 百度翻译 APP ID |
+| `BAIDU_SECRET_KEY` | 百度翻译密钥 |
+| `YOUDAO_APP_KEY` | 有道翻译应用 ID |
+| `YOUDAO_SECRET_KEY` | 有道翻译应用密钥 |
+| `CAIYUN_TOKEN` | 彩云小译 API 访问令牌 |
+| `PAPAGO_CLIENT_ID` | Papago 客户端 ID |
+| `PAPAGO_CLIENT_SECRET` | Papago 客户端密钥 |
 
-```bash
-# 拉取GPU镜像
-docker pull your-registry/manga-translator:latest-gpu
+**本地/自定义模型**：
+| 变量名 | 说明 |
+|--------|------|
+| `SAKURA_API_BASE` | Sakura API 地址（默认 http://127.0.0.1:8080/v1） |
+| `SAKURA_VERSION` | Sakura API 版本（可选，0.9 或 0.10） |
+| `SAKURA_DICT_PATH` | Sakura 术语表路径（可选，默认 ./dict/sakura_dict.txt） |
+| `CUSTOM_OPENAI_API_KEY` | 自定义 OpenAI 兼容 API Key（如 Ollama，默认 ollama） |
+| `CUSTOM_OPENAI_API_BASE` | 自定义 OpenAI 兼容 API 地址（默认 http://localhost:11434/v1） |
+| `CUSTOM_OPENAI_MODEL` | 自定义模型名称（如 qwen2.5:7b） |
+| `CUSTOM_OPENAI_MODEL_CONF` | 自定义模型配置（如 qwen2） |
 
-# 运行GPU容器（带管理员密码）
-docker run -d \
-  --name manga-translator-gpu \
-  --gpus all \
-  -p 8000:8000 \
-  -e MT_WEB_HOST=0.0.0.0 \
-  -e MT_WEB_PORT=8000 \
-  -e MT_USE_GPU=true \
-  -e MT_MODELS_TTL=300 \
-  -e MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password \
-  -v $(pwd)/fonts:/app/fonts \
-  -v $(pwd)/dict:/app/dict \
-  -v $(pwd)/result:/app/result \
-  your-registry/manga-translator:latest-gpu
-```
+> 💡 **提示**：
+> - 只需配置你要使用的翻译器对应的 API Key
+> - 如果不设置管理员密码，用户可以直接使用翻译功能，但无法访问管理界面
+> - API Keys 也可以在启动后通过管理界面配置（需要先设置管理员密码）
 
-### 方式2：使用Docker Compose
+### 访问地址
 
-创建 `docker-compose.yml` 文件：
+部署成功后访问：
+- **用户界面**：`http://服务器IP:8000`
+- **管理界面**：`http://服务器IP:8000/admin.html`（需要管理员密码）
 
-#### CPU版本
+### 宝塔面板部署步骤
 
-```yaml
-version: '3.8'
+1. **开放端口**：
+   - 进入宝塔面板 → **安全** → 放行端口 `8000`
+   - 如有云服务器安全组，也需要开放 `8000` 端口
 
-services:
-  manga-translator:
-    image: your-registry/manga-translator:latest
-    container_name: manga-translator
-    ports:
-      - "8000:8000"
-    environment:
-      - MT_WEB_HOST=0.0.0.0
-      - MT_WEB_PORT=8000
-      - MT_MODELS_TTL=300
-      - MT_RETRY_ATTEMPTS=3
-    volumes:
-      - ./fonts:/app/fonts
-      - ./dict:/app/dict
-      - ./result:/app/result
-      - ./models:/app/models
-    restart: unless-stopped
-```
+2. **安装 Docker**：
+   - 软件商店 → 搜索 **Docker 管理器** → 安装
 
-#### GPU版本
+3. **拉取镜像**：
+   - Docker 管理器 → **镜像** → **从仓库拉取**
+   - 填写镜像名：
+     - CPU 版本：`hgmzhn/manga-translator:latest-cpu`
+     - GPU 版本：`hgmzhn/manga-translator:latest-gpu`
 
-```yaml
-version: '3.8'
+4. **创建容器**：
+   - **容器** → **创建容器**
+   - **镜像**：选择刚才拉取的镜像
+   - **端口映射**：`8000:8000`
+   - **环境变量**：根据需要添加（可选）
+     
+     **最小配置**（无需设置环境变量，直接启动即可）
+     
+     **推荐配置示例**（设置管理员密码和 GPU）：
+     ```
+     MT_USE_GPU=true
+     MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password
+     ```
+     
+     **完整配置示例**（包含 API Keys）：
+     ```
+     MT_USE_GPU=true
+     MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password
+     OPENAI_API_KEY=sk-xxxxxxxxxxxxx
+     GEMINI_API_KEY=xxxxxxxxxxxxx
+     ```
 
-services:
-  manga-translator-gpu:
-    image: your-registry/manga-translator:latest-gpu
-    container_name: manga-translator-gpu
-    ports:
-      - "8000:8000"
-    environment:
-      - MT_WEB_HOST=0.0.0.0
-      - MT_WEB_PORT=8000
-      - MT_USE_GPU=true
-      - MT_MODELS_TTL=300
-      - MT_RETRY_ATTEMPTS=3
-      - MT_VERBOSE=false
-    volumes:
-      - ./fonts:/app/fonts
-      - ./dict:/app/dict
-      - ./result:/app/result
-      - ./models:/app/models
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
-```
+5. **启动容器**，访问 `http://服务器IP:8000` 即可使用
 
-启动服务：
+> ⚠️ **注意**：Docker 镜像功能目前处于实验阶段，可能存在未知问题。
 
-```bash
-# 启动
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f
-
-# 停止
-docker-compose down
-```
-
-### 访问服务
-
-容器启动后，通过浏览器访问：
-
-- **用户界面**：`http://localhost:8000/`
-- **管理后台**：`http://localhost:8000/admin`
-- **API文档**：`http://localhost:8000/docs`
-
-### 数据持久化
-
-建议挂载以下目录以保持数据持久化：
-
-- `/app/fonts` - 自定义字体文件
-- `/app/dict` - 提示词和词典文件
-- `/app/result` - 翻译结果输出
-- `/app/models` - AI模型文件（可选，避免重复下载）
-- `/app/.env` - 环境变量配置文件（可选）
-
-### 配置API密钥
-
-有两种方式配置API密钥：
-
-#### 方式1：通过环境变量
-
-在 `docker-compose.yml` 中添加：
-
-```yaml
-environment:
-  - OPENAI_API_KEY=your_openai_key
-  - GEMINI_API_KEY=your_gemini_key
-  - DEEPL_AUTH_KEY=your_deepl_key
-```
-
-#### 方式2：通过.env文件
-
-创建 `.env` 文件并挂载：
-
-```bash
-# .env 文件内容
-OPENAI_API_KEY=your_openai_key
-GEMINI_API_KEY=your_gemini_key
-DEEPL_AUTH_KEY=your_deepl_key
-```
-
-在 `docker-compose.yml` 中挂载：
-
-```yaml
-volumes:
-  - ./.env:/app/.env
-```
-
-### 性能优化建议
-
-1. **GPU内存管理**：
-   ```yaml
-   environment:
-     - MT_MODELS_TTL=300  # 5分钟后卸载模型，节省显存
-   ```
-
-2. **限制容器资源**：
-   ```yaml
-   deploy:
-     resources:
-       limits:
-         cpus: '4'
-         memory: 8G
-   ```
-
-3. **使用SSD存储**：
-   - 将模型文件存储在SSD上以提高加载速度
-
-### 故障排除
-
-#### GPU不可用
-
-**问题**：容器无法使用GPU
-
-**解决方法**：
-1. 确认已安装 NVIDIA Container Toolkit：
-   ```bash
-   docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi
-   ```
-2. 检查Docker版本是否支持GPU
-3. 重启Docker服务
-
-#### 端口冲突
-
-**问题**：端口8000已被占用
-
-**解决方法**：
-修改端口映射：
-```yaml
-ports:
-  - "8080:8000"  # 使用8080端口
-environment:
-  - MT_WEB_PORT=8000  # 容器内部仍使用8000
-```
-
-#### 模型下载缓慢
-
-**问题**：首次启动时模型下载很慢
-
-**解决方法**：
-1. 预先下载模型文件到 `./models` 目录
-2. 挂载模型目录：`-v $(pwd)/models:/app/models`
+**部署完成后**：
+- 🌐 **用户界面**：`http://服务器IP:8000` - 上传图片进行翻译
+- 🔧 **管理界面**：`http://服务器IP:8000/admin.html` - 配置翻译器和参数（需要管理员密码）
+- 📖 **使用教程**：[命令行使用指南](CLI_USAGE.md) - 了解更多功能和命令行模式
 
 ---
 

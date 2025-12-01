@@ -315,6 +315,7 @@ class EditorView(QWidget):
         self.file_list.file_selected.connect(self.logic.load_image_into_editor)
         self.file_list.files_dropped.connect(self.logic.add_files_from_paths)  # 拖放文件支持
         self.logic.file_list_changed.connect(self.update_file_list)
+        self.logic.file_list_with_tree_changed.connect(self.update_file_list_with_tree)  # 支持树形结构
 
         # --- Toolbar (Top) to Controller/View ---
         self.toolbar.back_requested.connect(self.back_to_main_requested)
@@ -393,42 +394,25 @@ class EditorView(QWidget):
         """处理文件移除请求：先在视图中移除，再调用app_logic同步"""
         import os
         
-        # 如果是翻译后的文件/文件夹，需要找到对应的源文件/文件夹
-        source_path, translated_path = self.logic._find_file_pair(file_path)
-        
-        # 如果是文件夹，需要特殊处理
-        if os.path.isdir(file_path):
-            # 翻译后的文件夹，需要找到对应的源文件夹
-            # 从 file_to_folder_map 中查找任意一个文件，获取其源文件夹
-            source_folder = None
-            for src_file, folder in self.app_logic.file_to_folder_map.items():
-                if folder:
-                    # 检查这个文件是否在当前要删除的翻译文件夹内
-                    # 通过文件名匹配（因为翻译文件夹和源文件夹的文件名相同）
-                    try:
-                        # 获取源文件的文件名
-                        src_filename = os.path.basename(src_file)
-                        # 检查翻译文件夹中是否有同名文件
-                        translated_file = os.path.join(file_path, src_filename)
-                        if os.path.exists(translated_file):
-                            source_folder = folder
-                            break
-                    except:
-                        pass
-            
-            path_to_remove = source_folder if source_folder else file_path
-        else:
-            # 单个文件，使用 _find_file_pair 的结果
-            path_to_remove = source_path if source_path else file_path
-        
         # 先在视图中移除（避免重建列表）
         self.file_list.remove_file(file_path)
         
+        # 调用 editor_logic 移除文件（会检查是否需要清空画布）
+        self.logic.remove_file(file_path, emit_signal=False)
+        
         # 再调用app_logic同步数据
-        self.app_logic.remove_file(path_to_remove)
+        # file_path 可能是源文件路径或翻译后的文件路径
+        # app_logic.remove_file 会自动处理
+        self.app_logic.remove_file(file_path)
     
     @pyqtSlot(list)
     def update_file_list(self, files: list):
         """Clears and repopulates the file list view based on a signal from the logic."""
         self.file_list.clear()
         self.file_list.add_files(files)
+    
+    @pyqtSlot(list, dict)
+    def update_file_list_with_tree(self, files: list, folder_tree: dict):
+        """使用树形结构更新文件列表"""
+        self.file_list.clear()
+        self.file_list.add_files_from_tree(folder_tree)

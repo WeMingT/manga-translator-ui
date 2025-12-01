@@ -73,6 +73,8 @@ class MainAppLogic(QObject):
 
         self.source_files: List[str] = [] # Holds both files and folders
         self.file_to_folder_map: Dict[str, Optional[str]] = {} # 记录文件来自哪个文件夹
+        self.excluded_subfolders: set = set() # 记录被删除的子文件夹路径
+        self.folder_tree_cache: Dict[str, dict] = {} # 缓存文件夹的完整树结构 {top_folder: tree_structure}
 
         self.app_config = AppConfig()
         self.logger.info("主页面应用业务逻辑初始化完成")
@@ -750,11 +752,47 @@ class MainAppLogic(QObject):
                 # 如果是文件，清理 file_to_folder_map
                 if norm_file_path in self.file_to_folder_map:
                     del self.file_to_folder_map[norm_file_path]
+                
+                # 如果是文件夹，清理排除列表中该文件夹下的所有子文件夹
+                if os.path.isdir(norm_file_path):
+                    excluded_to_remove = set()
+                    for excluded_folder in self.excluded_subfolders:
+                        try:
+                            # 检查 excluded_folder 是否在被删除的文件夹内
+                            common = os.path.commonpath([norm_file_path, excluded_folder])
+                            if common == norm_file_path:
+                                excluded_to_remove.add(excluded_folder)
+                        except ValueError:
+                            continue
+                    self.excluded_subfolders -= excluded_to_remove
+                
                 self.file_removed.emit(file_path)
                 return
             
-            # 情况2：文件夹路径（通过单独添加文件自动分组的）
+            # 情况2：文件夹路径（可能是顶层文件夹或子文件夹）
             if os.path.isdir(norm_file_path):
+                # 检查是否是某个顶层文件夹的子文件夹
+                parent_folder = None
+                for folder in self.source_files:
+                    if os.path.isdir(folder):
+                        try:
+                            # 检查 norm_file_path 是否是 folder 的子文件夹
+                            common = os.path.commonpath([folder, norm_file_path])
+                            if common == os.path.normpath(folder) and norm_file_path != os.path.normpath(folder):
+                                parent_folder = folder
+                                break
+                        except ValueError:
+                            continue
+                
+                if parent_folder:
+                    # 这是子文件夹，添加到排除列表
+                    self.excluded_subfolders.add(norm_file_path)
+                    # 发射删除信号让 FileListView 处理
+                    # FileListView 会自动更新树形结构和文件数量
+                    self.file_removed.emit(file_path)
+                    return
+                
+                # 不是子文件夹，可能是通过单独添加文件自动分组的文件夹
                 # 删除该文件夹下的所有文件
                 files_to_remove = []
                 for source_file in self.source_files:
@@ -833,11 +871,103 @@ class MainAppLogic(QObject):
         # TODO: Add confirmation dialog
         self.source_files.clear()
         self.file_to_folder_map.clear()  # 清空文件夹映射
+        self.excluded_subfolders.clear()  # 清空排除列表
         self.files_cleared.emit()
         self.logger.info("File list cleared by user.")
     # endregion
 
     # region 核心任务逻辑
+    def get_folder_tree_structure(self) -> dict:
+        """
+        获取完整的文件夹树结构
+        返回: {
+            'files': [所有文件列表],
+            'tree': {
+                'folder_path': {
+                    'files': [该文件夹直接包含的文件],
+                    'subfolders': [子文件夹路径列表]
+                }
+            }
+        }
+        """
+        tree = {}
+        all_files = []
+        
+        # 处理每个顶层文件夹
+        for source_path in self.source_files:
+            if os.path.isdir(source_path):
+                norm_folder = os.path.normpath(source_path)
+                # 递归构建该文件夹的树结构
+                folder_files = self._build_folder_tree(norm_folder, tree)
+                all_files.extend(folder_files)
+            elif os.path.isfile(source_path):
+                # 单独添加的文件
+                all_files.append(source_path)
+        
+        return {
+            'files': all_files,
+            'tree': tree
+        }
+    
+    def _build_folder_tree(self, folder_path: str, tree: dict) -> List[str]:
+        """
+        递归构建文件夹树结构
+        返回该文件夹及其子文件夹中的所有文件列表
+        """
+        # 检查是否被排除
+        if folder_path in self.excluded_subfolders:
+            return []
+        
+        norm_folder = os.path.normpath(folder_path)
+        
+        # 初始化该文件夹的树节点
+        if norm_folder not in tree:
+            tree[norm_folder] = {
+                'files': [],
+                'subfolders': []
+            }
+        
+        all_files = []
+        image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.webp'}
+        
+        try:
+            items = os.listdir(folder_path)
+            subdirs = []
+            files = []
+            
+            for item in items:
+                if item == 'manga_translator_work':
+                    continue
+                
+                item_path = os.path.join(folder_path, item)
+                norm_item_path = os.path.normpath(item_path)
+                
+                if os.path.isdir(item_path):
+                    # 检查是否被排除
+                    if norm_item_path not in self.excluded_subfolders:
+                        subdirs.append(norm_item_path)
+                        tree[norm_folder]['subfolders'].append(norm_item_path)
+                elif os.path.splitext(item)[1].lower() in image_extensions:
+                    files.append(norm_item_path)
+            
+            # 排序
+            subdirs.sort(key=self.file_service._natural_sort_key)
+            files.sort(key=self.file_service._natural_sort_key)
+            
+            # 添加该文件夹直接包含的文件
+            tree[norm_folder]['files'] = files
+            all_files.extend(files)
+            
+            # 递归处理子文件夹
+            for subdir in subdirs:
+                subdir_files = self._build_folder_tree(subdir, tree)
+                all_files.extend(subdir_files)
+        
+        except Exception as e:
+            self.logger.error(f"Error building tree for folder {folder_path}: {e}")
+        
+        return all_files
+    
     def _resolve_input_files(self) -> List[str]:
         """
         Expands folders in self.source_files into a list of image files.
@@ -860,6 +990,24 @@ class MainAppLogic(QObject):
                 if self.file_service.validate_image_file(path):
                     individual_files.append(path)
         
+        # 清理排除列表：移除不再属于任何 source_files 文件夹的排除项
+        if self.excluded_subfolders:
+            excluded_to_remove = set()
+            for excluded_folder in self.excluded_subfolders:
+                # 检查这个排除的文件夹是否还在某个 source_files 的文件夹内
+                is_valid = False
+                for folder in folders:
+                    try:
+                        common = os.path.commonpath([folder, excluded_folder])
+                        if common == os.path.normpath(folder):
+                            is_valid = True
+                            break
+                    except ValueError:
+                        continue
+                if not is_valid:
+                    excluded_to_remove.add(excluded_folder)
+            self.excluded_subfolders -= excluded_to_remove
+        
         # 对文件夹进行自然排序
         folders.sort(key=self.file_service._natural_sort_key)
         
@@ -867,6 +1015,25 @@ class MainAppLogic(QObject):
         for folder in folders:
             # 获取文件夹中的所有图片（递归查找所有子文件夹，已经使用自然排序）
             folder_files = self.file_service.get_image_files_from_folder(folder, recursive=True)
+            
+            # 过滤掉被排除的子文件夹中的文件
+            if self.excluded_subfolders:
+                filtered_files = []
+                for file_path in folder_files:
+                    # 检查文件是否在被排除的子文件夹中
+                    is_excluded = False
+                    for excluded_folder in self.excluded_subfolders:
+                        try:
+                            common = os.path.commonpath([excluded_folder, file_path])
+                            if common == excluded_folder:
+                                is_excluded = True
+                                break
+                        except ValueError:
+                            continue
+                    if not is_excluded:
+                        filtered_files.append(file_path)
+                folder_files = filtered_files
+            
             resolved_files.extend(folder_files)
             # 记录这些文件来自这个文件夹
             for file_path in folder_files:

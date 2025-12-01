@@ -98,48 +98,51 @@
    - 解压压缩包到任意目录
    - 双击 `app.exe`
 
-#### 方式三：Docker部署（🐳 服务器推荐）
+#### 方式三：Docker 部署（实验性）
 
-适合需要在服务器上部署或容器化运行的用户。
+**镜像地址**：
+- CPU 版本：`hgmzhn/manga-translator:latest-cpu`
+- GPU 版本：`hgmzhn/manga-translator:latest-gpu`
 
-**快速启动**：
+**访问地址**（默认端口 8000）：
+- 🌐 用户界面：`http://localhost:8000`
+- 🔧 管理界面：`http://localhost:8000/admin.html`
 
-```bash
-# CPU版本
-docker run -d \
-  --name manga-translator \
-  -p 8000:8000 \
-  -e MT_WEB_HOST=0.0.0.0 \
-  your-registry/manga-translator:latest
+> 📖 **详细安装教程**：[Docker 部署文档](doc/INSTALLATION.md#安装方式四docker部署)  
+> 📖 **使用教程**：[命令行使用指南](doc/CLI_USAGE.md)
 
-# GPU版本
-docker run -d \
-  --name manga-translator-gpu \
-  --gpus all \
-  -p 8000:8000 \
-  -e MT_WEB_HOST=0.0.0.0 \
-  -e MT_USE_GPU=true \
-  your-registry/manga-translator:latest-gpu
-```
+#### 方式四：从源码运行（开发者）
 
-**访问服务**：
-- 用户界面：`http://localhost:8000/`
-- 管理后台：`http://localhost:8000/admin`
-- API文档：`http://localhost:8000/docs`
-
-**详细配置**：查看 [Docker部署文档](doc/INSTALLATION.md#安装方式四docker部署)
-
-#### 方式三：手动部署（开发者）
+适合开发者或想要自定义的用户。
 
 1. **安装 Python 3.12**：[下载](https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe)
-2. **克隆仓库**：`git clone https://github.com/hgmzhn/manga-translator-ui.git`
+2. **克隆仓库**：
+   ```bash
+   git clone https://github.com/hgmzhn/manga-translator-ui.git
+   cd manga-translator-ui
+   ```
 3. **安装依赖**：
-   - **NVIDIA GPU**：`py -3.12 -m pip install -r requirements_gpu.txt`
-   - **AMD GPU**：`py -3.12 -m pip install -r requirements_amd.txt` 并参考文件注释安装 AMD PyTorch
-   - **CPU 版本**：`py -3.12 -m pip install -r requirements_cpu.txt`
-4. **运行程序**：`py -3.12 -m desktop_qt_ui.main`
+   ```bash
+   # NVIDIA GPU
+   pip install -r requirements_gpu.txt
+   
+   # AMD GPU（仅 RX 7000/9000 系列）
+   pip install -r requirements_amd.txt
+   
+   # CPU 版本
+   pip install -r requirements_cpu.txt
+   ```
+4. **运行程序**：
+   ```bash
+   # 桌面 UI
+   python -m desktop_qt_ui.main
+   
+   # Web UI（可选）
+   python -m manga_translator web
+   ```
 
-**详细安装指南** → [doc/INSTALLATION.md](doc/INSTALLATION.md)
+> 📖 **详细安装教程**：[安装指南](doc/INSTALLATION.md)  
+> 📖 **使用教程**：[命令行使用指南](doc/CLI_USAGE.md)
 
 ---
 

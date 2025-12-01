@@ -15,8 +15,8 @@ def create_parser():
     # ===== Web 模式（Web服务器：API + Web界面）=====
     web_parser = subparsers.add_parser('web', help='Web服务器模式（API + Web界面）')
     web_parser.add_argument('--host', 
-                           default=os.getenv('MT_WEB_HOST', '127.0.0.1'),
-                           help='服务器主机（默认：127.0.0.1，环境变量：MT_WEB_HOST）')
+                           default=os.getenv('MT_WEB_HOST', '0.0.0.0'),
+                           help='服务器主机（默认：0.0.0.0，环境变量：MT_WEB_HOST）')
     web_parser.add_argument('--port', 
                            default=int(os.getenv('MT_WEB_PORT', '8000')), 
                            type=int,

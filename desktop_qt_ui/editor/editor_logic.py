@@ -23,6 +23,7 @@ class EditorLogic(QObject):
         self.translated_files: List[str] = []
         self.translation_map_cache = {}
         self.config_service = get_config_service()
+        self.folder_tree: dict = {}  # 保存文件夹树结构
 
     # --- File Management Methods ---
 
@@ -126,66 +127,42 @@ class EditorLogic(QObject):
     @pyqtSlot(str)
     def remove_file(self, file_path: str, emit_signal: bool = False):
         """
-        移除文件（可能是源文件或翻译后的文件）
+        移除文件或文件夹（可能是源文件、翻译后的文件、或文件夹）
         
         Args:
-            file_path: 要移除的文件路径
+            file_path: 要移除的文件或文件夹路径
             emit_signal: 是否发射 file_list_changed 信号（默认 False，由视图自己处理）
         """
-        removed = False
         norm_file = os.path.normpath(file_path) if file_path else None
         
-        # 查找文件对（源文件和翻译文件）
-        source_path, translated_path = self._find_file_pair(file_path)
-        
-        # 规范化路径进行比较
-        norm_source = os.path.normpath(source_path) if source_path else None
-        norm_translated = os.path.normpath(translated_path) if translated_path else None
-        
-        # 移除源文件（使用规范化路径）
-        for sf in self.source_files[:]:  # 复制列表以避免修改迭代
-            if os.path.normpath(sf) == norm_source:
-                self.source_files.remove(sf)
-                removed = True
-                break
-
-        # 移除翻译文件（使用规范化路径）
-        for tf in self.translated_files[:]:
-            if os.path.normpath(tf) == norm_translated:
-                self.translated_files.remove(tf)
-                removed = True
-                break
-
-        # 如果没有找到文件对，尝试直接移除（使用规范化路径）
-        if not removed:
-            for sf in self.source_files[:]:
-                if os.path.normpath(sf) == norm_file:
-                    self.source_files.remove(sf)
-                    removed = True
-                    break
-            
-            for tf in self.translated_files[:]:
-                if os.path.normpath(tf) == norm_file:
-                    self.translated_files.remove(tf)
-                    removed = True
-                    break
-
-        if removed:
-            # 只有在明确要求时才发射信号（用于清空列表等操作）
-            if emit_signal:
-                self.file_list_changed.emit(self.translated_files if self.translated_files else self.source_files)
-
-            # 检查当前加载的图片是否是被移除的文件
+        # 检查是否是文件夹
+        if norm_file in self.folder_tree:
+            # 这是一个文件夹，检查当前图片是否在其中
             current_image_path = self.controller.model.get_source_image_path()
             if current_image_path:
-                # 规范化所有路径以确保比较准确
                 norm_current = os.path.normpath(current_image_path)
-                
-                # 如果当前图片是被移除的文件（可能是源文件或翻译文件）
-                if norm_current == norm_file or norm_current == norm_source or norm_current == norm_translated:
-                    # 先清空画布图片，再清空编辑器状态
-                    self.controller.model.set_image(None)
-                    self.controller._clear_editor_state()
+                # 检查当前图片是否在被删除的文件夹内
+                try:
+                    if norm_current.startswith(norm_file + os.sep) or norm_current == norm_file:
+                        self.controller.model.set_image(None)
+                        self.controller._clear_editor_state()
+                except:
+                    pass
+            # 文件夹删除由视图和app_logic处理，这里不需要做任何事
+            return
+        
+        # 检查是否是文件
+        # 查找文件对（源文件和翻译文件）
+        source_path, translated_path = self._find_file_pair(file_path)
+        norm_source = os.path.normpath(source_path) if source_path else None
+        
+        # 检查当前加载的图片是否是被移除的文件
+        current_image_path = self.controller.model.get_source_image_path()
+        if current_image_path:
+            norm_current = os.path.normpath(current_image_path)
+            if norm_current == norm_file or norm_current == norm_source:
+                self.controller.model.set_image(None)
+                self.controller._clear_editor_state()
 
     @pyqtSlot()
     def clear_list(self):
@@ -201,36 +178,22 @@ class EditorLogic(QObject):
 
     # --- Image Loading Methods ---
 
-    def load_file_lists(self, source_files: List[str], translated_files: List[str], folder_map: dict = None):
+    def load_file_lists(self, source_files: List[str], translated_files: List[str], folder_tree: dict = None):
         """
         Receives the file lists from the coordinator to populate the editor.
-        folder_map: 文件到文件夹的映射，用于支持文件夹分组显示（key是源文件路径）
+        folder_tree: 完整的文件夹树结构 {folder_path: {'files': [...], 'subfolders': [...]}}
         """
-        print(f"[DEBUG editor_logic] load_file_lists called")
-        print(f"[DEBUG editor_logic] source_files: {source_files}")
-        print(f"[DEBUG editor_logic] translated_files: {translated_files}")
-        print(f"[DEBUG editor_logic] folder_map: {folder_map}")
-        
         self.source_files = source_files
         self.translated_files = translated_files
+        self.folder_tree = folder_tree if folder_tree else {}
         self.translation_map_cache.clear() # Clear cache when lists change
         
-        # 选择要显示的文件列表
-        # 如果有翻译后的文件，显示源文件列表（但实际加载翻译后的文件）
-        # 这样文件夹结构和主页视图保持一致
-        files_to_show = self.source_files
-        
-        print(f"[DEBUG editor_logic] files_to_show: {files_to_show}")
-        print(f"[DEBUG editor_logic] Has folder_map: {bool(folder_map)}")
-        
-        # 如果有folder_map，使用树形结构显示
-        if folder_map:
-            print(f"[DEBUG editor_logic] Emitting file_list_with_tree_changed signal")
-            self.file_list_with_tree_changed.emit(files_to_show, folder_map)
+        # 如果有folder_tree，使用树形结构显示
+        if folder_tree:
+            self.file_list_with_tree_changed.emit(source_files, folder_tree)
         else:
             # 否则使用平铺列表
-            print(f"[DEBUG editor_logic] Emitting file_list_changed signal")
-            self.file_list_changed.emit(files_to_show)
+            self.file_list_changed.emit(source_files)
 
     @pyqtSlot(str)
     def load_image_into_editor(self, file_path: str):
