@@ -146,6 +146,16 @@ class CommonTranslator(InfererModule):
         self._SPLIT_THRESHOLD = 2  # 重试N次后触发分割
         self._global_attempt_count = 0  # 全局尝试计数器
         self._max_total_attempts = -1  # 全局最大尝试次数
+        self._cancel_check_callback = None  # 取消检查回调
+    
+    def set_cancel_check_callback(self, callback):
+        """设置取消检查回调"""
+        self._cancel_check_callback = callback
+    
+    def _check_cancelled(self):
+        """检查任务是否被取消"""
+        if self._cancel_check_callback and self._cancel_check_callback():
+            raise asyncio.CancelledError("Translation cancelled by user")
 
     def _build_user_prompt_for_texts(self, texts: List[str], ctx=None, prev_context: str = "") -> str:
         """

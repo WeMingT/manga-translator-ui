@@ -27,6 +27,14 @@ models/
 result/
 logs/
 
+# Upload directories (temporary file storage)
+uploads/
+upload-cache/
+
+# Admin configuration (user-specific settings)
+manga_translator/server/admin_config.json
+manga_translator/server/server_config.json
+
 # macOS
 .DS_Store
 

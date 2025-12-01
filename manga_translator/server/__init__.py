@@ -4,7 +4,7 @@ Manga Translator Web API Server
 """
 
 # 导出主要的类和函数，方便外部导入
-from manga_translator.server.main import app
+from manga_translator.server.main import app, run_server
 from manga_translator.server.request_extraction import (
     TranslateRequest,
     BatchTranslateRequest,
@@ -20,6 +20,7 @@ from manga_translator.server.to_json import TranslationResponse, to_translation
 __all__ = [
     # FastAPI app
     'app',
+    'run_server',
     
     # Request models
     'TranslateRequest',

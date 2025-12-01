@@ -1,5 +1,6 @@
 import argparse
 import sys
+import os
 
 def create_parser():
     """创建命令行参数解析器"""
@@ -11,20 +12,31 @@ def create_parser():
     # 添加子命令
     subparsers = parser.add_subparsers(dest='mode', help='运行模式')
     
-    # ===== Web 模式 =====
-    web_parser = subparsers.add_parser('web', help='Web API 服务器模式')
-    web_parser.add_argument('--host', default='127.0.0.1',
-                           help='服务器主机（默认：127.0.0.1）')
-    web_parser.add_argument('--port', default=8000, type=int,
-                           help='服务器端口（默认：8000）')
-    web_parser.add_argument('--use-gpu', action='store_true',
-                           help='使用 GPU')
-    web_parser.add_argument('--models-ttl', default=0, type=int,
-                           help='上次使用后将模型保留在内存中的时间（秒）（0 表示永远）')
-    web_parser.add_argument('--retry-attempts', default=None, type=int,
-                           help='翻译失败时的重试次数（-1 表示无限重试，None 表示使用 API 传入的配置）')
-    web_parser.add_argument('-v', '--verbose', action='store_true',
-                           help='显示详细日志')
+    # ===== Web 模式（Web服务器：API + Web界面）=====
+    web_parser = subparsers.add_parser('web', help='Web服务器模式（API + Web界面）')
+    web_parser.add_argument('--host', 
+                           default=os.getenv('MT_WEB_HOST', '127.0.0.1'),
+                           help='服务器主机（默认：127.0.0.1，环境变量：MT_WEB_HOST）')
+    web_parser.add_argument('--port', 
+                           default=int(os.getenv('MT_WEB_PORT', '8000')), 
+                           type=int,
+                           help='服务器端口（默认：8000，环境变量：MT_WEB_PORT）')
+    web_parser.add_argument('--use-gpu', 
+                           action='store_true',
+                           default=os.getenv('MT_USE_GPU', '').lower() in ('true', '1', 'yes'),
+                           help='使用 GPU（环境变量：MT_USE_GPU=true）')
+    web_parser.add_argument('--models-ttl', 
+                           default=int(os.getenv('MT_MODELS_TTL', '0')), 
+                           type=int,
+                           help='上次使用后将模型保留在内存中的时间（秒）（0 表示永远，环境变量：MT_MODELS_TTL）')
+    web_parser.add_argument('--retry-attempts', 
+                           default=int(os.getenv('MT_RETRY_ATTEMPTS', '-1')) if os.getenv('MT_RETRY_ATTEMPTS') else None, 
+                           type=int,
+                           help='翻译失败时的重试次数（-1 表示无限重试，None 表示使用 API 传入的配置，环境变量：MT_RETRY_ATTEMPTS）')
+    web_parser.add_argument('-v', '--verbose', 
+                           action='store_true',
+                           default=os.getenv('MT_VERBOSE', '').lower() in ('true', '1', 'yes'),
+                           help='显示详细日志（环境变量：MT_VERBOSE=true）')
     
     # ===== Local 模式（默认） =====
     local_parser = subparsers.add_parser('local', help='命令行翻译模式')
