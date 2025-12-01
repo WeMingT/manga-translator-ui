@@ -9,7 +9,8 @@
 - [系统要求](#系统要求)
 - [安装方式一：使用安装脚本（推荐，支持自动更新）](#安装方式一使用安装脚本推荐支持自动更新)
 - [安装方式二：下载打包版本](#安装方式二下载打包版本)
-- [安装方式三：手动部署](#安装方式三手动部署)
+- [安装方式三：从源码运行](#安装方式三从源码运行)
+- [安装方式四：Docker部署](#安装方式四docker部署)
 - [故障排除](#故障排除)
 
 ---
@@ -255,6 +256,252 @@ python -m desktop_qt_ui.main
 # 或运行旧版 CustomTkinter 界面
 python -m desktop-ui.main
 ```
+
+---
+
+## 安装方式四：Docker部署
+
+适合需要容器化部署或在服务器上运行的用户。
+
+### 前提条件
+
+- 已安装 Docker
+- （可选）已安装 Docker Compose
+- （GPU版本）已安装 NVIDIA Container Toolkit
+
+### 环境变量配置
+
+Docker部署支持通过环境变量配置服务器参数：
+
+| 环境变量 | 说明 | 默认值 | 示例 |
+|---------|------|--------|------|
+| `MT_WEB_HOST` | 服务器监听地址 | `127.0.0.1` | `0.0.0.0` |
+| `MT_WEB_PORT` | 服务器端口 | `8000` | `8080` |
+| `MT_USE_GPU` | 是否使用GPU | `false` | `true` |
+| `MT_MODELS_TTL` | 模型存活时间（秒） | `0`（永久） | `300` |
+| `MT_RETRY_ATTEMPTS` | 翻译重试次数 | `-1`（无限） | `3` |
+| `MT_VERBOSE` | 详细日志 | `false` | `true` |
+
+### 方式1：使用Docker命令
+
+#### CPU版本
+
+```bash
+# 拉取镜像
+docker pull your-registry/manga-translator:latest
+
+# 运行容器
+docker run -d \
+  --name manga-translator \
+  -p 8000:8000 \
+  -e MT_WEB_HOST=0.0.0.0 \
+  -e MT_WEB_PORT=8000 \
+  -v $(pwd)/fonts:/app/fonts \
+  -v $(pwd)/dict:/app/dict \
+  -v $(pwd)/result:/app/result \
+  your-registry/manga-translator:latest
+```
+
+#### GPU版本
+
+```bash
+# 拉取GPU镜像
+docker pull your-registry/manga-translator:latest-gpu
+
+# 运行GPU容器
+docker run -d \
+  --name manga-translator-gpu \
+  --gpus all \
+  -p 8000:8000 \
+  -e MT_WEB_HOST=0.0.0.0 \
+  -e MT_WEB_PORT=8000 \
+  -e MT_USE_GPU=true \
+  -e MT_MODELS_TTL=300 \
+  -v $(pwd)/fonts:/app/fonts \
+  -v $(pwd)/dict:/app/dict \
+  -v $(pwd)/result:/app/result \
+  your-registry/manga-translator:latest-gpu
+```
+
+### 方式2：使用Docker Compose
+
+创建 `docker-compose.yml` 文件：
+
+#### CPU版本
+
+```yaml
+version: '3.8'
+
+services:
+  manga-translator:
+    image: your-registry/manga-translator:latest
+    container_name: manga-translator
+    ports:
+      - "8000:8000"
+    environment:
+      - MT_WEB_HOST=0.0.0.0
+      - MT_WEB_PORT=8000
+      - MT_MODELS_TTL=300
+      - MT_RETRY_ATTEMPTS=3
+    volumes:
+      - ./fonts:/app/fonts
+      - ./dict:/app/dict
+      - ./result:/app/result
+      - ./models:/app/models
+    restart: unless-stopped
+```
+
+#### GPU版本
+
+```yaml
+version: '3.8'
+
+services:
+  manga-translator-gpu:
+    image: your-registry/manga-translator:latest-gpu
+    container_name: manga-translator-gpu
+    ports:
+      - "8000:8000"
+    environment:
+      - MT_WEB_HOST=0.0.0.0
+      - MT_WEB_PORT=8000
+      - MT_USE_GPU=true
+      - MT_MODELS_TTL=300
+      - MT_RETRY_ATTEMPTS=3
+      - MT_VERBOSE=false
+    volumes:
+      - ./fonts:/app/fonts
+      - ./dict:/app/dict
+      - ./result:/app/result
+      - ./models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+```
+
+启动服务：
+
+```bash
+# 启动
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止
+docker-compose down
+```
+
+### 访问服务
+
+容器启动后，通过浏览器访问：
+
+- **用户界面**：`http://localhost:8000/`
+- **管理后台**：`http://localhost:8000/admin`
+- **API文档**：`http://localhost:8000/docs`
+
+### 数据持久化
+
+建议挂载以下目录以保持数据持久化：
+
+- `/app/fonts` - 自定义字体文件
+- `/app/dict` - 提示词和词典文件
+- `/app/result` - 翻译结果输出
+- `/app/models` - AI模型文件（可选，避免重复下载）
+- `/app/.env` - 环境变量配置文件（可选）
+
+### 配置API密钥
+
+有两种方式配置API密钥：
+
+#### 方式1：通过环境变量
+
+在 `docker-compose.yml` 中添加：
+
+```yaml
+environment:
+  - OPENAI_API_KEY=your_openai_key
+  - GEMINI_API_KEY=your_gemini_key
+  - DEEPL_AUTH_KEY=your_deepl_key
+```
+
+#### 方式2：通过.env文件
+
+创建 `.env` 文件并挂载：
+
+```bash
+# .env 文件内容
+OPENAI_API_KEY=your_openai_key
+GEMINI_API_KEY=your_gemini_key
+DEEPL_AUTH_KEY=your_deepl_key
+```
+
+在 `docker-compose.yml` 中挂载：
+
+```yaml
+volumes:
+  - ./.env:/app/.env
+```
+
+### 性能优化建议
+
+1. **GPU内存管理**：
+   ```yaml
+   environment:
+     - MT_MODELS_TTL=300  # 5分钟后卸载模型，节省显存
+   ```
+
+2. **限制容器资源**：
+   ```yaml
+   deploy:
+     resources:
+       limits:
+         cpus: '4'
+         memory: 8G
+   ```
+
+3. **使用SSD存储**：
+   - 将模型文件存储在SSD上以提高加载速度
+
+### 故障排除
+
+#### GPU不可用
+
+**问题**：容器无法使用GPU
+
+**解决方法**：
+1. 确认已安装 NVIDIA Container Toolkit：
+   ```bash
+   docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi
+   ```
+2. 检查Docker版本是否支持GPU
+3. 重启Docker服务
+
+#### 端口冲突
+
+**问题**：端口8000已被占用
+
+**解决方法**：
+修改端口映射：
+```yaml
+ports:
+  - "8080:8000"  # 使用8080端口
+environment:
+  - MT_WEB_PORT=8000  # 容器内部仍使用8000
+```
+
+#### 模型下载缓慢
+
+**问题**：首次启动时模型下载很慢
+
+**解决方法**：
+1. 预先下载模型文件到 `./models` 目录
+2. 挂载模型目录：`-v $(pwd)/models:/app/models`
 
 ---
 

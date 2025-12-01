@@ -46,9 +46,12 @@ class OpenAITranslator(CommonTranslator):
         super().__init__()
         self.client = None
         self.prev_context = ""  # 用于存储多页上下文
-        # 重新加载 .env 文件以获取最新配置
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
+        # 只在非Web环境下重新加载.env文件
+        is_web_server = os.getenv('MANGA_TRANSLATOR_WEB_SERVER', 'false').lower() == 'true'
+        if not is_web_server:
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+        
         self.api_key = os.getenv('OPENAI_API_KEY', OPENAI_API_KEY)
         self.base_url = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
         self.model = os.getenv('OPENAI_MODEL', "gpt-4o")
@@ -230,6 +233,9 @@ This is an incorrect response because it includes extra text and explanations.
         local_attempt = 0  # 本次批次的尝试次数
 
         while is_infinite or attempt < max_retries:
+            # 检查是否被取消
+            self._check_cancelled()
+            
             # 检查全局尝试次数
             if not self._increment_global_attempt():
                 self.logger.error("Reached global attempt limit. Stopping translation.")
