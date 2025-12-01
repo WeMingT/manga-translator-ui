@@ -131,6 +131,9 @@ class MangaTranslator:
 
         self._progress_hooks = []
         self._add_logger_hook()
+        
+        # 取消检查回调（用于Web服务器等场景）
+        self._cancel_check_callback = None
 
         params = params or {}
         
@@ -180,7 +183,7 @@ class MangaTranslator:
             
             # 配置文件日志处理器
             file_handler = logging.FileHandler(log_path, encoding='utf-8')
-            file_handler.setLevel(logging.DEBUG)
+            file_handler.setLevel(logging.INFO)
             # 使用自定义格式器，保持与控制台输出一致
             from .utils.log import Formatter
             formatter = Formatter()
@@ -189,8 +192,8 @@ class MangaTranslator:
             # 添加到manga-translator根logger以捕获所有输出
             mt_logger = logging.getLogger('manga-translator')
             mt_logger.addHandler(file_handler)
-            if not mt_logger.level or mt_logger.level > logging.DEBUG:
-                mt_logger.setLevel(logging.DEBUG)
+            if not mt_logger.level or mt_logger.level > logging.INFO:
+                mt_logger.setLevel(logging.INFO)
             
             # 保存日志文件路径供后续使用
             self._log_file_path = log_path
@@ -2117,6 +2120,15 @@ class MangaTranslator:
 
     def add_progress_hook(self, ph):
         self._progress_hooks.append(ph)
+    
+    def set_cancel_check_callback(self, callback):
+        """设置取消检查回调函数"""
+        self._cancel_check_callback = callback
+    
+    def _check_cancelled(self):
+        """检查任务是否被取消"""
+        if self._cancel_check_callback and self._cancel_check_callback():
+            raise asyncio.CancelledError("Task cancelled")
 
     async def _report_progress(self, state: str, finished: bool = False):
         for ph in self._progress_hooks:
@@ -2280,6 +2292,7 @@ class MangaTranslator:
         # 分批处理所有图片
         for batch_start in range(0, total_images, batch_size):
             await asyncio.sleep(0)  # 检查是否被取消
+            self._check_cancelled()  # 检查取消标志
 
             batch_end = min(batch_start + batch_size, total_images)
             current_batch_images = images_with_configs[batch_start:batch_end]
@@ -2300,6 +2313,7 @@ class MangaTranslator:
                 logger.info("Load text mode: Loading translations from JSON and skipping detection/OCR/translation")
                 for i, (image, config) in enumerate(current_batch_images):
                     await asyncio.sleep(0)
+                    self._check_cancelled()  # 检查取消标志
                     try:
                         self._set_image_context(config, image)
                         image_name = image.name if hasattr(image, 'name') else None
@@ -2421,6 +2435,7 @@ class MangaTranslator:
             for i, (image, config) in enumerate(current_batch_images):
                 # 检查是否被取消
                 await asyncio.sleep(0)
+                self._check_cancelled()  # 检查取消标志
                 try:
                     self._set_image_context(config, image)
                     # ✅ 保存context以便渲染阶段复用，避免生成两个文件夹
@@ -2548,6 +2563,7 @@ class MangaTranslator:
             # 标准流程：渲染并保存
             for ctx, config in translated_contexts:
                 await asyncio.sleep(0)  # 检查是否被取消
+                self._check_cancelled()  # 检查取消标志
                 try:
                     if hasattr(ctx, 'input'):
                         from .utils.generic import get_image_md5
@@ -2924,6 +2940,8 @@ class MangaTranslator:
         
         # 按批次处理，防止内存溢出
         for i in range(0, total_contexts, batch_size):
+            await asyncio.sleep(0)  # 检查是否被取消
+            self._check_cancelled()  # 检查取消标志
             batch = contexts_with_configs[i:i + batch_size]
             logger.info(f'Processing translation batch {i//batch_size + 1}/{(total_contexts + batch_size - 1)//batch_size}')
             
@@ -3408,6 +3426,10 @@ class MangaTranslator:
             # 只有当 self.attempts 不是默认值时才覆盖（允许 API 传入的 config.translator.attempts 生效）
             if self.attempts != -1:
                 translator.attempts = self.attempts
+            
+            # 传递取消检查回调给翻译器
+            if self._cancel_check_callback:
+                translator.set_cancel_check_callback(self._cancel_check_callback)
 
             # 为所有翻译器构建和设置文本上下文（包括HQ翻译器）
             done_pages = self.all_page_translations
@@ -3498,6 +3520,9 @@ class MangaTranslator:
         
         if 'quota' in error_lower or 'balance' in error_lower or 'insufficient' in error_lower:
             return "❌ 翻译失败：API配额不足或余额不足\n💡 解决方法：\n1. 充值API账户\n2. 检查账户配额使用情况\n3. 升级API套餐"
+        
+        if 'budget' in error_lower or 'exceededbudget' in error_lower:
+            return "❌ 翻译失败：API预算已用完\n💡 解决方法：\n1. 在API提供商后台增加预算限制\n2. 充值账户余额\n3. 等待下个计费周期\n4. 暂时使用其他翻译服务"
         
         # 通用错误
         return f"❌ 翻译失败：{error_msg}\n💡 建议：\n1. 检查API配置是否正确\n2. 查看完整日志以获取详细错误信息\n3. 尝试更换翻译服务"
@@ -4087,6 +4112,7 @@ class MangaTranslator:
         for batch_start in range(0, total_images, batch_size):
             # 检查是否被取消
             await asyncio.sleep(0)
+            self._check_cancelled()  # 检查取消标志
 
             batch_end = min(batch_start + batch_size, total_images)
             current_batch_images = images_with_configs[batch_start:batch_end]
@@ -4104,6 +4130,7 @@ class MangaTranslator:
             for i, (image, config) in enumerate(current_batch_images):
                 # 检查是否被取消
                 await asyncio.sleep(0)
+                self._check_cancelled()  # 检查取消标志
                 try:
                     self._set_image_context(config, image)
                     # ✅ 保存context以便渲染阶段复用，避免生成两个文件夹
@@ -4266,6 +4293,7 @@ class MangaTranslator:
             for ctx, config in preprocessed_contexts:
                 # 检查是否被取消
                 await asyncio.sleep(0)
+                self._check_cancelled()  # 检查取消标志
                 try:
                     if hasattr(ctx, 'input'):
                         from .utils.generic import get_image_md5

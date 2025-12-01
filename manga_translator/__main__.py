@@ -32,12 +32,10 @@ def main():
     
     # 根据模式分发
     if args.mode == 'web':
-        # Web API 服务器模式
-        logger.info('Starting Web API server')
-        from manga_translator.server.main import main as web_main
-        
-        # 调用 web_main 来正确设置所有配置
-        web_main(args)
+        # Web 服务器模式（API + Web界面）
+        logger.info('[web] Starting Web server')
+        from manga_translator.server import run_server
+        run_server(args)
     
     elif args.mode == 'local':
         # Local 模式（命令行翻译）

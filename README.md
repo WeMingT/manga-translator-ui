@@ -98,6 +98,37 @@
    - 解压压缩包到任意目录
    - 双击 `app.exe`
 
+#### 方式三：Docker部署（🐳 服务器推荐）
+
+适合需要在服务器上部署或容器化运行的用户。
+
+**快速启动**：
+
+```bash
+# CPU版本
+docker run -d \
+  --name manga-translator \
+  -p 8000:8000 \
+  -e MT_WEB_HOST=0.0.0.0 \
+  your-registry/manga-translator:latest
+
+# GPU版本
+docker run -d \
+  --name manga-translator-gpu \
+  --gpus all \
+  -p 8000:8000 \
+  -e MT_WEB_HOST=0.0.0.0 \
+  -e MT_USE_GPU=true \
+  your-registry/manga-translator:latest-gpu
+```
+
+**访问服务**：
+- 用户界面：`http://localhost:8000/`
+- 管理后台：`http://localhost:8000/admin`
+- API文档：`http://localhost:8000/docs`
+
+**详细配置**：查看 [Docker部署文档](doc/INSTALLATION.md#安装方式四docker部署)
+
 #### 方式三：手动部署（开发者）
 
 1. **安装 Python 3.12**：[下载](https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe)
@@ -147,8 +178,11 @@ python -m manga_translator -i manga.jpg
 # 翻译整个文件夹
 python -m manga_translator local -i ./manga_folder/ -o ./output/
 
-# Web API 服务器模式
-python -m manga_translator web --host 127.0.0.1 --port 8000
+# Web API 服务器模式（纯API，无界面）
+python -m manga_translator web --host 127.0.0.1 --port 8000 --use-gpu
+
+# Web UI 服务器模式（带管理界面和用户界面）
+python -m manga_translator ui --host 127.0.0.1 --port 8000 --use-gpu
 
 # 查看所有参数
 python -m manga_translator --help

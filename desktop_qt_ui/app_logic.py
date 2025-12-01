@@ -865,7 +865,7 @@ class MainAppLogic(QObject):
         
         # 按文件夹分组处理
         for folder in folders:
-            # 获取文件夹中的所有图片（已经使用自然排序）
+            # 获取文件夹中的所有图片（递归查找所有子文件夹，已经使用自然排序）
             folder_files = self.file_service.get_image_files_from_folder(folder, recursive=True)
             resolved_files.extend(folder_files)
             # 记录这些文件来自这个文件夹

@@ -231,16 +231,27 @@ class ConfigService(QObject):
                     if 'cli' in config_dict:
                         config_dict['cli']['verbose'] = False
                     
-                    # 保留模板配置中的字体路径和提示词路径（不覆盖用户的个人设置）
-                    if existing_font_path is not None:
-                        if 'render' not in config_dict:
-                            config_dict['render'] = {}
-                        config_dict['render']['font_path'] = existing_font_path
+                    # 模板配置中的字体路径和提示词路径始终保持为默认示例文件
+                    # 这样用户可以看到示例，但不会被个人设置覆盖
+                    if 'render' not in config_dict:
+                        config_dict['render'] = {}
+                    config_dict['render']['font_path'] = 'fonts/Arial-Unicode-Regular.ttf'
                     
-                    if existing_prompt_path is not None:
-                        if 'translator' not in config_dict:
-                            config_dict['translator'] = {}
-                        config_dict['translator']['high_quality_prompt_path'] = existing_prompt_path
+                    # AI断句相关设置在模板配置中始终为关闭状态
+                    config_dict['render']['disable_auto_wrap'] = False
+                    config_dict['render']['center_text_in_bubble'] = False
+                    config_dict['render']['optimize_line_breaks'] = False
+                    config_dict['render']['check_br_and_retry'] = False
+                    config_dict['render']['strict_smart_scaling'] = False
+                    
+                    if 'translator' not in config_dict:
+                        config_dict['translator'] = {}
+                    config_dict['translator']['high_quality_prompt_path'] = 'dict/prompt_example.json'
+                    
+                    # 混合OCR在模板配置中始终为关闭状态
+                    if 'ocr' not in config_dict:
+                        config_dict['ocr'] = {}
+                    config_dict['ocr']['use_hybrid_ocr'] = False
                 else:
                     # 用户配置保留favorite_folders（但如果当前配置已经有新值，就不覆盖）
                     if existing_favorites is not None:
