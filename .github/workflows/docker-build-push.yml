@@ -69,7 +69,7 @@ jobs:
             type=ref,event=pr,suffix=-${{ matrix.build_type }}
             type=semver,pattern={{version}},suffix=-${{ matrix.build_type }}
             type=semver,pattern={{major}}.{{minor}},suffix=-${{ matrix.build_type }}
-            type=raw,value=latest-${{ matrix.build_type }},enable={{is_default_branch}}
+            type=raw,value=latest-${{ matrix.build_type }}
           flavor: |
             latest=false
       
