@@ -29,6 +29,7 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     
     strategy:
       matrix:
@@ -37,11 +38,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
-      - name: Download pydensecrf wheel
-        run: |
-          mkdir -p packaging
-          wget -q https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.9.2/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl -O packaging/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl || echo "Wheel not found, will build from source"
       
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
