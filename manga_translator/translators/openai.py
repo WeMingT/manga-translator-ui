@@ -203,8 +203,12 @@ This is an incorrect response because it includes extra text and explanations.
         return final_prompt
 
     def _build_user_prompt(self, texts: List[str], ctx: Any) -> str:
-        """构建用户提示词（纯文本版）- 使用统一方法"""
+        """构建用户提示词（纯文本版）- 使用统一方法，只包含上下文和待翻译文本"""
         return self._build_user_prompt_for_texts(texts, ctx, self.prev_context)
+    
+    def _get_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None) -> str:
+        """获取完整的系统提示词（包含断句提示词、自定义提示词和基础系统提示词）"""
+        return self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
 
     async def _translate_batch(self, texts: List[str], source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, ctx: Any = None, split_level: int = 0) -> List[str]:
         """批量翻译方法（纯文本）"""
@@ -214,15 +218,13 @@ This is an incorrect response because it includes extra text and explanations.
         if not self.client:
             self._setup_client()
         
-        # 构建消息
-        system_prompt = self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
+        # 构建消息：系统提示词放在 system role，用户提示词放在 user role
+        system_prompt = self._get_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
         user_prompt = self._build_user_prompt(texts, ctx)
-
-        # Combine system and user prompts into a single user message
-        combined_prompt_text = system_prompt + "\n\n" + user_prompt
         
         messages = [
-            {"role": "user", "content": combined_prompt_text}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ]
         
         # 发送请求
