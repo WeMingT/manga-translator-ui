@@ -95,7 +95,7 @@ class GeminiTranslator(CommonTranslator):
             self._MAX_REQUESTS_PER_MINUTE = max_rpm
             self.logger.info(f"Setting Gemini max requests per minute to: {max_rpm}")
     
-    def _setup_client(self):
+    def _setup_client(self, system_instruction=None):
         """设置Gemini客户端"""
         if not self.client and self.api_key:
             client_options = {"api_endpoint": self.base_url} if self.base_url else None
@@ -119,7 +119,14 @@ class GeminiTranslator(CommonTranslator):
                 "model_name": self.model_name,
                 "generation_config": generation_config,
             }
-            self.logger.info(f"Gemini客户端初始化完成。Base URL: {self.base_url or '默认'}")
+            
+            # 如果提供了系统指令，则添加到模型配置中
+            if system_instruction:
+                model_args["system_instruction"] = system_instruction
+                self.logger.info(f"Gemini客户端初始化完成（使用 system_instruction）。Base URL: {self.base_url or '默认'}")
+            else:
+                self.logger.info(f"Gemini客户端初始化完成。Base URL: {self.base_url or '默认'}")
+            
             self.logger.info(f"安全设置策略：默认发送 BLOCK_NONE，如遇错误自动回退")
 
             self.client = genai.GenerativeModel(**model_args)
@@ -220,8 +227,12 @@ This is an incorrect response because it includes extra text and explanations.
         return final_prompt
 
     def _build_user_prompt(self, texts: List[str], ctx: Any) -> str:
-        """构建用户提示词（纯文本版）- 使用统一方法"""
+        """构建用户提示词（纯文本版）- 使用统一方法，只包含上下文和待翻译文本"""
         return self._build_user_prompt_for_texts(texts, ctx, self.prev_context)
+    
+    def _get_system_instruction(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None) -> str:
+        """获取完整的系统指令（包含断句提示词、自定义提示词和基础系统提示词）"""
+        return self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
 
     async def _translate_batch(self, texts: List[str], source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, ctx: Any = None, split_level: int = 0) -> List[str]:
         """批量翻译方法（纯文本）"""
@@ -235,17 +246,19 @@ This is an incorrect response because it includes extra text and explanations.
             self.logger.error("Gemini客户端初始化失败")
             return texts
         
-        # 打印输入的原文 - 已注释以减少日志输出
-        # self.logger.info("--- Original Texts for Translation ---")
-        # for i, text in enumerate(texts):
-        #     self.logger.info(f"{i+1}: {text}")
-        # self.logger.info("------------------------------------")
-
-        # 添加系统提示词和用户提示词
-        system_prompt = self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
-        user_prompt = self._build_user_prompt(texts, ctx)
+        # 获取系统指令（包含断句提示词、自定义提示词和基础系统提示词）
+        system_instruction = self._get_system_instruction(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
         
-        combined_prompt = system_prompt + "\n\n" + user_prompt
+        # 重新初始化客户端以应用新的系统指令
+        self.client = None
+        self._setup_client(system_instruction=system_instruction)
+        
+        if not self.client:
+            self.logger.error("Gemini客户端初始化失败")
+            return texts
+        
+        # 构建用户提示词（只包含上下文和待翻译文本，不包含系统指令）
+        user_prompt = self._build_user_prompt(texts, ctx)
         
         # 发送请求
         max_retries = self.attempts
@@ -255,7 +268,7 @@ This is an incorrect response because it includes extra text and explanations.
 
         # 动态构建请求参数 - 默认总是发送安全设置
         request_args = {
-            "contents": combined_prompt,
+            "contents": user_prompt,
             "safety_settings": self.safety_settings
         }
         
