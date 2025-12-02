@@ -100,6 +100,15 @@
 
 #### 方式三：Docker 部署（实验性）
 
+**快速启动**：
+```bash
+# Windows CMD / PowerShell
+docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:latest-cpu
+
+# Linux / macOS
+docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:latest-cpu
+```
+
 **镜像地址**：
 - CPU 版本：`hgmzhn/manga-translator:latest-cpu`
 - GPU 版本：`hgmzhn/manga-translator:latest-gpu`

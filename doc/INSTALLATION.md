@@ -263,6 +263,22 @@ python -m desktop-ui.main
 
 适合使用宝塔面板、Portainer 等 Docker 管理工具的用户。
 
+### 快速启动
+
+**Windows CMD / PowerShell**：
+```cmd
+docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:latest-cpu
+```
+
+**Linux / macOS**：
+```bash
+docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:latest-cpu
+```
+
+启动后访问：
+- 🌐 用户界面：http://localhost:8000
+- 🔧 管理界面：http://localhost:8000/admin.html
+
 ### 镜像地址
 
 - **CPU 版本**：`hgmzhn/manga-translator:latest-cpu`
