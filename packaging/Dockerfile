@@ -62,29 +62,30 @@ WORKDIR /app
 # 复制项目文件
 COPY . /app/
 
+# 复制预编译的 pydensecrf wheel（如果存在）
+COPY packaging/pydensecrf-*.whl /tmp/ 2>/dev/null || true
+
 # 安装 Python 依赖
 ARG BUILD_TYPE=cpu
 RUN if [ "$BUILD_TYPE" = "gpu" ]; then \
-        # GPU 版本：尝试下载预编译的 pydensecrf，如果失败则从源码编译
-        if wget --spider -q https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.9.2/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl 2>/dev/null; then \
-            echo "Downloading precompiled pydensecrf wheel" && \
-            wget -q https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.9.2/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl -O /tmp/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl && \
-            pip install --no-cache-dir /tmp/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl; \
+        # GPU 版本：优先使用预编译的 pydensecrf，否则从源码编译
+        if ls /tmp/pydensecrf-*.whl 1> /dev/null 2>&1; then \
+            echo "Using precompiled pydensecrf wheel" && \
+            pip install --no-cache-dir /tmp/pydensecrf-*.whl; \
         else \
-            echo "Precompiled wheel not available, building from source" && \
+            echo "Building pydensecrf from source" && \
             pip install --no-cache-dir Cython numpy && \
             pip install --no-cache-dir git+https://github.com/lucasb-eyer/pydensecrf.git; \
         fi && \
         grep -v "^pydensecrf" requirements_gpu.txt > /tmp/requirements_gpu_no_pydensecrf.txt && \
         pip install --no-cache-dir -r /tmp/requirements_gpu_no_pydensecrf.txt; \
     else \
-        # CPU 版本：尝试下载预编译的 pydensecrf，如果失败则从源码编译
-        if wget --spider -q https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.9.2/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl 2>/dev/null; then \
-            echo "Downloading precompiled pydensecrf wheel" && \
-            wget -q https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.9.2/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl -O /tmp/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl && \
-            pip install --no-cache-dir /tmp/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl; \
+        # CPU 版本：优先使用预编译的 pydensecrf，否则从源码编译
+        if ls /tmp/pydensecrf-*.whl 1> /dev/null 2>&1; then \
+            echo "Using precompiled pydensecrf wheel" && \
+            pip install --no-cache-dir /tmp/pydensecrf-*.whl; \
         else \
-            echo "Precompiled wheel not available, building from source" && \
+            echo "Building pydensecrf from source" && \
             pip install --no-cache-dir Cython numpy && \
             pip install --no-cache-dir git+https://github.com/lucasb-eyer/pydensecrf.git; \
         fi && \
