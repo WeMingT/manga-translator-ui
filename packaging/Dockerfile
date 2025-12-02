@@ -25,6 +25,10 @@ RUN apt-get update && apt-get install -y \
 # ===== GPU 版本 =====
 FROM nvidia/cuda:${CUDA_VERSION}-cudnn8-runtime-ubuntu22.04 AS base-gpu
 
+# 设置非交互式安装
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+
 # 安装 Python 3.12
 RUN apt-get update && apt-get install -y \
     software-properties-common \
