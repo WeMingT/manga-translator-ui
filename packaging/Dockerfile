@@ -65,27 +65,17 @@ COPY . /app/
 # 安装 Python 依赖
 ARG BUILD_TYPE=cpu
 RUN if [ "$BUILD_TYPE" = "gpu" ]; then \
-        # GPU 版本：优先使用预编译的 pydensecrf，否则从源码编译
-        if [ -f /app/packaging/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl ]; then \
-            echo "Using precompiled pydensecrf wheel" && \
-            pip install --no-cache-dir /app/packaging/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl; \
-        else \
-            echo "Building pydensecrf from source" && \
-            pip install --no-cache-dir Cython numpy && \
-            pip install --no-cache-dir git+https://github.com/lucasb-eyer/pydensecrf.git; \
-        fi && \
+        # GPU 版本：从源码编译 pydensecrf
+        echo "Building pydensecrf from source" && \
+        pip install --no-cache-dir Cython numpy && \
+        pip install --no-cache-dir git+https://github.com/lucasb-eyer/pydensecrf.git && \
         grep -v "^pydensecrf" requirements_gpu.txt > /tmp/requirements_gpu_no_pydensecrf.txt && \
         pip install --no-cache-dir -r /tmp/requirements_gpu_no_pydensecrf.txt; \
     else \
-        # CPU 版本：优先使用预编译的 pydensecrf，否则从源码编译
-        if [ -f /app/packaging/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl ]; then \
-            echo "Using precompiled pydensecrf wheel" && \
-            pip install --no-cache-dir /app/packaging/pydensecrf-1.0-cp312-cp312-linux_x86_64.whl; \
-        else \
-            echo "Building pydensecrf from source" && \
-            pip install --no-cache-dir Cython numpy && \
-            pip install --no-cache-dir git+https://github.com/lucasb-eyer/pydensecrf.git; \
-        fi && \
+        # CPU 版本：从源码编译 pydensecrf
+        echo "Building pydensecrf from source" && \
+        pip install --no-cache-dir Cython numpy && \
+        pip install --no-cache-dir git+https://github.com/lucasb-eyer/pydensecrf.git && \
         grep -v "^pydensecrf" requirements_cpu.txt > /tmp/requirements_cpu_no_pydensecrf.txt && \
         pip install --no-cache-dir -r /tmp/requirements_cpu_no_pydensecrf.txt; \
     fi
