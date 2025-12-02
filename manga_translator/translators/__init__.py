@@ -11,9 +11,9 @@ from .papago import PapagoTranslator
 from .caiyun import CaiyunTranslator
 from .openai import OpenAITranslator
 from .nllb import NLLBTranslator, NLLBBigTranslator
-# 延迟导入 sugoi 翻译器，避免在启动时加载 ctranslate2
+# 延迟导入使用 ctranslate2 的翻译器，避免在启动时加载
 # from .sugoi import JparacrawlTranslator, JparacrawlBigTranslator, SugoiTranslator
-from .m2m100 import M2M100Translator, M2M100BigTranslator
+# from .m2m100 import M2M100Translator, M2M100BigTranslator
 from .mbart50 import MBart50Translator
 from .selective import SelectiveOfflineTranslator, prepare as prepare_selective_translator
 from .none import NoneTranslator
@@ -33,11 +33,20 @@ def _get_sugoi_translators():
     from .sugoi import JparacrawlTranslator, JparacrawlBigTranslator, SugoiTranslator
     return JparacrawlTranslator, JparacrawlBigTranslator, SugoiTranslator
 
+def _get_m2m100_translators():
+    """延迟导入 M2M100 相关翻译器"""
+    from .m2m100 import M2M100Translator, M2M100BigTranslator
+    return M2M100Translator, M2M100BigTranslator
+
 # 使用懒加载的占位符
 _sugoi_translators_loaded = False
 _JparacrawlTranslator = None
 _JparacrawlBigTranslator = None
 _SugoiTranslator = None
+
+_m2m100_translators_loaded = False
+_M2M100Translator = None
+_M2M100BigTranslator = None
 
 def _ensure_sugoi_loaded():
     """确保 Sugoi 翻译器已加载"""
@@ -45,6 +54,13 @@ def _ensure_sugoi_loaded():
     if not _sugoi_translators_loaded:
         _JparacrawlTranslator, _JparacrawlBigTranslator, _SugoiTranslator = _get_sugoi_translators()
         _sugoi_translators_loaded = True
+
+def _ensure_m2m100_loaded():
+    """确保 M2M100 翻译器已加载"""
+    global _m2m100_translators_loaded, _M2M100Translator, _M2M100BigTranslator
+    if not _m2m100_translators_loaded:
+        _M2M100Translator, _M2M100BigTranslator = _get_m2m100_translators()
+        _m2m100_translators_loaded = True
 
 class _LazyTranslatorProxy:
     """延迟加载翻译器的代理类"""
@@ -54,13 +70,20 @@ class _LazyTranslatorProxy:
     
     def __call__(self, *args, **kwargs):
         if self._translator_class is None:
-            _ensure_sugoi_loaded()
-            if self.translator_name == 'sugoi':
-                self._translator_class = _SugoiTranslator
-            elif self.translator_name == 'jparacrawl':
-                self._translator_class = _JparacrawlTranslator
-            elif self.translator_name == 'jparacrawl_big':
-                self._translator_class = _JparacrawlBigTranslator
+            if self.translator_name in ['sugoi', 'jparacrawl', 'jparacrawl_big']:
+                _ensure_sugoi_loaded()
+                if self.translator_name == 'sugoi':
+                    self._translator_class = _SugoiTranslator
+                elif self.translator_name == 'jparacrawl':
+                    self._translator_class = _JparacrawlTranslator
+                elif self.translator_name == 'jparacrawl_big':
+                    self._translator_class = _JparacrawlBigTranslator
+            elif self.translator_name in ['m2m100', 'm2m100_big']:
+                _ensure_m2m100_loaded()
+                if self.translator_name == 'm2m100':
+                    self._translator_class = _M2M100Translator
+                elif self.translator_name == 'm2m100_big':
+                    self._translator_class = _M2M100BigTranslator
         return self._translator_class(*args, **kwargs)
 
 OFFLINE_TRANSLATORS = {
@@ -70,8 +93,8 @@ OFFLINE_TRANSLATORS = {
     Translator.sugoi: _LazyTranslatorProxy('sugoi'),
     Translator.jparacrawl: _LazyTranslatorProxy('jparacrawl'),
     Translator.jparacrawl_big: _LazyTranslatorProxy('jparacrawl_big'),
-    Translator.m2m100: M2M100Translator,
-    Translator.m2m100_big: M2M100BigTranslator,
+    Translator.m2m100: _LazyTranslatorProxy('m2m100'),
+    Translator.m2m100_big: _LazyTranslatorProxy('m2m100_big'),
     Translator.mbart50: MBart50Translator,
     Translator.qwen2: Qwen2Translator,
     Translator.qwen2_big: Qwen2BigTranslator,

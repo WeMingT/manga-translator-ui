@@ -1,9 +1,20 @@
 import os
-import ctranslate2
-import sentencepiece as spm
 from typing import List
 
 from .common import OfflineTranslator
+
+# 延迟导入 ctranslate2 和 sentencepiece，避免在不使用时加载
+ctranslate2 = None
+spm = None
+
+def _lazy_import():
+    """延迟导入 ctranslate2 和 sentencepiece"""
+    global ctranslate2, spm
+    if ctranslate2 is None:
+        import ctranslate2 as ct2
+        import sentencepiece as sp
+        ctranslate2 = ct2
+        spm = sp
 
 # Adapted from:
 # https://gist.github.com/ymoslem/a414a0ead0d3e50f4d7ff7110b1d1c0d
@@ -52,6 +63,9 @@ class M2M100Translator(OfflineTranslator):
     }
 
     async def _load(self, from_lang: str, to_lang: str, device: str):
+        # 在实际使用时才导入依赖
+        _lazy_import()
+        
         self.load_params = {
             'from_lang': from_lang,
             'to_lang': to_lang,
