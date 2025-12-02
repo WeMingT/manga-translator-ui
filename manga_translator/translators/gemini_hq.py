@@ -135,7 +135,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
             self._MAX_REQUESTS_PER_MINUTE = max_rpm
             self.logger.info(f"Setting Gemini HQ max requests per minute to: {max_rpm}")
     
-    def _setup_client(self):
+    def _setup_client(self, system_instruction=None):
         """设置Gemini客户端"""
         if not self.client and self.api_key:
             client_options = {"api_endpoint": self.base_url} if self.base_url else None
@@ -159,7 +159,14 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 "model_name": self.model_name,
                 "generation_config": generation_config,
             }
-            self.logger.info(f"Gemini HQ客户端初始化完成。Base URL: {self.base_url or '默认'}")
+            
+            # 如果提供了系统指令，则添加到模型配置中
+            if system_instruction:
+                model_args["system_instruction"] = system_instruction
+                self.logger.info(f"Gemini HQ客户端初始化完成（使用 system_instruction）。Base URL: {self.base_url or '默认'}")
+            else:
+                self.logger.info(f"Gemini HQ客户端初始化完成。Base URL: {self.base_url or '默认'}")
+            
             self.logger.info(f"安全设置策略：默认发送 BLOCK_NONE，如遇错误自动回退")
 
             self.client = genai.GenerativeModel(**model_args)
@@ -217,22 +224,31 @@ class GeminiHighQualityTranslator(CommonTranslator):
         return final_prompt
 
     def _build_user_prompt(self, batch_data: List[Dict], ctx: Any) -> str:
-        """构建用户提示词（高质量版）- 使用统一方法"""
+        """构建用户提示词（高质量版）- 使用统一方法，只包含上下文和待翻译文本"""
         return self._build_user_prompt_for_hq(batch_data, ctx, self.prev_context)
+    
+    def _get_system_instruction(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None) -> str:
+        """获取完整的系统指令（包含断句提示词、自定义提示词和基础系统提示词）"""
+        # 构建系统提示词（包含所有指令）
+        return self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
 
     async def _translate_batch_high_quality(self, texts: List[str], batch_data: List[Dict], source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, ctx: Any = None, split_level: int = 0) -> List[str]:
         """高质量批量翻译方法"""
         if not texts:
             return []
         
-        if not self.client:
-            self._setup_client()
+        # 获取系统指令（包含断句提示词、自定义提示词和基础系统提示词）
+        system_instruction = self._get_system_instruction(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
+        
+        # 重新初始化客户端以应用新的系统指令
+        self.client = None
+        self._setup_client(system_instruction=system_instruction)
         
         if not self.client:
             self.logger.error("Gemini客户端初始化失败")
             return texts
         
-        # 准备图片和内容
+        # 准备内容：user消息只包含上下文、待翻译文本和图片
         content_parts = []
         
         # 打印输入的原文
@@ -248,13 +264,11 @@ class GeminiHighQualityTranslator(CommonTranslator):
             self.logger.info(f"Image {i+1}: size={image.size}, mode={image.mode}")
         self.logger.info("--------------------")
 
-        # 添加系统提示词和用户提示词
-        system_prompt = self._build_system_prompt(source_lang, target_lang, custom_prompt_json=custom_prompt_json, line_break_prompt_json=line_break_prompt_json)
+        # 构建用户提示词（只包含上下文和待翻译文本，不包含系统指令）
         user_prompt = self._build_user_prompt(batch_data, ctx)
+        content_parts.append(user_prompt)
         
-        content_parts.append(system_prompt + "\n\n" + user_prompt)
-        
-        # 添加图片
+        # 添加图片（放在最后）
         for data in batch_data:
             image = data['image']
             processed_image = encode_image_for_gemini(image)
