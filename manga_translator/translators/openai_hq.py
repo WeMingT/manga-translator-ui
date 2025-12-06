@@ -7,6 +7,7 @@ import logging
 from io import BytesIO
 from typing import List, Dict, Any
 from PIL import Image
+import httpx
 import openai
 from openai import AsyncOpenAI
 
@@ -17,6 +18,23 @@ from ..utils import Context
 # 禁用openai库的DEBUG日志,避免打印base64图片数据
 logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# 浏览器风格的请求头，避免被 CF 拦截
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Connection": "keep-alive",
+    "Origin": "https://chat.openai.com",
+    "Referer": "https://chat.openai.com/",
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+}
 
 
 def encode_image_for_openai(image, max_size=1024):
@@ -129,9 +147,15 @@ class OpenAIHighQualityTranslator(CommonTranslator):
     def _setup_client(self):
         """设置OpenAI客户端"""
         if not self.client:
+            # 使用浏览器式请求头，避免被 Cloudflare 阻止
             self.client = AsyncOpenAI(
                 api_key=self.api_key,
-                base_url=self.base_url
+                base_url=self.base_url,
+                default_headers=BROWSER_HEADERS,
+                http_client=httpx.AsyncClient(
+                    headers=BROWSER_HEADERS,
+                    timeout=httpx.Timeout(120.0, connect=30.0)
+                )
             )
     
     async def _cleanup(self):
@@ -243,6 +267,10 @@ This is an incorrect response because it includes extra text and explanations.
 
         # Replace placeholder with the full language name
         base_prompt = base_prompt.replace("{{{target_lang}}}", target_lang_full)
+        
+        # Also replace target_lang placeholder in custom prompt
+        if custom_prompt_str:
+            custom_prompt_str = custom_prompt_str.replace("{{{target_lang}}}", target_lang_full)
 
         # Combine prompts
         final_prompt = ""
@@ -304,15 +332,17 @@ This is an incorrect response because it includes extra text and explanations.
             # 检查全局尝试次数
             if not self._increment_global_attempt():
                 self.logger.error("Reached global attempt limit. Stopping translation.")
-                raise Exception(f"Global attempt limit reached: {self._global_attempt_count}/{self._max_total_attempts}")
+                # 包含最后一次错误的真正原因
+                last_error_msg = str(last_exception) if last_exception else "Unknown error"
+                raise Exception(f"达到最大尝试次数 ({self._max_total_attempts})，最后一次错误: {last_error_msg}")
 
             local_attempt += 1
             attempt += 1
 
-            # 检查是否应该触发分割（重试2次后）
-            if local_attempt > self._SPLIT_THRESHOLD and len(texts) > 1 and split_level < self._MAX_SPLIT_ATTEMPTS:
-                self.logger.warning(f"Triggering split after {local_attempt} local attempts")
-                raise self.SplitException(local_attempt, texts)
+            # 文本分割逻辑已禁用
+            # if local_attempt > self._SPLIT_THRESHOLD and len(texts) > 1 and split_level < self._MAX_SPLIT_ATTEMPTS:
+            #     self.logger.warning(f"Triggering split after {local_attempt} local attempts")
+            #     raise self.SplitException(local_attempt, texts)
             
             # 构建用户提示词（包含重试信息以避免缓存）
             user_prompt = self._build_user_prompt(batch_data, ctx, retry_attempt=retry_attempt, retry_reason=retry_reason)
@@ -354,6 +384,13 @@ This is an incorrect response because it includes extra text and explanations.
                     # ✅ 检测HTML错误响应（404等）- 抛出特定异常供统一错误处理
                     if result_text.startswith('<!DOCTYPE') or result_text.startswith('<html') or '<h1>404</h1>' in result_text:
                         raise Exception(f"API_404_ERROR: API返回HTML错误页面 - API地址({self.base_url})或模型({self.model})配置错误")
+                    
+                    # 去除 <think>...</think> 标签及内容（LM Studio 等本地模型的思考过程）
+                    result_text = re.sub(r'(</think>)?<think>.*?</think>', '', result_text, flags=re.DOTALL)
+                    # 提取 <answer>...</answer> 中的内容（如果存在）
+                    answer_match = re.search(r'<answer>(.*?)</answer>', result_text, flags=re.DOTALL)
+                    if answer_match:
+                        result_text = answer_match.group(1).strip()
                     
                     # 增加清理步骤，移除可能的Markdown代码块
                     if result_text.startswith("```") and result_text.endswith("```"):
@@ -550,6 +587,14 @@ This is an incorrect response because it includes extra text and explanations.
             
             if response.choices and response.choices[0].message.content:
                 result = response.choices[0].message.content.strip()
+                
+                # 去除 <think>...</think> 标签及内容（LM Studio 等本地模型的思考过程）
+                result = re.sub(r'(</think>)?<think>.*?</think>', '', result, flags=re.DOTALL)
+                # 提取 <answer>...</answer> 中的内容（如果存在）
+                answer_match = re.search(r'<answer>(.*?)</answer>', result, flags=re.DOTALL)
+                if answer_match:
+                    result = answer_match.group(1).strip()
+                
                 translations = result.split('\n')
                 translations = [t.strip() for t in translations if t.strip()]
                 
