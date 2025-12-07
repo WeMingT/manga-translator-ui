@@ -1245,13 +1245,12 @@ class EditorController(QObject):
         if not region_indices:
             return
 
-        try:
-            # 重置 _last_edited_region_index,确保删除操作触发完全更新
-            if self.view and hasattr(self.view, 'graphics_view'):
-                graphics_view = self.view.graphics_view
-                if graphics_view and hasattr(graphics_view, '_last_edited_region_index'):
-                    graphics_view._last_edited_region_index = None
-                    self.logger.info("[DELETE] 重置 _last_edited_region_index 为 None")
+        # 重置 _last_edited_region_index,确保删除操作触发完全更新
+        if self.view and hasattr(self.view, 'graphics_view'):
+            graphics_view = self.view.graphics_view
+            if graphics_view and hasattr(graphics_view, '_last_edited_region_index'):
+                graphics_view._last_edited_region_index = None
+                self.logger.info("[DELETE] 重置 _last_edited_region_index 为 None")
 
         # 按索引倒序处理，避免索引变化问题
         sorted_indices = sorted(region_indices, reverse=True)
