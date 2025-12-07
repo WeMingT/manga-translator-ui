@@ -192,59 +192,58 @@ class RegionTextItem(QGraphicsItemGroup):
             # 保存选中状态
             was_selected = self.isSelected()
 
-        # 确保 region_data 包含所有必要的字段
-        # 如果新的 region_data 缺少某些字段,从旧的 self.region_data 中复制
-        if hasattr(self, 'region_data') and self.region_data:
-            # 合并旧数据和新数据,新数据优先
-            merged_data = self.region_data.copy()
-            merged_data.update(region_data)
-            self.region_data = merged_data
-        else:
-            self.region_data = region_data
+            # 确保 region_data 包含所有必要的字段
+            # 如果新的 region_data 缺少某些字段,从旧的 self.region_data 中复制
+            if hasattr(self, 'region_data') and self.region_data:
+                # 合并旧数据和新数据,新数据优先
+                merged_data = self.region_data.copy()
+                merged_data.update(region_data)
+                self.region_data = merged_data
+            else:
+                self.region_data = region_data
 
-        self.desktop_geometry = DesktopUIGeometry(self.region_data)
+            self.desktop_geometry = DesktopUIGeometry(self.region_data)
 
-        # lines是未旋转的世界坐标,需要转换为局部坐标
-        model_lines = self.desktop_geometry.lines
-        self.rotation_angle = self.desktop_geometry.angle
-        self.visual_center = QPointF(self.desktop_geometry.center[0], self.desktop_geometry.center[1])
+            # lines是未旋转的世界坐标,需要转换为局部坐标
+            model_lines = self.desktop_geometry.lines
+            self.rotation_angle = self.desktop_geometry.angle
+            self.visual_center = QPointF(self.desktop_geometry.center[0], self.desktop_geometry.center[1])
 
-        # 在修改位置和旋转之前调用 prepareGeometryChange()
-        self.prepareGeometryChange()
+            # 在修改位置和旋转之前调用 prepareGeometryChange()
+            self.prepareGeometryChange()
 
-        self.setPos(self.visual_center)
-        self.setRotation(self.rotation_angle)
+            self.setPos(self.visual_center)
+            self.setRotation(self.rotation_angle)
 
-        # 转换为局部坐标: local = world - center
-        self.polygons = []
-        for i, line in enumerate(model_lines):
-            local_poly = QPolygonF()
-            for x, y in line:
-                local_poly.append(QPointF(x - self.visual_center.x(), y - self.visual_center.y()))
-            self.polygons.append(local_poly)
+            # 转换为局部坐标: local = world - center
+            self.polygons = []
+            for i, line in enumerate(model_lines):
+                local_poly = QPolygonF()
+                for x, y in line:
+                    local_poly.append(QPointF(x - self.visual_center.x(), y - self.visual_center.y()))
+                self.polygons.append(local_poly)
 
+            # 更新白框和绿框
+            self._update_frames_from_geometry(self.desktop_geometry)
 
-        # 更新白框和绿框
-        self._update_frames_from_geometry(self.desktop_geometry)
+            # 再次调用 prepareGeometryChange() 确保 shape() 缓存被清除
+            self.prepareGeometryChange()
 
-        # 再次调用 prepareGeometryChange() 确保 shape() 缓存被清除
-        self.prepareGeometryChange()
+            # 恢复选中状态
+            if was_selected != self.isSelected():
+                self.setSelected(was_selected)
 
-        # 恢复选中状态
-        if was_selected != self.isSelected():
-            self.setSelected(was_selected)
+            self.update()
 
-        self.update()
+            # 强制刷新场景空间索引 - 使用旧+新区域的并集
+            if self.scene() and old_scene_rect is not None:
+                from PyQt6.QtWidgets import QGraphicsScene
+                new_scene_rect = self.sceneBoundingRect()
+                # 合并旧和新的区域，确保空间索引完全更新
+                update_rect = old_scene_rect.united(new_scene_rect)
+                self.scene().invalidate(update_rect, QGraphicsScene.SceneLayer.ItemLayer)
+                self.scene().update(update_rect)
 
-        # 强制刷新场景空间索引 - 使用旧+新区域的并集
-        if self.scene() and old_scene_rect is not None:
-            from PyQt6.QtWidgets import QGraphicsScene
-            new_scene_rect = self.sceneBoundingRect()
-            # 合并旧和新的区域，确保空间索引完全更新
-            update_rect = old_scene_rect.united(new_scene_rect)
-            self.scene().invalidate(update_rect, QGraphicsScene.SceneLayer.ItemLayer)
-            self.scene().update(update_rect)
-            
         except (RuntimeError, AttributeError) as e:
             # Item可能在更新过程中被删除
             print(f"[RegionTextItem] Warning: update_from_data failed: {e}")

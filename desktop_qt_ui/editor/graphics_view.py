@@ -169,53 +169,52 @@ class GraphicsView(QGraphicsView):
             if hasattr(self, '_region_items'):
                 self._region_items.clear()
 
-        # 清空image items
-        if self._image_item and self._image_item.scene():
-            self.scene.removeItem(self._image_item)
-            self._image_item = None
+            # 清空image items
+            if self._image_item and self._image_item.scene():
+                self.scene.removeItem(self._image_item)
+                self._image_item = None
 
-        if self._inpainted_image_item and self._inpainted_image_item.scene():
-            self.scene.removeItem(self._inpainted_image_item)
-            self._inpainted_image_item = None
+            if self._inpainted_image_item and self._inpainted_image_item.scene():
+                self.scene.removeItem(self._inpainted_image_item)
+                self._inpainted_image_item = None
 
-        # 清空mask items
-        if self._raw_mask_item and self._raw_mask_item.scene():
-            self.scene.removeItem(self._raw_mask_item)
-            self._raw_mask_item = None
+            # 清空mask items
+            if self._raw_mask_item and self._raw_mask_item.scene():
+                self.scene.removeItem(self._raw_mask_item)
+                self._raw_mask_item = None
 
-        if self._refined_mask_item and self._refined_mask_item.scene():
-            self.scene.removeItem(self._refined_mask_item)
-            self._refined_mask_item = None
-        
-        if self._removed_mask_item and self._removed_mask_item.scene():
-            self.scene.removeItem(self._removed_mask_item)
-            self._removed_mask_item = None
-        
-        # 清空预览项（文本框、几何编辑、蒙版绘制等）
-        if self._textbox_preview_item and self._textbox_preview_item.scene():
-            self.scene.removeItem(self._textbox_preview_item)
-            self._textbox_preview_item = None
-        
-        if self._geometry_preview_item and self._geometry_preview_item.scene():
-            self.scene.removeItem(self._geometry_preview_item)
-            self._geometry_preview_item = None
-        
-        if self._preview_item and self._preview_item.scene():
-            self.scene.removeItem(self._preview_item)
-            self._preview_item = None
+            if self._refined_mask_item and self._refined_mask_item.scene():
+                self.scene.removeItem(self._refined_mask_item)
+                self._refined_mask_item = None
 
-        # 清空缓存
-        if hasattr(self, '_text_render_cache'):
-            self._text_render_cache.clear()
-        self._text_blocks_cache = []
-        self._dst_points_cache = []
+            if self._removed_mask_item and self._removed_mask_item.scene():
+                self.scene.removeItem(self._removed_mask_item)
+                self._removed_mask_item = None
 
-        # 重置所有绘制状态
-        self._is_drawing = False
-        self._is_drawing_geometry = False
-        self._is_drawing_textbox = False
-        self._last_edited_region_index = None
-        
+            # 清空预览项（文本框、几何编辑、蒙版绘制等）
+            if self._textbox_preview_item and self._textbox_preview_item.scene():
+                self.scene.removeItem(self._textbox_preview_item)
+                self._textbox_preview_item = None
+
+            if self._geometry_preview_item and self._geometry_preview_item.scene():
+                self.scene.removeItem(self._geometry_preview_item)
+                self._geometry_preview_item = None
+
+            if self._preview_item and self._preview_item.scene():
+                self.scene.removeItem(self._preview_item)
+                self._preview_item = None
+
+            # 清空缓存
+            if hasattr(self, '_text_render_cache'):
+                self._text_render_cache.clear()
+            self._text_blocks_cache = []
+            self._dst_points_cache = []
+
+            # 重置所有绘制状态
+            self._is_drawing = False
+            self._is_drawing_geometry = False
+            self._is_drawing_textbox = False
+            self._last_edited_region_index = None
         except (RuntimeError, AttributeError) as e:
             # 清理过程中可能遇到已删除的对象
             print(f"[View] Warning: Error during clear_all_state: {e}")
@@ -569,123 +568,127 @@ class GraphicsView(QGraphicsView):
                         item.set_dst_points(None)  # 清除绿框数据
                     continue
 
-            region_data = self.model.get_region_by_index(i)
-            if not region_data: continue
+                region_data = self.model.get_region_by_index(i)
+                if not region_data:
+                    continue
 
-            # --- FIX: Create a temporary un-rotated text block for rendering ---
-            render_region_data = region_data.copy()
-            render_region_data['angle'] = 0
+                # --- FIX: Create a temporary un-rotated text block for rendering ---
+                render_region_data = region_data.copy()
+                render_region_data['angle'] = 0
 
-            constructor_args = render_region_data.copy()
-            if 'lines' in constructor_args and isinstance(constructor_args['lines'], list):
-                constructor_args['lines'] = np.array(constructor_args['lines'])
-            if 'font_color' in constructor_args and isinstance(constructor_args['font_color'], str):
-                hex_color = constructor_args.pop('font_color')
+                constructor_args = render_region_data.copy()
+                if 'lines' in constructor_args and isinstance(constructor_args['lines'], list):
+                    constructor_args['lines'] = np.array(constructor_args['lines'])
+                if 'font_color' in constructor_args and isinstance(constructor_args['font_color'], str):
+                    hex_color = constructor_args.pop('font_color')
+                    try:
+                        r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+                        constructor_args['fg_color'] = (r, g, b)
+                    except (ValueError, TypeError):
+                        constructor_args['fg_color'] = (0, 0, 0)
+                elif 'fg_colors' in constructor_args:
+                    constructor_args['fg_color'] = constructor_args.pop('fg_colors')
+                if 'bg_colors' in constructor_args:
+                    constructor_args['bg_color'] = constructor_args.pop('bg_colors')
+
+                # 使用缓存中计算好的 font_size（经过 resize_regions_to_font_size 计算的）
+                if text_block is not None and hasattr(text_block, 'font_size'):
+                    constructor_args['font_size'] = text_block.font_size
+
                 try:
-                    r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
-                    constructor_args['fg_color'] = (r, g, b)
-                except (ValueError, TypeError): constructor_args['fg_color'] = (0, 0, 0)
-            elif 'fg_colors' in constructor_args: constructor_args['fg_color'] = constructor_args.pop('fg_colors')
-            if 'bg_colors' in constructor_args: constructor_args['bg_color'] = constructor_args.pop('bg_colors')
-            
-            # 使用缓存中计算好的 font_size（经过 resize_regions_to_font_size 计算的）
-            if text_block is not None and hasattr(text_block, 'font_size'):
-                constructor_args['font_size'] = text_block.font_size
-            
-            try:
-                unrotated_text_block = TextBlock(**constructor_args)
-            except Exception as e:
-                print(f"[View] Failed to create unrotated TextBlock for full update on index {i}: {e}")
-                item.update_text_pixmap(QPixmap(), QPointF(0, 0))
-                item.set_dst_points(None)  # 清除绿框数据
-                continue
-            # --- END FIX ---
+                    unrotated_text_block = TextBlock(**constructor_args)
+                except Exception as e:
+                    print(f"[View] Failed to create unrotated TextBlock for full update on index {i}: {e}")
+                    item.update_text_pixmap(QPixmap(), QPointF(0, 0))
+                    item.set_dst_points(None)  # 清除绿框数据
+                    continue
+                # --- END FIX ---
 
-            render_params = render_parameter_service.export_parameters_for_backend(i, region_data)
-            # 同步算法计算的 font_size 到 render_params，确保缓存键使用正确的值
-            render_params['font_size'] = unrotated_text_block.font_size
-            
-            # Set region-specific font_path for cache key
-            region_font_path = region_data.get('font_path', '')
-            if region_font_path and os.path.exists(region_font_path):
-                render_params['font_path'] = region_font_path
-            
-            cache_key = (
-                unrotated_text_block.get_translation_for_rendering(),
-                tuple(map(tuple, self._dst_points_cache[i].reshape(-1, 2))),
-                render_params.get('font_path'),
-                render_params.get('font_size'),
-                render_params.get('bold'),
-                render_params.get('italic'),
-                render_params.get('font_weight'),
-                tuple(render_params.get('font_color', (0,0,0))),
-                tuple(render_params.get('text_stroke_color', (0,0,0))),
-                render_params.get('opacity'),
-                render_params.get('alignment'),
-                render_params.get('direction'),
-                render_params.get('vertical'),
-                render_params.get('line_spacing'),
-                render_params.get('letter_spacing'),
-                render_params.get('layout_mode'),
-                render_params.get('disable_auto_wrap'),
-                render_params.get('hyphenate'),
-                render_params.get('font_size_offset'),
-                render_params.get('font_size_minimum'),
-                render_params.get('max_font_size'),
-                render_params.get('font_scale_ratio'),
-                render_params.get('center_text_in_bubble'),
-                render_params.get('text_stroke_width'),
-                render_params.get('shadow_radius'),
-                render_params.get('shadow_strength'),
-                tuple(render_params.get('shadow_color', (0,0,0))),
-                tuple(render_params.get('shadow_offset', [0.0, 0.0])),
-                render_params.get('disable_font_border'),
-                render_params.get('auto_rotate_symbols'),
-            )
-            cached_result = self._text_render_cache.get(cache_key)
+                render_params = render_parameter_service.export_parameters_for_backend(i, region_data)
+                # 同步算法计算的 font_size 到 render_params，确保缓存键使用正确的值
+                render_params['font_size'] = unrotated_text_block.font_size
 
-            if cached_result is None:
-                # Set font for this region if specified
+                # Set region-specific font_path for cache key
                 region_font_path = region_data.get('font_path', '')
                 if region_font_path and os.path.exists(region_font_path):
-                    text_renderer_backend.update_font_config(region_font_path)
-                else:
-                    # Use default font from global parameters
-                    default_params_obj = render_parameter_service.get_default_parameters()
-                    font_path = default_params_obj.font_path
-                    if font_path:
-                        text_renderer_backend.update_font_config(font_path)
-                
-                identity_transform = QTransform()
-                render_result = text_renderer_backend.render_text_for_region(
-                    unrotated_text_block,
-                    self._dst_points_cache[i],
-                    identity_transform,
-                    render_params,
-                    pure_zoom=1.0,
-                    total_regions=len(self._text_blocks_cache)
+                    render_params['font_path'] = region_font_path
+
+                cache_key = (
+                    unrotated_text_block.get_translation_for_rendering(),
+                    tuple(map(tuple, self._dst_points_cache[i].reshape(-1, 2))),
+                    render_params.get('font_path'),
+                    render_params.get('font_size'),
+                    render_params.get('bold'),
+                    render_params.get('italic'),
+                    render_params.get('font_weight'),
+                    tuple(render_params.get('font_color', (0,0,0))),
+                    tuple(render_params.get('text_stroke_color', (0,0,0))),
+                    render_params.get('opacity'),
+                    render_params.get('alignment'),
+                    render_params.get('direction'),
+                    render_params.get('vertical'),
+                    render_params.get('line_spacing'),
+                    render_params.get('letter_spacing'),
+                    render_params.get('layout_mode'),
+                    render_params.get('disable_auto_wrap'),
+                    render_params.get('hyphenate'),
+                    render_params.get('font_size_offset'),
+                    render_params.get('font_size_minimum'),
+                    render_params.get('max_font_size'),
+                    render_params.get('font_scale_ratio'),
+                    render_params.get('center_text_in_bubble'),
+                    render_params.get('text_stroke_width'),
+                    render_params.get('shadow_radius'),
+                    render_params.get('shadow_strength'),
+                    tuple(render_params.get('shadow_color', (0,0,0))),
+                    tuple(render_params.get('shadow_offset', [0.0, 0.0])),
+                    render_params.get('disable_font_border'),
+                    render_params.get('auto_rotate_symbols'),
                 )
+                cached_result = self._text_render_cache.get(cache_key)
 
-                if render_result:
-                    pixmap, pos = render_result
-                    self._text_render_cache[cache_key] = (pixmap, pos)
-                    cached_result = (pixmap, pos)
-            
-            if cached_result:
-                pixmap, pos = cached_result
-                # 不传递 angle，因为 item 已经通过 setRotation() 设置了旋转
-                pivot = None
+                if cached_result is None:
+                    # Set font for this region if specified
+                    region_font_path = region_data.get('font_path', '')
+                    if region_font_path and os.path.exists(region_font_path):
+                        text_renderer_backend.update_font_config(region_font_path)
+                    else:
+                        # Use default font from global parameters
+                        default_params_obj = render_parameter_service.get_default_parameters()
+                        font_path = default_params_obj.font_path
+                        if font_path:
+                            text_renderer_backend.update_font_config(font_path)
 
-                if item.scene() is not None:
-                    item.update_text_pixmap(pixmap, pos, 0, pivot)
-            else:
-                if item.scene() is not None:
-                    item.update_text_pixmap(QPixmap(), QPointF(0, 0))
+                    identity_transform = QTransform()
+                    render_result = text_renderer_backend.render_text_for_region(
+                        unrotated_text_block,
+                        self._dst_points_cache[i],
+                        identity_transform,
+                        render_params,
+                        pure_zoom=1.0,
+                        total_regions=len(self._text_blocks_cache)
+                    )
 
-            # 无论是否有渲染结果,都设置绿框数据(即使 translation 为空)
-            if item.scene() is not None and i < len(self._dst_points_cache):
-                item.set_dst_points(self._dst_points_cache[i])
-                
+                    if render_result:
+                        pixmap, pos = render_result
+                        self._text_render_cache[cache_key] = (pixmap, pos)
+                        cached_result = (pixmap, pos)
+
+                if cached_result:
+                    pixmap, pos = cached_result
+                    # 不传递 angle，因为 item 已经通过 setRotation() 设置了旋转
+                    pivot = None
+
+                    if item.scene() is not None:
+                        item.update_text_pixmap(pixmap, pos, 0, pivot)
+                else:
+                    if item.scene() is not None:
+                        item.update_text_pixmap(QPixmap(), QPointF(0, 0))
+
+                # 无论是否有渲染结果,都设置绿框数据(即使 translation 为空)
+                if item.scene() is not None and i < len(self._dst_points_cache):
+                    item.set_dst_points(self._dst_points_cache[i])
+
         except (RuntimeError, AttributeError) as e:
             # 处理item在更新过程中被删除的情况
             print(f"[View] Warning: Text visuals update failed: {e}")
@@ -814,90 +817,92 @@ class GraphicsView(QGraphicsView):
             dst_points = self._dst_points_cache[index] if index < len(self._dst_points_cache) else None
 
             if text_block is None or dst_points is None:
-            item.update_text_pixmap(QPixmap(), QPointF(0, 0))
-            item.set_dst_points(None)
-            return
-
-        region_data = self.model.get_region_by_index(index)
-        if not region_data:
-            return
-
-        # 创建未旋转的 text block 用于渲染
-        render_region_data = region_data.copy()
-        render_region_data['angle'] = 0
-
-        constructor_args = render_region_data.copy()
-        if 'lines' in constructor_args and isinstance(constructor_args['lines'], list):
-            constructor_args['lines'] = np.array(constructor_args['lines'])
-        if 'font_color' in constructor_args and isinstance(constructor_args['font_color'], str):
-            hex_color = constructor_args.pop('font_color')
-            try:
-                r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
-                constructor_args['fg_color'] = (r, g, b)
-            except (ValueError, TypeError):
-                constructor_args['fg_color'] = (0, 0, 0)
-        elif 'fg_colors' in constructor_args:
-            constructor_args['fg_color'] = constructor_args.pop('fg_colors')
-        if 'bg_colors' in constructor_args:
-            constructor_args['bg_color'] = constructor_args.pop('bg_colors')
-
-        # 【关键修复】转换direction字段：'horizontal'→'h', 'vertical'→'v'
-        if 'direction' in constructor_args:
-            dir_val = constructor_args['direction']
-            if dir_val == 'horizontal':
-                constructor_args['direction'] = 'h'
-            elif dir_val == 'vertical':
-                constructor_args['direction'] = 'v'
-
-        # 使用缓存中计算好的 font_size（经过 resize_regions_to_font_size 计算的）
-        if text_block is not None and hasattr(text_block, 'font_size'):
-            constructor_args['font_size'] = text_block.font_size
-
-        try:
-            unrotated_text_block = TextBlock(**constructor_args)
-        except Exception as e:
-            print(f"[View] Failed to create unrotated TextBlock for region {index}: {e}")
-            item.update_text_pixmap(QPixmap(), QPointF(0, 0))
-            item.set_dst_points(None)
-            return
-
-        render_parameter_service = get_render_parameter_service()
-        render_params = render_parameter_service.export_parameters_for_backend(index, region_data)
-        # 同步算法计算的 font_size 到 render_params
-        render_params['font_size'] = unrotated_text_block.font_size
-        
-        # Set font for this region if specified
-        region_font_path = region_data.get('font_path', '')
-        if region_font_path and os.path.exists(region_font_path):
-            text_renderer_backend.update_font_config(region_font_path)
-        else:
-            # Use default font from global parameters
-            default_params_obj = render_parameter_service.get_default_parameters()
-            font_path = default_params_obj.font_path
-            if font_path:
-                text_renderer_backend.update_font_config(font_path)
-
-        # 渲染文字（不使用缓存，因为几何已经改变）
-        identity_transform = QTransform()
-        render_result = text_renderer_backend.render_text_for_region(
-            unrotated_text_block,
-            self._dst_points_cache[index],
-            identity_transform,
-            render_params,
-            pure_zoom=1.0,
-            total_regions=len(self._text_blocks_cache)
-        )
-
-        if render_result:
-            pixmap, pos = render_result
-            # 不传递 angle，因为 item 已经通过 setRotation() 设置了旋转
-            if item.scene() is not None:  # 再次检查item是否仍有效
-                item.update_text_pixmap(pixmap, pos, 0, None)
-                item.set_dst_points(dst_points)
-        else:
-            if item.scene() is not None:
                 item.update_text_pixmap(QPixmap(), QPointF(0, 0))
                 item.set_dst_points(None)
+                return
+
+            region_data = self.model.get_region_by_index(index)
+            if not region_data:
+                return
+
+            # 创建未旋转的 text block 用于渲染
+            render_region_data = region_data.copy()
+            render_region_data['angle'] = 0
+
+            constructor_args = render_region_data.copy()
+            if 'lines' in constructor_args and isinstance(constructor_args['lines'], list):
+                constructor_args['lines'] = np.array(constructor_args['lines'])
+            if 'font_color' in constructor_args and isinstance(constructor_args['font_color'], str):
+                hex_color = constructor_args.pop('font_color')
+                try:
+                    r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+                    constructor_args['fg_color'] = (r, g, b)
+                except (ValueError, TypeError):
+                    constructor_args['fg_color'] = (0, 0, 0)
+            elif 'fg_colors' in constructor_args:
+                constructor_args['fg_color'] = constructor_args.pop('fg_colors')
+            if 'bg_colors' in constructor_args:
+                constructor_args['bg_color'] = constructor_args.pop('bg_colors')
+
+            # 【关键修复】转换direction字段：'horizontal'→'h', 'vertical'→'v'
+            if 'direction' in constructor_args:
+                dir_val = constructor_args['direction']
+                if dir_val == 'horizontal':
+                    constructor_args['direction'] = 'h'
+                elif dir_val == 'vertical':
+                    constructor_args['direction'] = 'v'
+
+            # 使用缓存中计算好的 font_size（经过 resize_regions_to_font_size 计算的）
+            if text_block is not None and hasattr(text_block, 'font_size'):
+                constructor_args['font_size'] = text_block.font_size
+
+            try:
+                unrotated_text_block = TextBlock(**constructor_args)
+            except Exception as e:
+                print(f"[View] Failed to create unrotated TextBlock for region {index}: {e}")
+                item.update_text_pixmap(QPixmap(), QPointF(0, 0))
+                item.set_dst_points(None)
+                return
+
+            render_parameter_service = get_render_parameter_service()
+            render_params = render_parameter_service.export_parameters_for_backend(index, region_data)
+            # 同步算法计算的 font_size 到 render_params
+            render_params['font_size'] = unrotated_text_block.font_size
+
+            # Set font for this region if specified
+            region_font_path = region_data.get('font_path', '')
+            if region_font_path and os.path.exists(region_font_path):
+                text_renderer_backend.update_font_config(region_font_path)
+            else:
+                # Use default font from global parameters
+                default_params_obj = render_parameter_service.get_default_parameters()
+                font_path = default_params_obj.font_path
+                if font_path:
+                    text_renderer_backend.update_font_config(font_path)
+
+            # 渲染文字（不使用缓存，因为几何已经改变）
+            identity_transform = QTransform()
+            render_result = text_renderer_backend.render_text_for_region(
+                unrotated_text_block,
+                self._dst_points_cache[index],
+                identity_transform,
+                render_params,
+                pure_zoom=1.0,
+                total_regions=len(self._text_blocks_cache)
+            )
+
+            if render_result:
+                pixmap, pos = render_result
+                # 不传递 angle，因为 item 已经通过 setRotation() 设置了旋转
+                if item.scene() is not None:  # 再次检查item是否仍有效
+                    item.update_text_pixmap(pixmap, pos, 0, None)
+                    item.set_dst_points(dst_points)
+            else:
+                if item.scene() is not None:
+                    item.update_text_pixmap(QPixmap(), QPointF(0, 0))
+                    item.set_dst_points(None)
+        except Exception as e:
+            print(f"[View] Error in _update_single_region_text_visual for index {index}: {e}")
                 
         except (RuntimeError, AttributeError) as e:
             # Item可能在渲染过程中被删除
