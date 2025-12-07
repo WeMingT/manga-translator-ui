@@ -233,20 +233,22 @@ echo.
 
 echo [警告] 将强制同步到远程分支,本地修改将被覆盖
 set /p confirm="是否继续更新? (y/n): "
-if /i not "!confirm!"=="y" (
-    echo 取消更新
-    goto menu
-)
+if /i not "!confirm!"=="y" goto :update_code_cancel
+
+echo.
+echo 获取远程更新...
+"!GIT!" fetch origin
 
 echo.
 echo 正在强制同步到远程分支...
-"%GIT%" reset --hard origin/main
+"!GIT!" reset --hard origin/main && echo [OK] 代码更新完成 && goto :update_code_done
+echo [ERROR] 代码更新失败
+goto :update_code_done
 
-if %ERRORLEVEL% == 0 (
-    echo [OK] 代码更新完成
-) else (
-    echo [ERROR] 代码更新失败
-)
+:update_code_cancel
+echo 取消更新
+
+:update_code_done
 pause
 goto menu
 
@@ -298,18 +300,20 @@ if /i not "!confirm!"=="y" (
 
 echo.
 echo 获取远程更新...
-"%GIT%" fetch origin
+"!GIT!" fetch origin
 
 echo.
 echo 正在强制同步到远程分支...
-"%GIT%" reset --hard origin/main
-
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] 代码更新失败
-    pause
-    goto menu
-)
+"!GIT!" reset --hard origin/main || goto :full_update_code_failed
 echo [OK] 代码更新完成
+goto :full_update_deps
+
+:full_update_code_failed
+echo [ERROR] 代码更新失败
+pause
+goto menu
+
+:full_update_deps
 
 echo.
 echo [2/2] 更新依赖...

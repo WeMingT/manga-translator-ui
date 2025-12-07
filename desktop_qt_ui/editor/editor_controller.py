@@ -1350,9 +1350,6 @@ class EditorController(QObject):
 
         # 清除选择
         self.model.set_selection([])
-        
-        except Exception as e:
-            self.logger.error(f"[DELETE] 删除区域时发生错误: {e}", exc_info=True)
 
     def enter_drawing_mode(self):
         """进入绘制模式以添加新文本框"""
