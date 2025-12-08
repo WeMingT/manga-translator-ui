@@ -285,6 +285,20 @@ python -m manga_translator --help
 
 ---
 
+## ❤️ 支持作者
+
+如果这个项目对你有帮助，欢迎请作者喝杯咖啡 ☕
+
+<div align="center">
+
+<img src="doc/images/mm_reward_qrcode_1765200960689.png" width="200" alt="打赏码">
+
+感谢每一位支持者的鼓励！
+
+</div>
+
+---
+
 ## 📝 许可证
 
 本项目基于 GPL-3.0 许可证开源。
