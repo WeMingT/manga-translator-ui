@@ -4,7 +4,7 @@ Repository for user resource management (prompts and fonts).
 
 from typing import List, Optional
 from .base_repository import BaseJSONRepository
-from ..core.models import PromptResource, FontResource
+from ..models.resource_models import PromptResource, FontResource
 
 
 class ResourceRepository(BaseJSONRepository):
