@@ -16,10 +16,10 @@ import uuid
 
 # Flask imports removed - using FastAPI now
 
-from ..models.session_models import SessionOwnership, SessionAccessAttempt
-from ..repositories.session_repository import SessionRepository
-from ..core.permission_service_v2 import EnhancedPermissionService
-from ..repositories.permission_repository import PermissionRepository
+from manga_translator.server.models.session_models import SessionOwnership, SessionAccessAttempt
+from manga_translator.server.repositories.session_repository import SessionRepository
+from manga_translator.server.core.permission_service_v2 import EnhancedPermissionService
+from manga_translator.server.repositories.permission_repository import PermissionRepository
 
 
 class SessionSecurityService:

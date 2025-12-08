@@ -10,10 +10,10 @@ from datetime import datetime, UTC
 from typing import Optional, Dict, List
 from pathlib import Path
 
-from ..repositories.quota_repository import QuotaRepository
-from ..repositories.permission_repository import PermissionRepository
-from ..models.quota_models import QuotaLimit, QuotaStats
-from ..core.group_service import GroupService
+from manga_translator.server.repositories.quota_repository import QuotaRepository
+from manga_translator.server.repositories.permission_repository import PermissionRepository
+from manga_translator.server.models.quota_models import QuotaLimit, QuotaStats
+from manga_translator.server.core.group_service import GroupService
 
 logger = logging.getLogger(__name__)
 

@@ -8,8 +8,8 @@
 import logging
 from typing import Dict, Optional, Any
 
-from ..repositories.permission_repository import PermissionRepository
-from ..models.permission_models import UserPermission
+from manga_translator.server.repositories.permission_repository import PermissionRepository
+from manga_translator.server.models.permission_models import UserPermission
 
 logger = logging.getLogger(__name__)
 

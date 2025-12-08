@@ -13,9 +13,9 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from ..core.middleware import require_admin
-from ..core.models import Session
-from ..core.cleanup_service import CleanupSchedulerService
+from manga_translator.server.core.middleware import require_admin
+from manga_translator.server.core.models import Session
+from manga_translator.server.core.cleanup_service import CleanupSchedulerService
 
 logger = logging.getLogger(__name__)
 
@@ -321,8 +321,8 @@ async def preview_cleanup(
             filters['session_tokens'] = request.session_tokens
         
         # Get sessions that would be deleted
-        from ..repositories.translation_repository import TranslationRepository
-        from ..models import TranslationResult
+        from manga_translator.server.repositories.translation_repository import TranslationRepository
+        from manga_translator.server.models import TranslationResult
         from datetime import datetime
         
         translation_repo = TranslationRepository(
