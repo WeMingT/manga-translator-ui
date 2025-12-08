@@ -11,11 +11,14 @@ This service handles:
 import os
 import uuid
 import shutil
+import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..models import TranslationResult
+
+logger = logging.getLogger(__name__)
 from ..repositories.translation_repository import TranslationRepository
 
 
