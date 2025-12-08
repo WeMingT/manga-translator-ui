@@ -7,10 +7,9 @@ This module contains Web UI related endpoints for the manga translator server.
 import os
 import shutil
 from fastapi import APIRouter, Form, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from manga_translator.server.core.config_manager import admin_settings
-from manga_translator.server.core.auth import valid_admin_tokens
 
 router = APIRouter(tags=["web"])
 

@@ -7,14 +7,13 @@ This module contains configuration and metadata endpoints for the manga translat
 import os
 import json
 from typing import Optional
-from fastapi import APIRouter, Header, Depends
+from fastapi import APIRouter, Header
 
 from manga_translator.server.core.config_manager import (
     load_default_config_dict, admin_settings, AVAILABLE_WORKFLOWS, FONTS_DIR
 )
 from manga_translator.utils import BASE_PATH
-from manga_translator.server.core.middleware import require_auth, get_services
-from manga_translator.server.core.models import Session
+from manga_translator.server.core.middleware import get_services
 
 router = APIRouter(tags=["config"])
 

@@ -7,8 +7,7 @@
 
 import os
 import logging
-import shutil
-from typing import List, Optional, Tuple, BinaryIO
+from typing import List, Optional
 from pathlib import Path
 
 from ..repositories.resource_repository import ResourceRepository

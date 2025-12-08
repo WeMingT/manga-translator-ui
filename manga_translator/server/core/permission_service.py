@@ -5,8 +5,8 @@
 """
 
 import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime, date
+from typing import Dict, Optional, Any
+from datetime import date
 from collections import defaultdict
 
 from .models import UserPermissions

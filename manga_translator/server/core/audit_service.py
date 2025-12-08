@@ -10,7 +10,6 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
-import os
 import shutil
 
 from .models import AuditEvent

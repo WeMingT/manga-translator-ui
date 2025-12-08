@@ -6,7 +6,7 @@ from PIL import Image
 from fastapi import HTTPException
 from fastapi.requests import Request
 
-from manga_translator import Config, MangaTranslator
+from manga_translator import Config
 from manga_translator.server.instance import executor_instances
 from manga_translator.server.sent_data_internal import NotifyType
 

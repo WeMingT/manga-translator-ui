@@ -9,7 +9,6 @@ from typing import Optional, Dict, Any
 
 from .account_service import AccountService
 from .permission_service_v2 import EnhancedPermissionService, get_enhanced_permission_service
-from ..repositories.permission_repository import PermissionRepository
 
 logger = logging.getLogger(__name__)
 

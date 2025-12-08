@@ -7,7 +7,6 @@
 
 import logging
 from typing import Dict, Optional, Any
-from datetime import datetime
 
 from ..repositories.permission_repository import PermissionRepository
 from ..models.permission_models import UserPermission

@@ -9,7 +9,7 @@ import logging
 import os
 import shutil
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 

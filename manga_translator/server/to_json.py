@@ -1,10 +1,8 @@
-import base64
 import struct
-from typing import Dict, List, Annotated
+from typing import List, Annotated
 
-import cv2
 import numpy as np
-from pydantic import BaseModel, Field, WithJsonSchema
+from pydantic import BaseModel, WithJsonSchema
 
 from manga_translator import Context
 from manga_translator.utils import TextBlock
