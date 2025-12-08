@@ -6,10 +6,7 @@ This module provides data access for session ownership and access control.
 
 import os
 import json
-from typing import List, Optional, Dict
-from datetime import datetime
-
-from .base_repository import BaseJSONRepository
+from typing import List, Optional
 from ..models.session_models import SessionOwnership, SessionAccessAttempt
 
 

@@ -9,10 +9,10 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from manga_translator.server.core.models import Session
-from manga_translator.server.core.middleware import require_admin, get_services
+from manga_translator.server.core.middleware import require_admin
 from manga_translator.server.core.audit_service import AuditService
 
 logger = logging.getLogger('manga_translator.server')

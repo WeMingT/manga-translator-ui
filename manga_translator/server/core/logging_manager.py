@@ -4,7 +4,6 @@
 负责日志队列管理、任务日志隔离和日志导出功能。
 """
 
-import io
 import logging
 import threading
 import uuid

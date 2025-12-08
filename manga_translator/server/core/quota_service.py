@@ -6,7 +6,7 @@
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, UTC
 from typing import Optional, Dict, List
 from pathlib import Path
 

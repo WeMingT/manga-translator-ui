@@ -6,7 +6,7 @@ import os
 import re
 import json
 from base64 import b64decode
-from typing import Union, Optional
+from typing import Union
 
 import requests
 from PIL import Image
@@ -14,10 +14,7 @@ from fastapi import Request, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
-from manga_translator import Config, MangaTranslator
-from manga_translator.server.myqueue import task_queue, wait_in_queue, QueueElement, BatchQueueElement
-from manga_translator.server.streaming import notify, stream
-from manga_translator.utils import BASE_PATH
+from manga_translator import Config
 from contextlib import asynccontextmanager
 import logging
 

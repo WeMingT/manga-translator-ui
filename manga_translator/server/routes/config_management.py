@@ -5,7 +5,7 @@ Provides endpoints for managing .env configurations, presets, and user configs.
 """
 
 from typing import Optional, Dict, List
-from fastapi import APIRouter, HTTPException, Header, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from ..core.config_management_service import ConfigManagementService

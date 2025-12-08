@@ -5,15 +5,12 @@
 """
 
 import logging
-from typing import List
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 
 from ..core.middleware import require_auth
 from ..core.models import Session
 from ..core.resource_service import ResourceManagementService
 from ..core.permission_integration import IntegratedPermissionService
-from ..repositories.resource_repository import ResourceRepository
-from ..models.resource_models import PromptResource, FontResource
 
 logger = logging.getLogger(__name__)
 

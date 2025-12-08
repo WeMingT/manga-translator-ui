@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import secrets
@@ -7,7 +6,6 @@ import signal
 import subprocess
 import sys
 from argparse import Namespace
-import asyncio
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
@@ -16,15 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
-from pathlib import Path
 
-from manga_translator import Config
 from manga_translator.server.instance import ExecutorInstance, executor_instances
-from manga_translator.server.myqueue import task_queue
 import logging
 
 # Import core modules
-from manga_translator.server.core import config_manager, auth, logging_manager, task_manager, response_utils
+from manga_translator.server.core import config_manager, logging_manager, task_manager
 
 # 初始化服务器配置文件（如果不存在则从模板复制）
 config_manager.init_server_config_file()
@@ -353,8 +348,6 @@ def init_translator(use_gpu=False, verbose=False):
 def run_server(args):
     """启动 Web API 服务器（纯API模式，不带界面）"""
     import uvicorn
-    
-    global nonce
     
     # 设置服务器配置（在 prepare 之前）
     task_manager.server_config['use_gpu'] = getattr(args, 'use_gpu', False)

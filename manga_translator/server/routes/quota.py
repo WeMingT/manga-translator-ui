@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from ..core.middleware import require_auth, require_admin
 from ..core.models import Session
 from ..core.quota_service import QuotaManagementService
-from ..models.quota_models import QuotaStats
 
 logger = logging.getLogger(__name__)
 

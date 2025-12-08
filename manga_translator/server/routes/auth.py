@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import logging
 
-from manga_translator.server.core.config_manager import admin_settings, save_admin_settings
+from manga_translator.server.core.config_manager import admin_settings
 
 logger = logging.getLogger('manga_translator.server.routes.auth')
 

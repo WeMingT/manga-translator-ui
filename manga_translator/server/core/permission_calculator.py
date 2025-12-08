@@ -10,7 +10,7 @@
 
 import logging
 from typing import List, Set, Dict, Any, Optional
-from .models import UserAccount, UserPermissions
+from .models import UserAccount
 from .group_service import get_group_service
 
 logger = logging.getLogger(__name__)

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from ..core.middleware import require_auth, require_admin
+from ..core.middleware import require_admin
 from ..core.models import Session
 from ..core.cleanup_service import CleanupSchedulerService
 

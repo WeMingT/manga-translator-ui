@@ -8,7 +8,6 @@ import bcrypt
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pathlib import Path
 
 from .models import UserAccount, UserPermissions
 from .persistence import atomic_write_json, load_json

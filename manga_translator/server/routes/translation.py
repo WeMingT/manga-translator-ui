@@ -12,7 +12,6 @@ import tempfile
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 
-from manga_translator import Config
 from manga_translator.server.request_extraction import (
     get_ctx, while_streaming, TranslateRequest, BatchTranslateRequest, get_batch_ctx
 )

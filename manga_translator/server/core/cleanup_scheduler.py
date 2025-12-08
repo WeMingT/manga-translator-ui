@@ -7,7 +7,6 @@ It uses APScheduler to run cleanup operations on a daily schedule.
 
 import logging
 from typing import Optional, Dict
-from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 

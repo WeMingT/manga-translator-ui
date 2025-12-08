@@ -7,7 +7,7 @@
 import logging
 import os
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends, Query, Body, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -16,7 +16,6 @@ from ..core.models import Session
 from ..core.history_service import HistoryManagementService
 from ..core.search_service import SearchService
 from ..core.permission_integration import IntegratedPermissionService
-from ..models.translation_models import TranslationResult
 
 logger = logging.getLogger(__name__)
 

@@ -2,10 +2,9 @@
 Repository for user group management.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict
 from datetime import datetime, timezone
 from .base_repository import BaseJSONRepository
-from ..models.group_models import UserGroup
 
 
 class GroupRepository(BaseJSONRepository):
