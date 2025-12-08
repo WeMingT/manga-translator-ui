@@ -6,10 +6,45 @@
 
 ## 📋 目录
 
+- [模型选择建议](#模型选择建议)
 - [通用 API 配置说明](#通用-api-配置说明)
+- [硅基流动 API 配置](#硅基流动-api-配置)
 - [DeepSeek API 配置](#deepseek-api-配置)
 - [Google Gemini API 配置](#google-gemini-api-配置)
-- [其他 API 配置](#其他-api-配置)
+- [常见问题](#常见问题)
+
+---
+
+## 模型选择建议
+
+- **高质量翻译器**需要多模态模型（能"看图"的 AI），如 Grok、Gemini、ChatGPT 等，AI 能看到漫画画面，翻译更准确
+- 一般来说，参数量越大的模型翻译效果越好
+
+### 如何看参数量
+
+模型名称中通常包含参数量信息，例如：
+- `Qwen3-235B` → 2350 亿参数
+- `DeepSeek-V3-671B` → 6710 亿参数
+- `Llama-3-70B` → 700 亿参数
+
+参数量单位：`B` = Billion（十亿），所以 `235B` = 2350 亿参数
+
+### 多模态模型示例
+
+| 模型 | 平台 | 说明 |
+|------|------|------|
+| `gpt-5.2` | OpenAI | ChatGPT 最新多模态 |
+| `gemini-3-pro-preview` | Google | Gemini 最新多模态 |
+| `gemini-2.5-pro` | Google | Gemini 多模态 |
+| `grok-4.1` | xAI | Grok 最新多模态 |
+
+### 纯文字模型示例
+
+| 模型 | 平台 | 说明 |
+|------|------|------|
+| `deepseek-chat` | DeepSeek | 速度快 |
+| `deepseek-reasoner` | DeepSeek | 有思考，断句稳定 |
+| `Qwen/Qwen3-235B-A22B` | 硅基流动 | 通义千问3，2350亿参数 |
 
 ---
 
@@ -54,6 +89,36 @@ OpenAI 翻译器**几乎支持市面上所有模型**，因为几乎所有的 AI
   - 填写：`https://generativelanguage.googleapis.com`
   - 程序会自动添加 `/v1beta`
 - **使用 AI Studio 官方 key**：无需填写 API 地址（自动使用默认地址）
+
+---
+
+## 硅基流动 API 配置
+
+硅基流动（SiliconFlow）是国内 AI 平台，提供多种模型，新用户有赠送额度，价格便宜，国内访问速度快。
+
+> 💡 **优势**：新用户注册赠送额度，支持 Qwen3、DeepSeek 等多种模型，国内直连无需科学上网。
+
+### 1. 注册账号
+
+1. 访问 [硅基流动官网](https://cloud.siliconflow.cn/)
+2. 点击"注册"，使用手机号注册
+3. 完成验证
+
+### 2. 创建 API Key
+
+1. 登录后进入控制台
+2. 点击左侧"API 密钥"
+3. 点击"新建 API 密钥"
+4. 复制生成的 API Key
+
+### 3. 配置到程序中
+
+1. 打开程序
+2. 在"基础设置"→"翻译器"中选择"OpenAI"
+3. 在"高级设置"中填写：
+   - **API Key**：你的硅基流动 API Key
+   - **Base URL**：`https://api.siliconflow.cn/v1`
+   - **模型**：在 [模型广场](https://cloud.siliconflow.cn/models) 查看所有可用模型
 
 ---
 
@@ -102,78 +167,26 @@ DeepSeek 提供高质量、低成本的 AI 翻译服务，非常适合漫画翻�
 
 Google Gemini 是 Google 最新的多模态 AI 模型，性能强劲。
 
+> ⚠️ **注意**：Google AI Studio 已全面收费，不再提供免费额度。
+
 ### 1. 获取 API Key
 
-1. 访问 [Google AI Studio](https://makersuite.google.com/app/apikey)
+1. 访问 [Google AI Studio](https://aistudio.google.com/apikey)
 2. 登录 Google 账号
 3. 点击"Create API Key"
 4. 选择 Google Cloud 项目（或创建新项目）
 5. 复制生成的 API Key
 
-> 💡 **优势**：Gemini 提供每日免费额度，适合测试使用
-
-### 2. 模型选择
-
-Gemini 提供多种模型，各有不同的免费额度（每天）：
-
-| 模型 | 每分钟请求数 | 上下文长度 | 每日免费次数 | 推荐度 |
-|------|-------------|-----------|-------------|--------|
-| **gemini-2.5-pro** | 2 | 125,000 tokens | 50 | ⭐⭐⭐ 推荐，断句稳定 |
-| **gemini-2.5-flash** | 10 | 250,000 tokens | 250 | ⭐⭐ 推荐，速度快 |
-| gemini-2.5-flash-preview | 10 | 250,000 tokens | 250 | 预览版 |
-| gemini-2.5-flash-lite | 15 | 250,000 tokens | 1000 | 轻量版 |
-| gemini-2.5-flash-lite-preview | 15 | 250,000 tokens | 1000 | 轻量版预览 |
-| gemini-2.0-flash | 15 | 1,000,000 tokens | 200 | - |
-| gemini-2.0-flash-lite | 30 | 1,000,000 tokens | 200 | - |
-
-> ⚠️ **重要提示**：除了 `gemini-2.5-pro` 之外，其他模型的 **AI 断句可能不稳定**。如果需要稳定的断句效果，建议使用 Pro 模型。
-
-### 3. 配置到程序中
+### 2. 配置到程序中
 
 1. 打开程序
 2. 在"基础设置"→"翻译器"中选择"高质量翻译 Gemini"或"Gemini"
 3. 在"高级设置"中填写：
    - **API Key**：你的 Gemini API Key
-   - **Base URL**：如果使用 AI Studio 的官方 key，**无需填写**（自动使用默认地址）
+   - **Base URL**：无需填写（自动使用默认地址）
    - **模型**：
-     - `gemini-2.5-pro`：断句稳定，质量最高 ⭐ 强烈推荐
-     - `gemini-2.5-flash`：速度快，免费次数多 ⭐ 推荐
-
----
-
-## 其他 API 配置
-
-### DeepL API
-
-**特点**：专业翻译服务，质量高
-
-1. 访问 [DeepL API](https://www.deepl.com/pro-api)
-2. 注册账号并充值
-3. 获取 API Key
-4. 配置：
-
-```yaml
-deepl:
-  api_key: "your-deepl-api-key-here"
-```
-
-### 百度翻译 API
-
-**特点**：中文友好，价格便宜
-
-1. 访问 [百度翻译开放平台](https://fanyi-api.baidu.com/)
-2. 注册账号
-3. 创建应用，获取 APP ID 和密钥
-4. 在程序中选择"百度翻译"
-
-### 有道翻译 API
-
-**特点**：中文友好，有免费额度
-
-1. 访问 [有道智云](https://ai.youdao.com/)
-2. 注册账号
-3. 创建应用，获取应用 ID 和密钥
-4. 在程序中选择"有道翻译"
+     - `gemini-2.5-pro`：断句稳定，质量最高 ⭐ 推荐
+     - `gemini-2.5-flash`：速度快，价格便宜
 
 ---
 
@@ -183,8 +196,7 @@ deepl:
 
 **回答**：
 - **性价比最高**：DeepSeek（国内用户推荐）
-- **质量最高**：OpenAI GPT-4o
-- **免费试用**：Google Gemini
+- **质量最高**：OpenAI GPT-4o / Google Gemini
 
 ### Q2：API Key 泄露怎么办？
 
