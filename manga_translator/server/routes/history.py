@@ -11,11 +11,11 @@ from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from ..core.middleware import require_auth, require_admin
-from ..core.models import Session
-from ..core.history_service import HistoryManagementService
-from ..core.search_service import SearchService
-from ..core.permission_integration import IntegratedPermissionService
+from manga_translator.server.core.middleware import require_auth, require_admin
+from manga_translator.server.core.models import Session
+from manga_translator.server.core.history_service import HistoryManagementService
+from manga_translator.server.core.search_service import SearchService
+from manga_translator.server.core.permission_integration import IntegratedPermissionService
 
 logger = logging.getLogger(__name__)
 

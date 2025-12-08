@@ -14,8 +14,8 @@ import json
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 
-from ..models import LogEntry
-from ..repositories.log_repository import LogRepository
+from manga_translator.server.models import LogEntry
+from manga_translator.server.repositories.log_repository import LogRepository
 
 
 class LogManagementService:

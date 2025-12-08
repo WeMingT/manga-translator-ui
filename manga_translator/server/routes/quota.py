@@ -9,9 +9,9 @@ from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from ..core.middleware import require_auth, require_admin
-from ..core.models import Session
-from ..core.quota_service import QuotaManagementService
+from manga_translator.server.core.middleware import require_auth, require_admin
+from manga_translator.server.core.models import Session
+from manga_translator.server.core.quota_service import QuotaManagementService
 
 logger = logging.getLogger(__name__)
 

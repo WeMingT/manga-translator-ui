@@ -7,7 +7,7 @@ This module provides data access for session ownership and access control.
 import os
 import json
 from typing import List, Optional
-from ..models.session_models import SessionOwnership, SessionAccessAttempt
+from manga_translator.server.models.session_models import SessionOwnership, SessionAccessAttempt
 
 
 class SessionRepository:

@@ -8,8 +8,8 @@ from typing import Optional, Dict, List
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from ..core.config_management_service import ConfigManagementService
-from ..core.middleware import require_admin, require_auth
+from manga_translator.server.core.config_management_service import ConfigManagementService
+from manga_translator.server.core.middleware import require_admin, require_auth
 
 router = APIRouter(prefix="/api", tags=["config-management"])
 
