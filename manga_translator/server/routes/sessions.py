@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 from pydantic import BaseModel
 
-from ..core.session_security_service import SessionSecurityService
+from manga_translator.server.core.session_security_service import SessionSecurityService
 
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -45,7 +45,7 @@ async def get_current_user_from_header(
         raise HTTPException(status_code=401, detail="Authentication required")
     
     # 验证token并获取用户信息
-    from ..core.middleware import get_services
+    from manga_translator.server.core.middleware import get_services
     _, session_service, _ = get_services()
     
     session = session_service.verify_token(x_session_token)

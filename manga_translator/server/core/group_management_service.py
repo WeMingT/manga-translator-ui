@@ -9,8 +9,8 @@ import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 
-from ..repositories.group_repository import GroupRepository
-from ..models.group_models import UserGroup
+from manga_translator.server.repositories.group_repository import GroupRepository
+from manga_translator.server.models.group_models import UserGroup
 
 logger = logging.getLogger(__name__)
 

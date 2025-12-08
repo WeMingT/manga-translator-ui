@@ -12,11 +12,11 @@ from typing import Optional, List
 from pydantic import BaseModel
 import io
 
-from ..core.log_management_service import LogManagementService
-from ..repositories.log_repository import LogRepository
-from ..core.session_security_service import SessionSecurityService
-from ..core.middleware import require_auth, require_admin
-from ..core.models import Session
+from manga_translator.server.core.log_management_service import LogManagementService
+from manga_translator.server.repositories.log_repository import LogRepository
+from manga_translator.server.core.session_security_service import SessionSecurityService
+from manga_translator.server.core.middleware import require_auth, require_admin
+from manga_translator.server.core.models import Session
 
 # 创建路由器
 logs_router = APIRouter(prefix='/api/logs', tags=['logs'])
@@ -234,7 +234,7 @@ async def get_logs(
     用于用户端实时查看翻译任务日志
     """
     try:
-        from ..core.logging_manager import get_task_logs
+        from manga_translator.server.core.logging_manager import get_task_logs
         
         if task_id:
             # 按任务ID获取日志

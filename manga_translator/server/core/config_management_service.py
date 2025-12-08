@@ -15,8 +15,8 @@ from cryptography.fernet import Fernet
 import base64
 import hashlib
 
-from ..repositories.config_repository import ConfigRepository, UserConfigRepository
-from ..models.config_models import ConfigPreset, UserConfig
+from manga_translator.server.repositories.config_repository import ConfigRepository, UserConfigRepository
+from manga_translator.server.models.config_models import ConfigPreset, UserConfig
 from .env_service import EnvService
 
 logger = logging.getLogger(__name__)

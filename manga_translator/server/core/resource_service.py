@@ -10,8 +10,8 @@ import logging
 from typing import List, Optional
 from pathlib import Path
 
-from ..repositories.resource_repository import ResourceRepository
-from ..models.resource_models import PromptResource, FontResource
+from manga_translator.server.repositories.resource_repository import ResourceRepository
+from manga_translator.server.models.resource_models import PromptResource, FontResource
 
 logger = logging.getLogger(__name__)
 

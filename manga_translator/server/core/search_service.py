@@ -13,8 +13,8 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import re
 
-from ..models import TranslationResult
-from ..repositories.translation_repository import TranslationRepository
+from manga_translator.server.models import TranslationResult
+from manga_translator.server.repositories.translation_repository import TranslationRepository
 
 logger = logging.getLogger(__name__)
 
