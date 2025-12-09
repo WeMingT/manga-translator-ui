@@ -313,8 +313,6 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
         return_debug_img: If True, returns (dst_points_list, debug_img) for balloon_fill mode
     """
     mode = config.render.layout_mode
-    logger.info(f"=== resize_regions_to_font_size called with mode='{mode}' ===")
-    logger.info(f"Total regions: {len(text_regions)}, original_img provided: {original_img is not None}")
 
     # Prepare debug image for balloon_fill mode (only when requested)
     debug_img = None

@@ -567,6 +567,10 @@ class RegionTextItem(QGraphicsItemGroup):
                     # 没有 view/model，使用默认行为
                     super().mousePressEvent(event)
                     return
+            else:
+                # 其他按钮的默认行为
+                super().mousePressEvent(event)
+                return
             
             # 检查 Ctrl 键
             ctrl_pressed = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
@@ -665,9 +669,6 @@ class RegionTextItem(QGraphicsItemGroup):
                 self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
                 event.accept()
                 return
-        
-            # 其他按钮的默认行为
-            super().mousePressEvent(event)
         except (RuntimeError, AttributeError) as e:
             # Item可能已被删除
             print(f"[RegionTextItem] Warning: mousePressEvent failed: {e}")
@@ -761,149 +762,136 @@ class RegionTextItem(QGraphicsItemGroup):
                 # 处理移动模式
                 if current_mode == 'move':
                     self._is_dragging = False  # 清除拖动状态
-                
-                # 使用保存的初始visual_center计算delta
-                new_center = self.pos()
-                old_center = self._drag_start_visual_center
+                    
+                    # 使用保存的初始visual_center计算delta
+                    new_center = self.pos()
+                    old_center = self._drag_start_visual_center
 
-                # 计算偏移量
-                delta_x = new_center.x() - old_center.x()
-                delta_y = new_center.y() - old_center.y()
+                    # 计算偏移量
+                    delta_x = new_center.x() - old_center.x()
+                    delta_y = new_center.y() - old_center.y()
 
-                # 如果没有移动,跳过更新
-                if abs(delta_x) < 0.1 and abs(delta_y) < 0.1:
+                    # 如果没有移动,跳过更新
+                    if abs(delta_x) < 0.1 and abs(delta_y) < 0.1:
+                        super().mouseReleaseEvent(event)
+                        return
+
+                    # 更新lines：所有点都加上偏移量
+                    new_lines = []
+                    for poly in self.desktop_geometry.lines:
+                        new_poly = [[p[0] + delta_x, p[1] + delta_y] for p in poly]
+                        new_lines.append(new_poly)
+
+                    # 更新内部状态
+                    self.visual_center = new_center
+                    self.desktop_geometry.center = [new_center.x(), new_center.y()]
+                    self.desktop_geometry.lines = new_lines
+
+                    import copy
+                    new_region_data = copy.deepcopy(self.region_data)
+                    new_region_data['center'] = [new_center.x(), new_center.y()]
+                    new_region_data['lines'] = new_lines
+                    
+                    # 【关键修复】先更新本地状态，再调用 callback
+                    # 因为 callback 可能触发 item 重建，之后不能再访问 self
+                    self.region_data.update(new_region_data)
+                    
+                    # 手动更新polygons
+                    self.polygons = []
+                    for i, line in enumerate(new_lines):
+                        local_poly = QPolygonF()
+                        for x, y in line:
+                            local_poly.append(QPointF(x - new_center.x(), y - new_center.y()))
+                        self.polygons.append(local_poly)
+                    
+                    # 保存 callback 引用，因为调用后 self 可能无效
+                    callback = self.geometry_callback
+                    region_index = self.region_index
+                    
+                    # 调用父类方法
                     super().mouseReleaseEvent(event)
+                    
+                    # 【最后】调用 callback，之后不再访问 self
+                    callback(region_index, new_region_data)
                     return
 
-                # 更新lines：所有点都加上偏移量
-                new_lines = []
-                for poly in self.desktop_geometry.lines:
-                    new_poly = [[p[0] + delta_x, p[1] + delta_y] for p in poly]
-                    new_lines.append(new_poly)
+                elif current_mode == 'rotate':
+                    # The item's rotation is the new angle.
+                    new_angle = self.rotation()
 
-                # 更新内部状态
-                self.visual_center = new_center
-                self.desktop_geometry.center = [new_center.x(), new_center.y()]
-                self.desktop_geometry.lines = new_lines
+                    # Update internal state
+                    self.rotation_angle = new_angle
+                    self.desktop_geometry.angle = new_angle
 
-                import copy
-                new_region_data = copy.deepcopy(self.region_data)
-                new_region_data['center'] = [new_center.x(), new_center.y()]
-                new_region_data['lines'] = new_lines
-                
-                # 【关键修复】先更新本地状态，再调用 callback
-                # 因为 callback 可能触发 item 重建，之后不能再访问 self
-                self.region_data.update(new_region_data)
-                
-                # 手动更新polygons
-                self.polygons = []
-                for i, line in enumerate(new_lines):
-                    local_poly = QPolygonF()
-                    for x, y in line:
-                        local_poly.append(QPointF(x - new_center.x(), y - new_center.y()))
-                    self.polygons.append(local_poly)
-                
-                # 保存 callback 引用，因为调用后 self 可能无效
-                callback = self.geometry_callback
-                region_index = self.region_index
-                
-                # 调用父类方法
-                super().mouseReleaseEvent(event)
-                
-                # 【最后】调用 callback，之后不再访问 self
-                callback(region_index, new_region_data)
-                return
+                    # Update the model
+                    import copy
+                    new_region_data = copy.deepcopy(self.region_data)
+                    new_region_data['angle'] = new_angle
 
+                    # 先更新本地状态
+                    self.region_data.update(new_region_data)
+                    
+                    # 保存引用
+                    callback = self.geometry_callback
+                    region_index = self.region_index
+                    
+                    super().mouseReleaseEvent(event)
+                    
+                    # 最后调用 callback
+                    callback(region_index, new_region_data)
+                    return
 
-            elif current_mode == 'rotate':
-                # The item's rotation is the new angle.
-                new_angle = self.rotation()
+                elif current_mode in ['vertex', 'edge']:
+                    # 使用 desktop-ui 的数据结构保存蓝框编辑结果
+                    new_region_data = self.desktop_geometry.to_region_data()
 
-                # Update internal state
-                self.rotation_angle = new_angle
-                self.desktop_geometry.angle = new_angle
+                    import copy
+                    final_region_data = copy.deepcopy(self.region_data)
+                    final_region_data.update(new_region_data)
 
-                # Update the model
-                import copy
-                new_region_data = copy.deepcopy(self.region_data)
-                new_region_data['angle'] = new_angle
+                    # 先更新本地状态
+                    self.region_data.update(final_region_data)
+                    
+                    # 保存引用
+                    callback = self.geometry_callback
+                    region_index = self.region_index
+                    
+                    super().mouseReleaseEvent(event)
+                    
+                    # 最后调用 callback
+                    callback(region_index, final_region_data)
+                    return
 
-                # 先更新本地状态
-                self.region_data.update(new_region_data)
-                
-                # 保存引用
-                callback = self.geometry_callback
-                region_index = self.region_index
-                
-                super().mouseReleaseEvent(event)
-                
-                # 最后调用 callback
-                callback(region_index, new_region_data)
-                return
+                elif current_mode in ['white_corner', 'white_edge']:
+                    # 使用 desktop-ui 的数据结构保存结果
+                    new_region_data = self.desktop_geometry.to_region_data()
 
-            elif current_mode in ['vertex', 'edge']:
-                # 使用 desktop-ui 的数据结构保存蓝框编辑结果
-                new_region_data = self.desktop_geometry.to_region_data()
+                    import copy
+                    final_region_data = copy.deepcopy(self.region_data)
+                    final_region_data.update(new_region_data)
 
-                import copy
-                final_region_data = copy.deepcopy(self.region_data)
+                    # 先更新本地状态
+                    self.region_data.update(final_region_data)
 
-                print(f"[BLUE FRAME DEBUG] Region {self.region_index}: before update")
-                print(f"  texts: {final_region_data.get('texts', 'NOT FOUND')}")
-                print(f"  translation: {final_region_data.get('translation', 'NOT FOUND')}")
+                    # 使用保存的初始rect刷新空间索引
+                    scene = self.scene()
+                    if scene and hasattr(self, '_drag_start_scene_rect') and self._drag_start_scene_rect is not None:
+                        from PyQt6.QtWidgets import QGraphicsScene
+                        new_scene_rect = self.sceneBoundingRect()
+                        update_rect = self._drag_start_scene_rect.united(new_scene_rect)
+                        scene.invalidate(update_rect, QGraphicsScene.SceneLayer.ItemLayer)
+                        scene.update(update_rect)
+                    
+                    # 保存引用
+                    callback = self.geometry_callback
+                    region_index = self.region_index
+                    
+                    super().mouseReleaseEvent(event)
+                    
+                    # 最后调用 callback
+                    callback(region_index, final_region_data)
+                    return
 
-                final_region_data.update(new_region_data)
-
-                print(f"[BLUE FRAME DEBUG] Region {self.region_index}: after update")
-                print(f"  texts: {final_region_data.get('texts', 'NOT FOUND')}")
-                print(f"  translation: {final_region_data.get('translation', 'NOT FOUND')}")
-
-                # 先更新本地状态
-                self.region_data.update(final_region_data)
-                
-                # 保存引用
-                callback = self.geometry_callback
-                region_index = self.region_index
-                
-                super().mouseReleaseEvent(event)
-                
-                # 最后调用 callback
-                callback(region_index, final_region_data)
-                return
-
-            elif current_mode in ['white_corner', 'white_edge']:
-                # 使用 desktop-ui 的数据结构保存结果
-                new_region_data = self.desktop_geometry.to_region_data()
-
-                import copy
-                final_region_data = copy.deepcopy(self.region_data)
-                final_region_data.update(new_region_data)
-
-                # 先更新本地状态
-                self.region_data.update(final_region_data)
-
-                # 使用保存的初始rect刷新空间索引
-                scene = self.scene()
-                if scene and hasattr(self, '_drag_start_scene_rect') and self._drag_start_scene_rect is not None:
-                    from PyQt6.QtWidgets import QGraphicsScene
-                    new_scene_rect = self.sceneBoundingRect()
-                    update_rect = self._drag_start_scene_rect.united(new_scene_rect)
-                    scene.invalidate(update_rect, QGraphicsScene.SceneLayer.ItemLayer)
-                    scene.update(update_rect)
-                
-                # 保存引用
-                callback = self.geometry_callback
-                region_index = self.region_index
-                
-                super().mouseReleaseEvent(event)
-                
-                # 最后调用 callback
-                callback(region_index, final_region_data)
-                return
-
-                # --- End of Change ---
-
-            self._interaction_mode = 'none'
             super().mouseReleaseEvent(event)
         except (RuntimeError, AttributeError) as e:
             # Item可能在操作过程中被删除

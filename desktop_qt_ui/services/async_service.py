@@ -38,22 +38,19 @@ class AsyncService:
             return None
         
         try:
-            # 将协程包装成异步函数
-            async def _run_coro():
-                return await coro
+            # 获取事件循环
+            loop = self._job_manager._loop
+            if loop is None:
+                self.logger.error("Event loop is not available")
+                return None
             
-            # 提交到新的job manager
-            job = self._job_manager.submit(
-                _run_coro,
-                priority=JobPriority.NORMAL,
-            )
-            
-            # 返回一个兼容的future对象
-            # 注意：旧代码可能不使用返回值，所以这里简单返回job对象
-            return job
+            # 直接提交协程到事件循环
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            self.logger.debug(f"Task submitted to event loop")
+            return future
             
         except Exception as e:
-            self.logger.error(f"Failed to submit task: {e}")
+            self.logger.error(f"Failed to submit task: {e}", exc_info=True)
             return None
     
     def cancel_all_tasks(self):
