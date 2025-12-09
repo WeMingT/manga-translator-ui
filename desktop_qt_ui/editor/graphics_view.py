@@ -36,6 +36,7 @@ class GraphicsView(QGraphicsView):
     """
     region_geometry_changed = pyqtSignal(int, dict)
     geometry_added = pyqtSignal(int, list)
+    _layout_result_ready = pyqtSignal(list)  # 布局计算结果信号
 
     def __init__(self, model: EditorModel, parent=None):
         super().__init__(parent)
@@ -102,6 +103,9 @@ class GraphicsView(QGraphicsView):
 
         self._setup_view()
         self._connect_model_signals()
+        
+        # 连接布局结果信号
+        self._layout_result_ready.connect(self._apply_layout_result)
 
     def _setup_view(self):
         """配置视图属性"""
@@ -536,10 +540,9 @@ class GraphicsView(QGraphicsView):
                 self.scene.addItem(item)
                 self._region_items.append(item)
 
-            # After updating items, recalculate all rendering data
+            # After updating items, recalculate all rendering data (异步执行)
+            # _update_text_visuals 会在 recalculate_render_data 完成后自动调用
             self.recalculate_render_data()
-            self._update_text_visuals()
-            self.scene.update()
         except Exception as e:
             print(f"[View] Warning: Render update failed: {e}")
 
@@ -912,6 +915,7 @@ class GraphicsView(QGraphicsView):
         """
         执行昂贵的布局计算并将结果缓存。
         这个方法应该在 regions 数据变化后被调用。
+        使用线程池异步执行以避免阻塞UI。
         """
         regions = self.model.get_regions()
         if self._image_np is None or not regions:
@@ -954,7 +958,7 @@ class GraphicsView(QGraphicsView):
                 text_blocks.append(None)
         self._text_blocks_cache = text_blocks
 
-        # 2. 获取全局渲染参数并设置字体 (修正)
+        # 2. 获取全局渲染参数
         render_parameter_service = get_render_parameter_service()
         default_params_obj = render_parameter_service.get_default_parameters()
         global_params_dict = default_params_obj.to_dict()
@@ -974,21 +978,49 @@ class GraphicsView(QGraphicsView):
             
         config_obj = Config(render=RenderConfig(**global_params_dict))
 
-        # 3. 调用后端进行昂贵的布局计算
+        # 3. 异步执行昂贵的布局计算
+        valid_blocks = [b for b in self._text_blocks_cache if b is not None]
+        if not valid_blocks:
+            self._dst_points_cache = []
+            return
+        
+        # 使用线程池异步计算
+        import concurrent.futures
+        if not hasattr(self, '_render_executor'):
+            self._render_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        
+        # 保存当前状态用于回调
+        image_np = self._image_np
+        
+        def compute_layout():
+            try:
+                return resize_regions_to_font_size(image_np, valid_blocks, config_obj, image_np)
+            except Exception as e:
+                print(f"[View] Error during resize_regions_to_font_size: {e}")
+                import traceback
+                traceback.print_exc()
+                return [None] * len(valid_blocks)
+        
+        def on_layout_complete(future):
+            try:
+                result = future.result()
+                # 使用信号在主线程更新缓存和UI（信号是线程安全的）
+                self._layout_result_ready.emit(result)
+            except Exception as e:
+                print(f"[View] Layout computation failed: {e}")
+        
+        future = self._render_executor.submit(compute_layout)
+        future.add_done_callback(on_layout_complete)
+    
+    @pyqtSlot(list)
+    def _apply_layout_result(self, dst_points_cache):
+        """在主线程应用布局计算结果"""
         try:
-            # 过滤掉创建失败的None值
-            valid_blocks = [b for b in self._text_blocks_cache if b is not None]
-            if not valid_blocks:
-                self._dst_points_cache = []
-                return
-            
-            self._dst_points_cache = resize_regions_to_font_size(self._image_np, valid_blocks, config_obj, self._image_np)
-            print(f"[View] Recalculated dst_points for {len(self._dst_points_cache)} regions.")
+            self._dst_points_cache = dst_points_cache
+            self._update_text_visuals()
+            self.scene.update()
         except Exception as e:
-            print(f"[View] Error during resize_regions_to_font_size: {e}")
-            import traceback
-            traceback.print_exc()
-            self._dst_points_cache = [None] * len(self._text_blocks_cache)
+            print(f"[View] Error applying layout result: {e}")
 
 
 

@@ -46,6 +46,9 @@ class EditorController(QObject):
     
     # Signal for thread-safe Toast notifications
     _show_toast_signal = pyqtSignal(str, int, bool, str)  # message, duration, success, clickable_path
+    
+    # Signal for thread-safe image loading
+    _load_result_ready = pyqtSignal(dict)  # 加载结果信号
 
     def __init__(self, model: EditorModel, parent=None):
         super().__init__(parent)
@@ -78,6 +81,7 @@ class EditorController(QObject):
         self._regions_update_finished.connect(self.on_regions_update_finished)
         self._ocr_completed.connect(self._on_ocr_completed)
         self._translation_completed.connect(self._on_translation_completed)
+        self._load_result_ready.connect(self._apply_load_result)  # 连接加载结果信号
         
         # 设置model的controller引用，用于命令模式
         self.model.controller = self
@@ -191,30 +195,23 @@ class EditorController(QObject):
     @pyqtSlot(str, int, bool, str)
     def _show_toast_in_main_thread(self, message: str, duration: int, success: bool, clickable_path: str):
         """在主线程显示Toast通知的槽函数"""
-        self.logger.info(f"[TOAST_DEBUG] _show_toast_in_main_thread called in main thread: message='{message}'")
         try:
             # 先关闭"正在导出"Toast（在主线程中安全关闭）
             if hasattr(self, '_export_toast') and self._export_toast:
                 try:
-                    self.logger.info(f"[TOAST_DEBUG] Closing export toast in main thread...")
                     self._export_toast.close()
                     self._export_toast = None
-                    self.logger.info(f"[TOAST_DEBUG] Export toast closed")
                 except Exception as e:
-                    self.logger.warning(f"[TOAST_DEBUG] Failed to close export toast: {e}")
+                    self.logger.warning(f"Failed to close export toast: {e}")
             
             # 显示新Toast
             if hasattr(self, 'toast_manager'):
                 if success:
-                    result = self.toast_manager.show_success(message, duration, clickable_path if clickable_path else None)
-                    self.logger.info(f"[TOAST_DEBUG] show_success returned: {result}")
+                    self.toast_manager.show_success(message, duration, clickable_path if clickable_path else None)
                 else:
-                    result = self.toast_manager.show_error(message, duration)
-                    self.logger.info(f"[TOAST_DEBUG] show_error returned: {result}")
-            else:
-                self.logger.warning("[TOAST_DEBUG] toast_manager not found!")
+                    self.toast_manager.show_error(message, duration)
         except Exception as e:
-            self.logger.error(f"[TOAST_DEBUG] Exception in _show_toast_in_main_thread: {e}", exc_info=True)
+            self.logger.error(f"Exception in _show_toast_in_main_thread: {e}", exc_info=True)
 
     def _connect_model_signals(self):
         """监听模型的变化，可能需要触发一些后续逻辑"""
@@ -272,9 +269,10 @@ class EditorController(QObject):
         return self.history_service.can_undo()
     
     def _generate_export_snapshot(self) -> dict:
-        """生成当前状态的快照，用于检测导出后是否有更改"""
-        import hashlib
+        """生成当前状态的快照，用于检测导出后是否有更改
         
+        使用轻量级的特征值而不是完整哈希，避免阻塞主线程
+        """
         regions = self._get_regions()
         
         # 提取关键数据生成哈希
@@ -292,17 +290,21 @@ class EditorController(QObject):
             }
             snapshot_data.append(str(region_key))
         
-        # 包含蒙版的哈希（如果有）
+        # 使用蒙版的轻量级特征（形状+总和+非零像素数）而不是完整哈希
         mask = self.model.get_refined_mask()
         if mask is None:
             mask = self.model.get_raw_mask()
-        mask_hash = ""
+        mask_signature = ""
         if mask is not None:
-            mask_hash = hashlib.md5(mask.tobytes()).hexdigest()
+            # 使用形状、总和、非零像素数作为快速特征
+            mask_signature = f"{mask.shape}_{mask.sum()}_{np.count_nonzero(mask)}"
+        
+        # 使用简单的字符串哈希
+        regions_str = '|'.join(snapshot_data)
         
         return {
-            'regions_hash': hashlib.md5('|'.join(snapshot_data).encode()).hexdigest(),
-            'mask_hash': mask_hash,
+            'regions_hash': hash(regions_str),
+            'mask_signature': mask_signature,
             'source_path': self.model.get_source_image_path(),
         }
     
@@ -320,7 +322,7 @@ class EditorController(QObject):
             return self.history_service.can_undo()
         
         return (current_snapshot['regions_hash'] != self._last_export_snapshot['regions_hash'] or
-                current_snapshot['mask_hash'] != self._last_export_snapshot['mask_hash'])
+                current_snapshot['mask_signature'] != self._last_export_snapshot['mask_signature'])
     
     def _save_export_snapshot(self):
         """保存当前状态快照（导出成功后调用）"""
@@ -425,10 +427,9 @@ class EditorController(QObject):
 
     def load_image_and_regions(self, image_path: str):
         """加载图像及其关联的区域数据，并触发后台处理"""
-        self.logger.debug(f"Controller: Loading image {image_path}")
-
         # 检查是否有未导出的更改（基于快照比较，而不仅仅是撤销历史）
-        if self._has_changes_since_last_export():
+        has_changes = self._has_changes_since_last_export()
+        if has_changes:
             from PyQt6.QtWidgets import QMessageBox
             reply = QMessageBox.question(
                 None,
@@ -439,117 +440,185 @@ class EditorController(QObject):
             )
 
             if reply == QMessageBox.StandardButton.Cancel:
-                self.logger.info("User cancelled loading new image")
                 return
             elif reply == QMessageBox.StandardButton.Yes:
-                self.logger.info("Exporting before switching image...")
                 self.export_image()
                 # 使用QTimer延迟加载，避免阻塞UI
                 from PyQt6.QtCore import QTimer
                 QTimer.singleShot(500, lambda: self._do_load_image(image_path))
                 return
 
-        # 直接加载
         self._do_load_image(image_path)
     
     def _do_load_image(self, image_path: str):
-        """实际执行图片加载的内部方法"""
+        """实际执行图片加载的内部方法 - 使用线程池避免阻塞UI"""
+        import concurrent.futures
+        
         # 清空旧状态
         self._clear_editor_state()
+        
+        # 显示加载提示
+        if hasattr(self, 'toast_manager'):
+            self._loading_toast = self.toast_manager.show_info("正在加载...", duration=0)
+        
+        # 使用线程池加载数据
+        if not hasattr(self, '_load_executor'):
+            self._load_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        
+        def load_data():
+            """在后台线程加载数据"""
+            try:
+                # 1. 加载图片
+                image_resource = self.resource_manager.load_image(image_path)
+                image = image_resource.image
 
+                # 2. 检查是否是翻译后的图片
+                is_translated_image = self._is_translated_image(image_path)
+
+                if is_translated_image:
+                    return {'type': 'translated', 'image_path': image_path, 'image': image}
+
+                # 3. 加载JSON
+                regions, raw_mask, original_size = self.file_service.load_translation_json(image_path)
+
+                # 4. 查找和加载inpainted图片
+                inpainted_path = find_inpainted_path(image_path)
+                inpainted_image = None
+                if inpainted_path:
+                    try:
+                        inpainted_image = Image.open(inpainted_path)
+                        if inpainted_image.size != image.size:
+                            inpainted_image = inpainted_image.resize(image.size, Image.LANCZOS)
+                    except Exception as e:
+                        self.logger.error(f"Error loading inpainted image: {e}")
+                        inpainted_path = None
+                        inpainted_image = None
+
+                return {
+                    'type': 'normal',
+                    'image_path': image_path,
+                    'image': image,
+                    'regions': regions,
+                    'raw_mask': raw_mask,
+                    'inpainted_path': inpainted_path,
+                    'inpainted_image': inpainted_image
+                }
+            except Exception as e:
+                self.logger.error(f"Error loading image data: {e}", exc_info=True)
+                return {'type': 'error', 'error': str(e)}
+        
+        def on_load_complete(future):
+            """加载完成回调 - 使用信号确保在主线程更新UI"""
+            try:
+                result = future.result()
+                self._load_result_ready.emit(result)
+            except Exception as e:
+                self.logger.error(f"Load failed: {e}", exc_info=True)
+                self._load_result_ready.emit({'type': 'error', 'error': str(e)})
+        
+        future = self._load_executor.submit(load_data)
+        future.add_done_callback(on_load_complete)
+    
+    @pyqtSlot(dict)
+    def _apply_load_result(self, result: dict):
+        """在主线程应用加载结果"""
         try:
-            # 使用ResourceManager加载图片
-            image_resource = self.resource_manager.load_image(image_path)
-            image = image_resource.image
+            if result['type'] == 'error':
+                self._handle_load_error(result['error'])
+            elif result['type'] == 'translated':
+                self._apply_translated_image_to_model(result['image_path'], result['image'])
+            else:
+                self._apply_loaded_data_to_model(
+                    result['image_path'],
+                    result['image'],
+                    result['regions'],
+                    result['raw_mask'],
+                    result['inpainted_path'],
+                    result['inpainted_image']
+                )
+        except Exception as e:
+            self.logger.error(f"Exception in _apply_load_result: {e}", exc_info=True)
+    
+    def _apply_translated_image_to_model(self, image_path: str, image):
+        """在主线程应用翻译后图片到Model"""
+        try:
+            # 关闭加载提示
+            if hasattr(self, '_loading_toast') and self._loading_toast:
+                self._loading_toast.close()
+                self._loading_toast = None
+            
+            self.model.set_source_image_path(image_path)
 
-            # 检查是否是翻译后的图片（通过translation_map.json）
-            is_translated_image = self._is_translated_image(image_path)
+            if not hasattr(self, '_user_adjusted_alpha') or not self._user_adjusted_alpha:
+                self.model.set_original_image_alpha(1.0)
 
-            if is_translated_image:
-                # 翻译后的图片：只作为查看器，不加载JSON
-                self.logger.debug(f"Detected translated image, loading as viewer only: {image_path}")
-                self.model.set_source_image_path(image_path)
-
-                # 只在首次加载或用户未手动调整时设置透明度
-                # 如果用户已经调整过透明度，保持当前值
-                if not hasattr(self, '_user_adjusted_alpha') or not self._user_adjusted_alpha:
-                    # 翻译后的图片本身就是最终结果，所以原图alpha应该是1.0（完全显示）
-                    self.model.set_original_image_alpha(1.0)  # 完全不透明，显示翻译后的图片
-
-                # 同步Model状态（View仍然监听Model的信号）
-                self.model.set_image(image)
-                self._set_regions([])  # 不加载regions
-                self.model.set_raw_mask(None)
-                self.model.set_refined_mask(None)
-                self.model.set_inpainted_image_path(None)
-                # 不触发后台处理
-                return
-
-            # 原图或无翻译映射的图片：正常加载JSON
-            # Call FileService to handle JSON loading and parsing  
-            regions, raw_mask, original_size = self.file_service.load_translation_json(image_path)
-
-            # First, import render parameters from the loaded JSON data
+            self.model.set_image(image)
+            self._set_regions([])
+            self.model.set_raw_mask(None)
+            self.model.set_refined_mask(None)
+            self.model.set_inpainted_image_path(None)
+        except Exception as e:
+            self.logger.error(f"Error applying translated image to model: {e}")
+    
+    def _apply_loaded_data_to_model(self, image_path, image, regions, raw_mask, inpainted_path, inpainted_image):
+        """在主线程应用加载的数据到Model"""
+        try:
+            # 关闭加载提示
+            if hasattr(self, '_loading_toast') and self._loading_toast:
+                self._loading_toast.close()
+                self._loading_toast = None
+            
+            # 导入渲染参数
             if regions:
                 from services import get_render_parameter_service
                 render_parameter_service = get_render_parameter_service()
                 for i, region_data in enumerate(regions):
                     render_parameter_service.import_parameters_from_json(i, region_data)
 
-            # Update model with the data from the service
-            self.model.set_source_image_path(image_path) # Save the path
+            self.model.set_source_image_path(image_path)
 
-            # 只在首次加载或用户未手动调整时设置透明度
-            # 如果用户已经调整过透明度，保持当前值
             if not hasattr(self, '_user_adjusted_alpha') or not self._user_adjusted_alpha:
-                # 原图alpha = 0.0 -> 原图完全透明（不可见）-> 显示inpainted
-                self.model.set_original_image_alpha(0.0) # 完全透明，显示inpainted图片
+                self.model.set_original_image_alpha(0.0)
 
-            # 同步Model状态（View仍然监听Model的信号）
             self.model.set_image(image)
             self._set_regions(regions)
 
-            # 使用ResourceManager管理蒙版
             if raw_mask is not None:
                 from desktop_qt_ui.editor.core.types import MaskType
                 self.resource_manager.set_mask(MaskType.RAW, raw_mask)
-                # 同步到Model（向后兼容）
                 self.model.set_raw_mask(raw_mask)
 
-            self.model.set_refined_mask(None) # Initially, no refined mask is ready
+            self.model.set_refined_mask(None)
 
-            # 检查是否存在已有的inpainted图片
-            inpainted_path = find_inpainted_path(image_path)
             if inpainted_path:
                 self.model.set_inpainted_image_path(inpainted_path)
-                self.logger.debug(f"Found existing inpainted image: {inpainted_path}")
-                # 加载inpainted图片并触发信号
-                try:
-                    inpainted_image = Image.open(inpainted_path)
-                    # 如果inpainted图尺寸与原图不同，缩放到原图尺寸
-                    if inpainted_image.size != image.size:
-                        self.logger.info(f"Resizing inpainted image from {inpainted_image.size} to {image.size}")
-                        inpainted_image = inpainted_image.resize(image.size, Image.LANCZOS)
+                if inpainted_image:
                     self.model.set_inpainted_image(inpainted_image)
-                    self.logger.debug(f"Loaded inpainted image: {inpainted_path}")
-                except Exception as e:
-                    self.logger.error(f"Error loading inpainted image: {e}")
-                    self.model.set_inpainted_image_path(None)
             else:
                 self.model.set_inpainted_image_path(None)
                 self.model.set_inpainted_image(None)
 
-            # If regions were loaded, trigger background processing
+            # 触发后台处理
             if regions:
-                self.logger.debug("JSON data loaded, background processing is temporarily disabled.")
                 self.async_service.submit_task(self._async_refine_and_inpaint())
-
+                
         except Exception as e:
-            self.logger.error(f"Error loading image and regions: {e}", exc_info=True)
-            self.model.set_image(None)
-            self.model.set_regions([])
-            self.model.set_raw_mask(None)
-            self.model.set_refined_mask(None)
+            self.logger.error(f"Error applying loaded data to model: {e}", exc_info=True)
+    
+    def _handle_load_error(self, error_msg: str):
+        """处理加载错误"""
+        # 关闭加载提示
+        if hasattr(self, '_loading_toast') and self._loading_toast:
+            self._loading_toast.close()
+            self._loading_toast = None
+        
+        if hasattr(self, 'toast_manager'):
+            self.toast_manager.show_error(f"加载失败: {error_msg}")
+        
+        self.model.set_image(None)
+        self.model.set_regions([])
+        self.model.set_raw_mask(None)
+        self.model.set_refined_mask(None)
 
     async def _async_refine_and_inpaint(self):
         """Asynchronously refines the mask and generates an inpainting preview."""
@@ -620,14 +689,12 @@ class EditorController(QObject):
             inpainted_path = self.model.get_inpainted_image_path()
             if inpainted_path and os.path.exists(inpainted_path):
                 # 已有inpainted图片，直接加载
-                self.logger.info(f"Loading existing inpainted image from: {inpainted_path}")
                 try:
                     inpainted_image = Image.open(inpainted_path)
                     # 获取原图尺寸
                     original_image = self.model.get_image()
                     # 如果inpainted图尺寸与原图不同，缩放到原图尺寸
                     if original_image and inpainted_image.size != original_image.size:
-                        self.logger.info(f"Resizing inpainted image from {inpainted_image.size} to {original_image.size}")
                         inpainted_image = inpainted_image.resize(original_image.size, Image.LANCZOS)
                     inpainted_image_np = np.array(inpainted_image.convert("RGB"))
 
@@ -644,7 +711,6 @@ class EditorController(QObject):
 
             # 如果没有已有的inpainted图片，执行inpainting
             if not inpainted_path or not os.path.exists(inpainted_path):
-                self.logger.info("Starting inpainting process...")
                 try:
                     # 从配置服务获取inpainter配置
                     config = self.config_service.get_config()
@@ -686,8 +752,6 @@ class EditorController(QObject):
                         # 缓存完整修复结果，用于后续增量修复
                         self.resource_manager.set_cache(self.CACHE_LAST_INPAINTED, inpainted_image_np.copy())
                         self.resource_manager.set_cache(self.CACHE_LAST_MASK, refined_mask.copy())
-
-                        self.logger.info("Inpainting successful. Model updated and cached for incremental updates.")
                     else:
                         self.logger.error("Inpainting failed, returned None.")
 
@@ -695,7 +759,6 @@ class EditorController(QObject):
                     self.logger.error(f"Error during inpainting process: {e}", exc_info=True)
 
         except asyncio.CancelledError:
-            self.logger.info("Async refine and inpaint task was cancelled")
             raise  # 重新抛出，让任务正确取消
         except Exception as e:
             self.logger.error(f"Error during async refine and inpaint: {e}")
@@ -712,7 +775,6 @@ class EditorController(QObject):
             # 检查是否有缓存
             last_processed_mask = self.resource_manager.get_cache(self.CACHE_LAST_MASK)
             if last_processed_mask is None:
-                self.logger.info("No cached mask, falling back to full inpainting...")
                 await self._async_full_inpaint_with_cache(current_mask)
                 return
 
@@ -733,7 +795,6 @@ class EditorController(QObject):
             all_changed_areas = cv2.bitwise_or(added_areas, removed_areas)
 
             if np.sum(all_changed_areas) == 0:
-                self.logger.info("No changes detected, skipping update.")
                 return
 
             # 计算变化区域的边界框
@@ -814,17 +875,12 @@ class EditorController(QObject):
                 final_image = Image.fromarray(full_result)
                 self.model.set_inpainted_image(final_image)
 
-                self.logger.info("Bounding box incremental inpainting successful.")
-            else:
-                self.logger.error("Bounding box inpainting failed.")
-
         except Exception as e:
             self.logger.error(f"Error during bounding box inpainting: {e}", exc_info=True)
 
     async def _async_full_inpaint_with_cache(self, mask):
         """执行完整修复并缓存结果"""
         try:
-            self.logger.info("Performing full inpainting with caching...")
             image = self._get_current_image()
 
             if image is None or mask is None:
@@ -888,10 +944,6 @@ class EditorController(QObject):
                 inpainted_image = Image.fromarray(inpainted_image_np)
                 self.model.set_inpainted_image(inpainted_image)
 
-                self.logger.info("Full inpainting with cache successful.")
-            else:
-                self.logger.error("Full inpainting failed, returned None.")
-
         except Exception as e:
             self.logger.error(f"Error during full inpainting with cache: {e}", exc_info=True)
 
@@ -911,7 +963,6 @@ class EditorController(QObject):
     def set_removed_mask_visible(self, visible: bool):
         """Slot to control visibility of removed mask parts."""
         self.model.set_removed_mask_visible(visible)
-        self.logger.info(f"Set removed mask visible: {visible}")
 
     @pyqtSlot(str)
     def set_active_tool(self, tool: str):
@@ -928,10 +979,8 @@ class EditorController(QObject):
                 if self.view:
                     self.view.toolbar.edit_geometry_button.setChecked(False)
                 return
-            self.logger.info("Entering geometry edit mode.")
             self.set_active_tool('geometry_edit')
         else:
-            self.logger.info("Exiting geometry edit mode.")
             self.set_active_tool('select')
 
     @pyqtSlot(int)
@@ -943,7 +992,6 @@ class EditorController(QObject):
     def update_mask_config(self, new_settings: dict):
         """Slot to update mask settings in the config service."""
         self.config_service.update_config(new_settings)
-        self.logger.info(f"Mask config updated with: {new_settings}")
 
 
 
@@ -1131,14 +1179,9 @@ class EditorController(QObject):
             self._update_undo_redo_buttons()
 
     def undo(self):
-        self.logger.info("Undo operation requested")
         command = self.history_service.undo()
         if command:
-            self.logger.info(f"Executing undo for command: {command.description}")
             command.undo()
-            self.logger.info("Undo operation completed")
-        else:
-            self.logger.warning("No command available to undo")
         self._update_undo_redo_buttons()
 
     def redo(self):
@@ -1150,7 +1193,6 @@ class EditorController(QObject):
     @pyqtSlot(int, list)
     def add_geometry_to_region(self, region_index: int, new_polygon_coords: list):
         """Adds a new polygon (in image coordinates) to an existing region."""
-        self.logger.info(f"Controller: Adding new geometry to region {region_index}")
         
         old_region_data = self._get_region_by_index(region_index)
         if not old_region_data:
@@ -1261,7 +1303,6 @@ class EditorController(QObject):
 
         # 将区域数据保存到历史服务的剪贴板
         self.history_service.copy_to_clipboard(copy.deepcopy(region_data))
-        self.logger.info(f"已复制区域 {region_index}")
 
     def paste_region_style(self, region_index: int):
         """将复制的样式粘贴到指定区域"""
@@ -1309,7 +1350,6 @@ class EditorController(QObject):
             graphics_view = self.view.graphics_view
             if graphics_view and hasattr(graphics_view, '_last_edited_region_index'):
                 graphics_view._last_edited_region_index = None
-                self.logger.info("[DELETE] 重置 _last_edited_region_index 为 None")
 
         # 按索引倒序处理，避免索引变化问题
         sorted_indices = sorted(region_indices, reverse=True)
@@ -1329,7 +1369,7 @@ class EditorController(QObject):
                 if region_item and hasattr(region_item, 'active_polygon_index'):
                     active_polygon_index = region_item.active_polygon_index
 
-                self.logger.info(f"[DELETE] Region {region_index}: active_polygon_index={active_polygon_index}")
+
 
                 # 获取区域数据
                 region_data = self.model._regions[region_index]
@@ -1346,7 +1386,6 @@ class EditorController(QObject):
                     if len(new_lines_model) == 0:
                         # 如果删除后没有多边形了,删除整个区域
                         regions_to_delete.append(region_index)
-                        self.logger.info(f"[DELETE] Region {region_index}: 删除最后一个多边形,将删除整个区域")
                     else:
                         # 获取旧的 center 和 angle
                         old_center = region_data.get('center', [0, 0])
@@ -1383,7 +1422,6 @@ class EditorController(QObject):
                             description=f"Delete Polygon {active_polygon_index} from Region {region_index}"
                         )
                         self.execute_command(command)
-                        self.logger.info(f"[DELETE] Region {region_index}: 已删除多边形 {active_polygon_index}, 新 center=({new_cx:.1f}, {new_cy:.1f})")
                 else:
                     # 没有紫色多边形,删除整个区域
                     regions_to_delete.append(region_index)
@@ -1405,18 +1443,13 @@ class EditorController(QObject):
                     )
                     self.execute_command(command)
 
-            self.logger.info(f"[DELETE] 已删除 {len(regions_to_delete)} 个区域")
-
         # 清除选择
         self.model.set_selection([])
 
     def enter_drawing_mode(self):
         """进入绘制模式以添加新文本框"""
-        self.logger.info("进入文本框绘制模式")
-
         # 如果当前在编辑形状模式下,先退出
         if self.model.get_active_tool() == 'geometry_edit':
-            self.logger.info("当前在编辑形状模式下,先退出")
             self.set_active_tool('select')
 
         # 清除当前选择
@@ -1496,8 +1529,6 @@ class EditorController(QObject):
         new_index = len(self.model._regions) - 1
         self.model.set_selection([new_index])
 
-        self.logger.info(f"已粘贴区域到位置 ({new_center_x:.0f}, {new_center_y:.0f})")
-
     def _update_undo_redo_buttons(self):
         """更新撤销/重做按钮的启用状态"""
         can_undo = self.history_service.can_undo()
@@ -1537,13 +1568,11 @@ class EditorController(QObject):
 
     @pyqtSlot()
     def go_back(self):
-        self.logger.info("Toolbar: 'Back' requested. (Not Implemented)")
-        # This should likely signal the main window to switch views
+        pass  # This should likely signal the main window to switch views
 
     @pyqtSlot()
     def export_image(self):
         """导出基于编辑器当前数据的图片（使用编辑器的蒙版和样式设置）"""
-        self.logger.info("Toolbar: 'Export Image' requested.")
         try:
             image = self._get_current_image()
             regions = self._get_regions()
@@ -1575,7 +1604,6 @@ class EditorController(QObject):
 
     async def _async_export_with_desktop_ui_service(self, image, regions, mask):
         """使用desktop-ui导出服务进行异步导出"""
-        self.logger.info("Starting export using desktop-ui service...")
         try:
             import os
 
@@ -1593,7 +1621,6 @@ class EditorController(QObject):
                 # 输出到原图所在目录的 manga_translator_work/result 子目录
                 output_dir = os.path.join(os.path.dirname(source_path), 'manga_translator_work', 'result')
                 os.makedirs(output_dir, exist_ok=True)
-                self.logger.info(f"Using source directory output: {output_dir}")
             else:
                 # 原有逻辑：使用配置的输出目录
                 output_dir = getattr(config.app, 'last_output_path', None) if hasattr(config, 'app') else None
@@ -1602,9 +1629,6 @@ class EditorController(QObject):
                         output_dir = os.path.dirname(source_path)
                     else:
                         output_dir = os.getcwd()
-                    self.logger.warning(f"Using fallback output directory: {output_dir}")
-                else:
-                    self.logger.info(f"Using configured output directory: {output_dir}")
 
             # 生成输出文件名（保持原文件名和格式）
             source_path = self.model.get_source_image_path()
@@ -1636,21 +1660,17 @@ class EditorController(QObject):
             export_service = ExportService()
 
             def progress_callback(message):
-                self.logger.info(f"Export progress: {message}")
+                pass
 
             def success_callback(message):
-                self.logger.info(f"[TOAST_DEBUG] Export success callback called: {message}")
-                # 使用信号在主线程显示Toast，显示完整路径
-                self.logger.info(f"[TOAST_DEBUG] Emitting _show_toast_signal to main thread...")
+                # 使用信号在主线程显示Toast
                 self._show_toast_signal.emit(f"导出成功\n{output_path}", 5000, True, output_path)
-                self.logger.info(f"[TOAST_DEBUG] Signal emitted successfully")
                 
                 # 保存导出快照，用于检测后续是否有更改
                 self._save_export_snapshot()
                 
                 # 导出成功后释放内存
                 self.resource_manager.release_memory_after_export()
-                self.logger.info("Memory released after successful export")
 
             def error_callback(message):
                 self.logger.error(f"Export error: {message}")
@@ -1665,25 +1685,7 @@ class EditorController(QObject):
             else:
                 config_dict = {}
             
-            # 添加调试日志，查看upscale和colorizer配置
-            self.logger.info(f"Config keys: {list(config_dict.keys())}")
-            if 'upscale' in config_dict:
-                self.logger.info(f"Upscale config: {config_dict['upscale']}")
-            else:
-                self.logger.warning("No upscale config found in config_dict")
-            if 'colorizer' in config_dict:
-                self.logger.info(f"Colorizer config: {config_dict['colorizer']}")
-            else:
-                self.logger.warning("No colorizer config found in config_dict")
 
-            # 添加调试信息
-            self.logger.info(f"Export called with {len(regions)} regions")
-            self.logger.info(f"Using output directory: {output_dir}")
-            self.logger.info(f"Output file: {output_path}")
-
-            for i, region in enumerate(regions[:3]):  # 只显示前3个区域的信息
-                self.logger.info(f"Region {i}: text='{region.get('text', '')[:20]}...', translation='{region.get('translation', '')[:20]}...', font_size={region.get('font_size')}, lines={type(region.get('lines'))}")
-                self.logger.info(f"Region {i} keys: {list(region.keys())}")
 
             # 确保区域数据包含渲染所需的所有信息
             enhanced_regions = []
