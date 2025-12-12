@@ -274,7 +274,21 @@ def update_font_selection():
 
 def set_font(path: str):
     global FONT
-    if not path or not os.path.exists(path):
+    
+    # 处理相对路径：尝试在 BASE_PATH 下查找
+    resolved_path = path
+    if path and not os.path.isabs(path) and not os.path.exists(path):
+        # 尝试 BASE_PATH/fonts/filename 或 BASE_PATH/path
+        possible_paths = [
+            os.path.join(BASE_PATH, 'fonts', os.path.basename(path)),
+            os.path.join(BASE_PATH, path),
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                resolved_path = p
+                break
+    
+    if not resolved_path or not os.path.exists(resolved_path):
         if path:
             logger.error(f'Could not load font: {path}')
         try:
@@ -287,9 +301,9 @@ def set_font(path: str):
         return
 
     try:
-        FONT = freetype.Face(Path(path).open('rb'))
+        FONT = freetype.Face(Path(resolved_path).open('rb'))
     except (freetype.ft_errors.FT_Exception, FileNotFoundError):
-        logger.error(f'Could not load font: {path}')
+        logger.error(f'Could not load font: {resolved_path}')
         try:
             FONT = freetype.Face(Path(DEFAULT_FONT).open('rb'))
         except (freetype.ft_errors.FT_Exception, FileNotFoundError):

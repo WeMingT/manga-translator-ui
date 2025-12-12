@@ -208,6 +208,17 @@ class GraphicsView(QGraphicsView):
                 self.scene.removeItem(self._preview_item)
                 self._preview_item = None
 
+            # 清空框选矩形
+            if self._box_select_rect_item:
+                try:
+                    if self._box_select_rect_item.scene():
+                        self.scene.removeItem(self._box_select_rect_item)
+                except RuntimeError:
+                    pass  # C++ 对象已被删除
+            self._box_select_rect_item = None
+            self._is_box_selecting = False
+            self._box_select_start_pos = None
+
             # 清空缓存
             if hasattr(self, '_text_render_cache'):
                 self._text_render_cache.clear()
@@ -246,6 +257,7 @@ class GraphicsView(QGraphicsView):
         self._inpainted_image_item = None
         self._preview_item = None
         self._image_np = None
+        self._box_select_rect_item = None  # scene.clear() 会删除所有 item
 
         if image is None:
             return
@@ -1154,8 +1166,17 @@ class GraphicsView(QGraphicsView):
                 self._is_box_selecting = True
                 self._box_select_start_pos = self.mapToScene(event.pos())
                 
-                # 创建框选矩形
-                if self._box_select_rect_item is None:
+                # 创建框选矩形（检查是否需要重新创建）
+                need_create = self._box_select_rect_item is None
+                if not need_create:
+                    # 检查 C++ 对象是否仍然有效
+                    try:
+                        _ = self._box_select_rect_item.scene()
+                    except RuntimeError:
+                        need_create = True
+                        self._box_select_rect_item = None
+                
+                if need_create:
                     pen = QPen(QColor(0, 120, 215, 180))  # 蓝色半透明
                     pen.setWidth(2)
                     pen.setStyle(Qt.PenStyle.DashLine)
@@ -1186,12 +1207,24 @@ class GraphicsView(QGraphicsView):
         """Handle mouse move for drawing."""
         # 处理框选
         if self._is_box_selecting and self._box_select_start_pos:
-            current_pos = self.mapToScene(event.pos())
-            # 更新框选矩形
-            rect = QRectF(self._box_select_start_pos, current_pos).normalized()
-            self._box_select_rect_item.setRect(rect)
-            event.accept()
-            return
+            # 检查框选矩形是否仍然有效（可能在切换图片时被删除）
+            if self._box_select_rect_item is None:
+                self._is_box_selecting = False
+                self._box_select_start_pos = None
+                return
+            try:
+                current_pos = self.mapToScene(event.pos())
+                # 更新框选矩形
+                rect = QRectF(self._box_select_start_pos, current_pos).normalized()
+                self._box_select_rect_item.setRect(rect)
+                event.accept()
+                return
+            except RuntimeError:
+                # C++ 对象已被删除，重置状态
+                self._box_select_rect_item = None
+                self._is_box_selecting = False
+                self._box_select_start_pos = None
+                return
         
         if self._is_drawing_textbox:
             self._update_textbox_drawing(event.pos())
@@ -1231,31 +1264,36 @@ class GraphicsView(QGraphicsView):
         # 处理框选完成
         if self._is_box_selecting and event.button() == Qt.MouseButton.LeftButton:
             self._is_box_selecting = False
+            self._box_select_start_pos = None
             
-            # 隐藏框选矩形
+            # 隐藏框选矩形（检查对象是否仍然有效）
             if self._box_select_rect_item:
-                select_rect = self._box_select_rect_item.rect()
-                self._box_select_rect_item.setVisible(False)
-                
-                # 查找框内的所有 RegionTextItem
-                selected_indices = []
-                for i, item in enumerate(self._region_items):
-                    if isinstance(item, RegionTextItem):
-                        # 检查 item 的边界是否与选择框相交
-                        item_rect = item.sceneBoundingRect()
-                        if select_rect.intersects(item_rect):
-                            selected_indices.append(i)
-                
-                # 更新选择
-                ctrl_pressed = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-                if ctrl_pressed:
-                    # Ctrl+框选：添加到现有选择
-                    current_selection = self.model.get_selection()
-                    new_selection = list(set(current_selection + selected_indices))
-                    self.model.set_selection(new_selection)
-                else:
-                    # 普通框选：替换选择
-                    self.model.set_selection(selected_indices)
+                try:
+                    select_rect = self._box_select_rect_item.rect()
+                    self._box_select_rect_item.setVisible(False)
+                    
+                    # 查找框内的所有 RegionTextItem
+                    selected_indices = []
+                    for i, item in enumerate(self._region_items):
+                        if isinstance(item, RegionTextItem):
+                            # 检查 item 的边界是否与选择框相交
+                            item_rect = item.sceneBoundingRect()
+                            if select_rect.intersects(item_rect):
+                                selected_indices.append(i)
+                    
+                    # 更新选择
+                    ctrl_pressed = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+                    if ctrl_pressed:
+                        # Ctrl+框选：添加到现有选择
+                        current_selection = self.model.get_selection()
+                        new_selection = list(set(current_selection + selected_indices))
+                        self.model.set_selection(new_selection)
+                    else:
+                        # 普通框选：替换选择
+                        self.model.set_selection(selected_indices)
+                except RuntimeError:
+                    # C++ 对象已被删除，重置引用
+                    self._box_select_rect_item = None
             
             event.accept()
             return

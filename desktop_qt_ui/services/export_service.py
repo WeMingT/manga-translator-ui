@@ -184,26 +184,27 @@ class ExportService:
                 )
                 
                 if rendered_text_layer:
-                    # Composite the text layer onto the original image
-                    final_image = image.copy()
-                    if final_image.mode != 'RGBA':
-                        temp_img = final_image.convert('RGBA')
-                        final_image.close()  # 释放旧图像
-                        final_image = temp_img
-                    if rendered_text_layer.mode != 'RGBA':
-                        temp_layer = rendered_text_layer.convert('RGBA')
-                        rendered_text_layer.close()  # 释放旧图像
-                        rendered_text_layer = temp_layer
+                    # 检查是否开启了超分（通过尺寸判断）
+                    # 如果后端返回的图片尺寸与原图不同，说明进行了超分处理
+                    # 此时后端返回的是完整的渲染结果（超分背景+文字），直接使用即可
+                    if image.size != rendered_text_layer.size:
+                        self.logger.info(f"检测到超分: 原图 {image.size}, 渲染结果 {rendered_text_layer.size}. 直接使用超分后的完整结果。")
+                        final_image = rendered_text_layer
+                        rendered_text_layer = None  # 避免后续释放
+                    else:
+                        # 尺寸相同，按原逻辑合成文字层到原图
+                        final_image = image.copy()
+                        if final_image.mode != 'RGBA':
+                            temp_img = final_image.convert('RGBA')
+                            final_image.close()
+                            final_image = temp_img
+                        if rendered_text_layer.mode != 'RGBA':
+                            temp_layer = rendered_text_layer.convert('RGBA')
+                            rendered_text_layer.close()
+                            rendered_text_layer = temp_layer
 
-                    # Ensure sizes match before pasting, resizing if necessary
-                    if final_image.size != rendered_text_layer.size:
-                        self.logger.warning(f"Size mismatch: Original {final_image.size}, Rendered {rendered_text_layer.size}. Resizing text layer.")
-                        temp_layer = rendered_text_layer.resize(final_image.size, Image.LANCZOS)
-                        rendered_text_layer.close()  # 释放旧图像
-                        rendered_text_layer = temp_layer
-
-                    final_image.paste(rendered_text_layer, (0, 0), rendered_text_layer)
-                    rendered_text_layer.close()  # 释放渲染层
+                        final_image.paste(rendered_text_layer, (0, 0), rendered_text_layer)
+                        rendered_text_layer.close()
 
                     # --- Safer saving logic ---
                     temp_output_path = output_path + ".tmp"
@@ -277,6 +278,12 @@ class ExportService:
     
     def _save_regions_data(self, regions_data: List[Dict[str, Any]], json_path: str, mask: Optional[np.ndarray] = None, config: Optional[Dict[str, Any]] = None):
         """保存区域数据到JSON文件，确保格式与TextBlock兼容"""
+        # 获取超分倍率，用于放大坐标
+        upscale_ratio = 1
+        if config:
+            upscale_config = config.get('upscale', {})
+            upscale_ratio = upscale_config.get('upscale_ratio', 0) or 1
+        
         # 准备保存数据，确保数据格式正确
         save_data = []
         for region in regions_data:
@@ -441,19 +448,19 @@ class ExportService:
         """准备翻译器参数"""
         translator_params = {}
         
-        # 提取字体路径
+        # 字体路径处理：让后端自己处理，不在这里转换
+        # 后端的 set_font 会在路径不存在时自动回退到 DEFAULT_FONT
+        # 只有当配置中是绝对路径且存在时才传递
         render_config = config.get('render', {})
-        font_filename = render_config.get('font_path')
-        if font_filename:
-            font_full_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)), 'fonts', font_filename
-            )
-            font_full_path = os.path.abspath(font_full_path)
-            if os.path.exists(font_full_path):
-                translator_params['font_path'] = font_full_path
-                # 同时更新 config 中的 font_path
-                config['render']['font_path'] = font_full_path
-                self.logger.info(f"设置字体路径: {font_full_path}")
+        font_path_value = render_config.get('font_path')
+        if font_path_value and os.path.isabs(font_path_value) and os.path.exists(font_path_value):
+            translator_params['font_path'] = font_path_value
+            self.logger.info(f"设置字体路径: {font_path_value}")
+        else:
+            # 清除相对路径，让后端使用默认字体
+            if 'render' in config and 'font_path' in config['render']:
+                config['render']['font_path'] = None
+            self.logger.info("使用后端默认字体")
         
         # 提取输出格式
         output_format = self.get_output_format_from_config(config)
