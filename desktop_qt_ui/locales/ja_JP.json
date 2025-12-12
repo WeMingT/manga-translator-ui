@@ -224,6 +224,7 @@
   "Drag and drop files or folders here\nor click the buttons above to add": "ファイルまたはフォルダをここにドラッグ＆ドロップ\nまたは上のボタンをクリックして追加",
   "Start Translation": "翻訳を開始",
   "Stop Translation": "翻訳を停止",
+  "Stopping...": "停止中...",
   "Export Translation": "翻訳をエクスポート",
   "Translation Workflow Mode:": "翻訳ワークフローモード：",
   "Output Directory:": "出力ディレクトリ：",

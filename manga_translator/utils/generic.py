@@ -288,19 +288,28 @@ class AvgMeter():
             return 0
 
 def load_image(img: Image.Image) -> Tuple[np.ndarray, Optional[Image.Image]]:
+    """
+    将 PIL Image 转换为 RGB numpy 数组，并提取 alpha 通道（如果有）。
+    
+    Args:
+        img: PIL.Image.Image 对象
+        
+    Returns:
+        Tuple[np.ndarray, Optional[Image.Image]]: RGB 数组和 alpha 通道
+    """
     if img.mode == 'RGBA':
         # from https://stackoverflow.com/questions/9166400/convert-rgba-png-to-rgb-with-pil
         img.load()  # needed for split()
         background = Image.new('RGB', img.size, (255, 255, 255))
         alpha_ch = img.split()[3]
-        background.paste(img, mask = alpha_ch)  # 3 is the alpha channel
+        background.paste(img, mask=alpha_ch)  # 3 is the alpha channel
         return np.array(background), alpha_ch
     elif img.mode == 'P':
         img = img.convert('RGBA')
         img.load()  # needed for split()
         background = Image.new('RGB', img.size, (255, 255, 255))
         alpha_ch = img.split()[3]
-        background.paste(img, mask = alpha_ch)  # 3 is the alpha channel
+        background.paste(img, mask=alpha_ch)  # 3 is the alpha channel
         return np.array(background), alpha_ch
     else:
         return np.array(img.convert('RGB')), None

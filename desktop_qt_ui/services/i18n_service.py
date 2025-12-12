@@ -179,6 +179,7 @@ class I18nManager:
                 # 翻译相关
                 "Start Translation": "开始翻译",
                 "Stop Translation": "停止翻译",
+                "Stopping...": "停止中...",
                 "Translation Settings": "翻译设置",
                 "Translator": "翻译引擎",
                 "Target Language": "目标语言",

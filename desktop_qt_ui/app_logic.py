@@ -1458,9 +1458,11 @@ class MainAppLogic(QObject):
         if self.thread and self.thread.isRunning():
             self._ui_log("正在请求停止翻译线程...")
 
-            # 立即更新UI状态：设置为非翻译状态
-            self.state_manager.set_translating(False)
+            # 立即更新按钮为"停止中..."状态并禁用，防止重复点击
+            # 但不更新 is_translating 状态，等线程真正结束后再更新
             self.state_manager.set_status_message("正在停止...")
+            if hasattr(self, 'main_view') and self.main_view:
+                self.main_view.set_stopping_state()
 
             # 1. 通知 worker 停止（设置标志）
             if self.worker:
@@ -1472,10 +1474,15 @@ class MainAppLogic(QObject):
             # 2. 请求线程退出事件循环
             self.thread.quit()
             
-            # 3. 连接 finished 信号以清理资源
+            # 3. 连接 finished 信号以清理资源，并在线程真正结束后更新状态
             def on_thread_finished():
                 self._ui_log("翻译线程已正常停止")
+                # 线程结束后才更新翻译状态，与进度条重置时机一致
+                self.state_manager.set_translating(False)
                 self.state_manager.set_status_message("任务已停止")
+                # 重置进度条
+                if hasattr(self, 'main_view') and self.main_view:
+                    self.main_view.reset_progress()
                 self.thread = None
                 self.worker = None
             
@@ -1489,7 +1496,6 @@ class MainAppLogic(QObject):
         
         self._ui_log("请求停止任务，但没有正在运行的线程。", "WARNING")
         self.state_manager.set_translating(False)
-        return False
         return False
     # endregion
 

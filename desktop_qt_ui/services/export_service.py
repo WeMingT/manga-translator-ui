@@ -129,10 +129,14 @@ class ExportService:
             success_callback: 成功回调
             error_callback: 错误回调
         """
-        if not image or not regions_data:
+        if not image:
             if error_callback:
-                error_callback("没有图片或区域数据可导出")
+                error_callback("没有图片可导出")
             return
+        
+        # regions_data 可以为空列表，此时导出原图（可能经过上色/超分处理）
+        if regions_data is None:
+            regions_data = []
         
         if progress_callback:
             progress_callback("开始导出渲染图片...")
