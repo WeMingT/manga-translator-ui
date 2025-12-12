@@ -232,6 +232,7 @@
   "Drag and drop files or folders here\nor click the buttons above to add": "拖拽文件或文件夹到此处\n或点击上方按钮添加",
   "Start Translation": "开始翻译",
   "Stop Translation": "停止翻译",
+  "Stopping...": "停止中...",
   "Export Translation": "导出翻译",
   "Translation Workflow Mode:": "翻译流程模式：",
   "Output Directory:": "输出目录:",

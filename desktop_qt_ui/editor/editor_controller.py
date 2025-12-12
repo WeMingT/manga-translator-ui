@@ -1583,17 +1583,22 @@ class EditorController(QObject):
         try:
             image = self._get_current_image()
             regions = self._get_regions()
-            if not image or not regions:
-                self.logger.warning("Cannot export: missing image or regions data")
+            if not image:
+                self.logger.warning("Cannot export: missing image data")
                 if hasattr(self, 'toast_manager'):
-                    self.toast_manager.show_error("导出失败：缺少图像或区域数据")
+                    self.toast_manager.show_error("导出失败：缺少图像数据")
                 return
+            
+            # regions 可以为空列表，此时导出原图（可能经过上色/超分处理）
+            if regions is None:
+                regions = []
 
             mask = self.model.get_refined_mask()
             if mask is None:
                 mask = self.model.get_raw_mask()
-            if mask is None:
-                self.logger.warning("Cannot export: no mask data available")
+            # 如果没有区域，mask 可以为 None，后端会处理
+            if mask is None and regions:
+                self.logger.warning("Cannot export: no mask data available for regions")
                 if hasattr(self, 'toast_manager'):
                     self.toast_manager.show_error("导出失败：没有可用的蒙版数据")
                 return

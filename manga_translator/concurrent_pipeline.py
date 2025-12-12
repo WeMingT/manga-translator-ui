@@ -114,18 +114,27 @@ class ConcurrentPipeline:
                 ctx.img_rgb, ctx.img_alpha = load_image(image)
                 
                 if config.colorizer.colorizer.value != 'none':
-                    ctx.img_colorized = await self.translator._run_colorizer(config, ctx)
+                    colorized_result = await self.translator._run_colorizer(config, ctx)
+                    # colorizer 返回 PIL Image，需要转换为 numpy
+                    if hasattr(colorized_result, 'mode'):  # PIL Image
+                        ctx.img_colorized, _ = load_image(colorized_result)
+                    else:
+                        ctx.img_colorized = colorized_result
                 else:
                     ctx.img_colorized = ctx.img_rgb
                 
                 if config.upscale.upscale_ratio:
-                    ctx.upscaled = await self.translator._run_upscaling(config, ctx)
+                    upscaled_result = await self.translator._run_upscaling(config, ctx)
+                    # upscaler 返回 PIL Image，需要转换为 numpy
+                    if hasattr(upscaled_result, 'mode'):  # PIL Image
+                        ctx.upscaled, _ = load_image(upscaled_result)
+                    else:
+                        ctx.upscaled = upscaled_result
                 else:
                     ctx.upscaled = ctx.img_colorized
                 
-                # ✅ 关键修复：将upscaled重新加载为img_rgb（与标准流程一致）
-                # 这样后续的检测、OCR、修复、渲染都基于upscaled
-                ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
+                # 更新 img_rgb 为 upscaled 结果（现在都是 numpy.ndarray）
+                ctx.img_rgb = ctx.upscaled
                 
                 # 检测（在线程池中执行，避免阻塞事件循环）
                 loop = asyncio.get_event_loop()

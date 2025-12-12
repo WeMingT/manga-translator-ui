@@ -1200,6 +1200,16 @@ class MainView(QWidget):
                 pass
             self.start_button.clicked.connect(self.controller.stop_task)
 
+    def set_stopping_state(self):
+        """设置按钮为"停止中..."状态，禁用按钮防止重复点击"""
+        self.start_button.setEnabled(False)
+        self.start_button.setText(self._t("Stopping..."))
+        self.start_button.setStyleSheet("background-color: #888888; color: white;")
+        try:
+            self.start_button.clicked.disconnect()
+        except TypeError:
+            pass
+
     def _sync_workflow_mode_from_config(self):
         """从配置同步下拉框的选择"""
         try:

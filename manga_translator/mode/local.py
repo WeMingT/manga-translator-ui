@@ -74,6 +74,10 @@ def parse_args():
     parser.add_argument('--resume', action='store_true',
                         help='从上次中断的位置继续（需要配合 --subprocess 使用）')
     
+    # 并发模式参数
+    parser.add_argument('--concurrent', action='store_true',
+                        help='启用并发流水线模式（检测、OCR、翻译、渲染并行处理）')
+    
     return parser.parse_args()
 
 
@@ -142,6 +146,11 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     if hasattr(args, 'attempts') and args.attempts is not None:
         cli_config['attempts'] = args.attempts
     
+    # concurrent: 命令行参数优先，否则使用配置文件中的值
+    if hasattr(args, 'concurrent') and args.concurrent:
+        cli_config['batch_concurrent'] = True
+    # 如果命令行没有指定，保留配置文件中的 batch_concurrent 值（已在 cli_config 中）
+    
     config_dict['cli'] = cli_config
     
     print(f"\n{'='*60}")
@@ -149,6 +158,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     print(f"目标语言: {config_dict['translator']['target_lang']}")
     print(f"使用 GPU: {cli_config.get('use_gpu', True)}")
     print(f"批量大小: {cli_config.get('batch_size', 1)}")
+    print(f"并发模式: {'启用' if cli_config.get('batch_concurrent', False) else '禁用'}")
     print(f"覆盖已存在文件: {overwrite}")
     print(f"输出格式: {cli_config.get('format') or '保持原格式'}")
     print(f"保存质量: {cli_config.get('save_quality', 95)}")
@@ -306,7 +316,9 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
             print(f"      - {folder}")
     print()
     
-    # ✅ 按批次加载和处理图片，避免一次性加载所有图片到内存
+    # 根据是否启用并发模式选择不同的处理方式
+    use_concurrent = cli_config.get('batch_concurrent', False)
+    
     try:
         print(f"🚀 开始翻译...")
         print(f"📋 传递给翻译器的 save_info:")
@@ -315,38 +327,30 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         print(f"   overwrite: {save_info['overwrite']}")
         print(f"   input_folders: {save_info['input_folders']}")
         print()
-        print(f"⏳ 开始批量翻译（按批次加载图片以节省内存）...")
-        logger.info(f"开始批量翻译，save_info={save_info}")
         
         import sys
         sys.stdout.flush()  # 强制刷新输出
         
-        # ✅ 按批次加载和处理图片
-        # 前端分批加载的批次大小（用于内存管理）
-        frontend_batch_size = 10  # 每次最多加载10张图片到内存
-        total_frontend_batches = (total_images + frontend_batch_size - 1) // frontend_batch_size
-        
         all_contexts = []
-        processed_images_count = 0  # 已处理的图片总数
         
-        for frontend_batch_num in range(total_frontend_batches):
-            batch_start = frontend_batch_num * frontend_batch_size
-            batch_end = min(batch_start + frontend_batch_size, total_images)
-            current_batch_paths = file_paths_with_configs[batch_start:batch_end]
+        if use_concurrent:
+            # ✅ 并发模式：一次性传递所有文件路径，让 ConcurrentPipeline 内部管理加载
+            print(f"⏳ 并发流水线模式：一次性处理 {total_images} 张图片...")
+            logger.info(f"开始并发批量翻译，save_info={save_info}")
             
-            # 加载当前批次的图片（静默加载，不显示前端批次信息）
+            # 创建带文件路径的 Image 对象（不加载数据，只设置 name 属性）
             images_with_configs = []
-            for file_path, config in current_batch_paths:
+            for file_path, config in file_paths_with_configs:
+                # 创建一个轻量级的 Image 占位符，只包含路径信息
+                # ConcurrentPipeline 会根据 image.name 自己加载图片
                 try:
-                    with open(file_path, 'rb') as f:
-                        image = Image.open(f)
-                        image.load()  # 加载图片数据
+                    image = Image.open(file_path)
+                    # 不调用 load()，让 ConcurrentPipeline 按需加载
                     image.name = file_path
                     images_with_configs.append((image, config))
                 except Exception as e:
-                    logger.error(f"Failed to load image {file_path}: {e}")
-                    print(f"❌ 无法加载: {os.path.basename(file_path)} - {e}")
-                    # 创建一个错误上下文
+                    logger.error(f"Failed to open image {file_path}: {e}")
+                    print(f"❌ 无法打开: {os.path.basename(file_path)} - {e}")
                     from manga_translator.utils import Context
                     error_ctx = Context()
                     error_ctx.image_name = file_path
@@ -354,17 +358,15 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                     all_contexts.append(error_ctx)
             
             if images_with_configs:
-                # 传递全局偏移量给后端，让后端显示正确的全局图片编号
                 batch_contexts = await translator.translate_batch(
-                    images_with_configs, 
+                    images_with_configs,
                     save_info=save_info,
-                    global_offset=processed_images_count,  # 传递已处理的图片数
-                    global_total=total_images  # 传递总图片数
+                    global_offset=0,
+                    global_total=total_images
                 )
                 all_contexts.extend(batch_contexts)
-                processed_images_count += len(images_with_configs)
                 
-                # ✅ 批次处理完成后，立即清理图片对象
+                # 清理 Image 对象
                 for image, _ in images_with_configs:
                     if hasattr(image, 'close'):
                         try:
@@ -373,9 +375,66 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                             pass
                 images_with_configs.clear()
                 
-                # 强制垃圾回收
                 import gc
                 gc.collect()
+        else:
+            # ✅ 非并发模式：按批次加载和处理图片，避免一次性加载所有图片到内存
+            print(f"⏳ 开始批量翻译（按批次加载图片以节省内存）...")
+            logger.info(f"开始批量翻译，save_info={save_info}")
+            
+            # 前端分批加载的批次大小（用于内存管理）
+            frontend_batch_size = 10  # 每次最多加载10张图片到内存
+            total_frontend_batches = (total_images + frontend_batch_size - 1) // frontend_batch_size
+            
+            processed_images_count = 0  # 已处理的图片总数
+            
+            for frontend_batch_num in range(total_frontend_batches):
+                batch_start = frontend_batch_num * frontend_batch_size
+                batch_end = min(batch_start + frontend_batch_size, total_images)
+                current_batch_paths = file_paths_with_configs[batch_start:batch_end]
+                
+                # 加载当前批次的图片（静默加载，不显示前端批次信息）
+                images_with_configs = []
+                for file_path, config in current_batch_paths:
+                    try:
+                        with open(file_path, 'rb') as f:
+                            image = Image.open(f)
+                            image.load()  # 加载图片数据
+                        image.name = file_path
+                        images_with_configs.append((image, config))
+                    except Exception as e:
+                        logger.error(f"Failed to load image {file_path}: {e}")
+                        print(f"❌ 无法加载: {os.path.basename(file_path)} - {e}")
+                        # 创建一个错误上下文
+                        from manga_translator.utils import Context
+                        error_ctx = Context()
+                        error_ctx.image_name = file_path
+                        error_ctx.translation_error = str(e)
+                        all_contexts.append(error_ctx)
+                
+                if images_with_configs:
+                    # 传递全局偏移量给后端，让后端显示正确的全局图片编号
+                    batch_contexts = await translator.translate_batch(
+                        images_with_configs, 
+                        save_info=save_info,
+                        global_offset=processed_images_count,  # 传递已处理的图片数
+                        global_total=total_images  # 传递总图片数
+                    )
+                    all_contexts.extend(batch_contexts)
+                    processed_images_count += len(images_with_configs)
+                    
+                    # ✅ 批次处理完成后，立即清理图片对象
+                    for image, _ in images_with_configs:
+                        if hasattr(image, 'close'):
+                            try:
+                                image.close()
+                            except:
+                                pass
+                    images_with_configs.clear()
+                    
+                    # 强制垃圾回收
+                    import gc
+                    gc.collect()
         
         contexts = all_contexts
         
