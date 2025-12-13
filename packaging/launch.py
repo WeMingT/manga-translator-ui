@@ -156,10 +156,59 @@ def run_pip_requirements(requirements_file, desc=None):
     import urllib.parse
     from pathlib import Path
     
-    def build_pip_command(pip_args, mirror_url=None):
+    # 读取 requirements 文件
+    req_path = Path(requirements_file)
+    if not req_path.exists():
+        raise RuntimeError(f"找不到依赖文件: {requirements_file}")
+    
+    # 解析 requirements 文件，提取有效的包和 --extra-index-url
+    packages = []
+    extra_index_urls = []  # 存储 --extra-index-url 参数
+    
+    with open(req_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            # 跳过空行、注释
+            if not line or line.startswith('#'):
+                continue
+            # 解析 --extra-index-url 选项
+            if line.startswith('--extra-index-url'):
+                parts = line.split(None, 1)  # 按空白分割，最多分2部分
+                if len(parts) == 2:
+                    extra_index_urls.append(parts[1].strip())
+                continue
+            # 跳过其他 pip 选项
+            if line.startswith('-'):
+                continue
+            # 去除行内注释
+            line = line.split('#')[0].strip()
+            if line:
+                packages.append(line)
+    
+    # 需要从 extra-index-url 下载的包前缀列表
+    pytorch_packages = ['torch', 'torchvision', 'torchaudio', 'xformers']
+    
+    def is_pytorch_package(pkg_name):
+        """检查是否是需要从 PyTorch 源下载的包"""
+        pkg_lower = pkg_name.lower()
+        for prefix in pytorch_packages:
+            if pkg_lower.startswith(prefix):
+                return True
+        return False
+    
+    def build_pip_command(pip_args, mirror_url=None, use_extra_index=False):
         """构建pip命令"""
         index_url_line = f' --index-url {mirror_url}' if mirror_url else ''
+        extra_index_line = ''
         trusted_host_line = ''
+        
+        # 如果需要使用 extra-index-url（用于 torch 等包）
+        if use_extra_index and extra_index_urls:
+            for extra_url in extra_index_urls:
+                extra_index_line += f' --extra-index-url {extra_url}'
+                parsed_extra = urllib.parse.urlparse(extra_url)
+                if parsed_extra.hostname:
+                    trusted_host_line += f' --trusted-host {parsed_extra.hostname}'
         
         if mirror_url:
             parsed = urllib.parse.urlparse(mirror_url)
@@ -167,25 +216,7 @@ def run_pip_requirements(requirements_file, desc=None):
                 trusted_host_line += f' --trusted-host {parsed.hostname}'
             trusted_host_line += ' --trusted-host download.pytorch.org'
         
-        return f'"{python}" -m pip {pip_args} --prefer-binary{index_url_line}{trusted_host_line} --disable-pip-version-check --no-warn-script-location'
-    
-    # 读取 requirements 文件
-    req_path = Path(requirements_file)
-    if not req_path.exists():
-        raise RuntimeError(f"找不到依赖文件: {requirements_file}")
-    
-    # 解析 requirements 文件，提取有效的包
-    packages = []
-    with open(req_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            # 跳过空行、注释、pip选项
-            if not line or line.startswith('#') or line.startswith('-'):
-                continue
-            # 去除行内注释
-            line = line.split('#')[0].strip()
-            if line:
-                packages.append(line)
+        return f'"{python}" -m pip {pip_args} --prefer-binary{index_url_line}{extra_index_line}{trusted_host_line} --disable-pip-version-check --no-warn-script-location'
     
     if not packages:
         print(f"[警告] {requirements_file} 中没有找到有效的依赖包")
@@ -211,10 +242,15 @@ def run_pip_requirements(requirements_file, desc=None):
         mirror_name = urllib.parse.urlparse(mirror).hostname or mirror
         
         # 获取包名用于显示（去除版本约束）
-        pkg_display = pkg.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].strip()
+        pkg_display = pkg.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].split('@')[0].strip()
         print(f"[{pkg_idx + 1}/{total}] 安装 {pkg_display}...")
         
-        cmd = build_pip_command(f'install "{pkg}"', mirror)
+        # 检查是否是 PyTorch 相关包，需要使用 extra-index-url
+        use_extra = is_pytorch_package(pkg_display)
+        if use_extra and extra_index_urls:
+            print(f"    (使用 PyTorch 源: {extra_index_urls[0]})")
+        
+        cmd = build_pip_command(f'install "{pkg}"', mirror, use_extra_index=use_extra)
         
         try:
             result = subprocess.run(cmd, shell=True, env=os.environ)
