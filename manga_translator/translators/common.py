@@ -1026,11 +1026,11 @@ def parse_json_or_text_response(result_text: str) -> List[str]:
     
     # 保存原始文本用于调试
     original_text = result_text
-        
+    
+    import re
+    
     # 清理可能的Markdown代码块（更强健的处理）
     if "```" in result_text:
-        # 尝试提取代码块内容
-        import re
         # 匹配 ```json ... ``` 或 ``` ... ```
         code_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', result_text, re.DOTALL)
         if code_block_match:
@@ -1045,6 +1045,12 @@ def parse_json_or_text_response(result_text: str) -> List[str]:
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             result_text = "\n".join(lines).strip()
+    
+    # 清理可能的单独 "json" 标记行（AI有时会在JSON前加这个）
+    lines = result_text.split('\n')
+    if len(lines) > 1 and lines[0].strip().lower() in ['json', 'json:', '```json', '```']:
+        result_text = "\n".join(lines[1:]).strip()
+        logger.debug(f"移除了开头的标记行: {lines[0].strip()}")
     
     translations = []
     try:
