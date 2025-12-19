@@ -1046,11 +1046,25 @@ def parse_json_or_text_response(result_text: str) -> List[str]:
                 lines = lines[:-1]
             result_text = "\n".join(lines).strip()
     
-    # 清理可能的单独 "json" 标记行（AI有时会在JSON前加这个）
-    lines = result_text.split('\n')
-    if len(lines) > 1 and lines[0].strip().lower() in ['json', 'json:', '```json', '```']:
-        result_text = "\n".join(lines[1:]).strip()
-        logger.debug(f"移除了开头的标记行: {lines[0].strip()}")
+    # 直接查找第一个 [ 或 {，去掉前面的所有内容（更通用的清理方式）
+    first_bracket = result_text.find('[')
+    first_brace = result_text.find('{')
+    
+    # 找到第一个JSON起始符号的位置
+    json_start = -1
+    if first_bracket != -1 and first_brace != -1:
+        json_start = min(first_bracket, first_brace)
+    elif first_bracket != -1:
+        json_start = first_bracket
+    elif first_brace != -1:
+        json_start = first_brace
+    
+    # 如果找到了JSON起始符号，且前面有其他内容，则去掉前面的内容
+    if json_start > 0:
+        removed_prefix = result_text[:json_start].strip()
+        result_text = result_text[json_start:].strip()
+        if removed_prefix:
+            logger.debug(f"移除了JSON前的内容: {removed_prefix[:50]}...")
     
     translations = []
     try:
