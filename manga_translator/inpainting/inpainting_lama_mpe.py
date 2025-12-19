@@ -481,14 +481,15 @@ class LamaLargeInpainter(LamaMPEInpainter):
         
         return super()._check_downloaded_map(map_key)
 
-    async def _load(self, device: str):
+    async def _load(self, device: str, force_torch: bool = False):
         self.device = device
         
-        # ✅ CPU模式使用ONNX（解决虚拟内存泄漏）
-        if not device.startswith('cuda') and device != 'mps':
+        # ✅ CPU模式使用ONNX（除非强制使用PyTorch）
+        if not device.startswith('cuda') and device != 'mps' and not force_torch:
             try:
                 import onnxruntime as ort
                 onnx_path = self._get_file_path('lamalarge.onnx')
+                ckpt_path = self._get_file_path('lama_large_512px.ckpt')
                 
                 # 检查 ONNX 文件是否存在
                 if not os.path.isfile(onnx_path):
@@ -498,12 +499,23 @@ class LamaLargeInpainter(LamaMPEInpainter):
                     await self._download()
                     self._downloaded = True
                 
+                # ⚠️ 检查备用的 PyTorch 模型是否存在（用于 ONNX 失败时降级）
+                if not os.path.isfile(ckpt_path):
+                    self.logger.warning(f'备用 PyTorch 模型不存在: {ckpt_path}')
+                    self.logger.warning('如果 ONNX 推理失败，将无法降级到 PyTorch')
+                    self.logger.warning('建议确保打包时包含完整的 models 文件夹')
+                
                 self.logger.info(f'使用ONNX模型（CPU优化）: {onnx_path}')
                 
-                # 🔧 内存优化配置
+                # 🔧 ONNX Runtime 配置
                 sess_options = ort.SessionOptions()
-                sess_options.enable_mem_pattern = False  # 禁用内存模式优化
-                sess_options.enable_cpu_mem_arena = False  # 禁用CPU内存池，按需分配
+                
+                # ✅ 限制线程数，减少并发内存压力
+                sess_options.intra_op_num_threads = 4  # 单个操作内的并行度
+                sess_options.inter_op_num_threads = 1  # 操作间的并行度
+                
+                # ✅ 图优化级别
+                sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
                 
                 self.session = ort.InferenceSession(
                     onnx_path,
@@ -511,10 +523,14 @@ class LamaLargeInpainter(LamaMPEInpainter):
                     providers=['CPUExecutionProvider']
                 )
                 self.backend = 'onnx'
-                self.logger.info(f'ONNX Runtime版本: {ort.__version__}（内存优化模式）')
+                self.logger.info(f'ONNX Runtime版本: {ort.__version__}')
                 return
             except Exception as e:
                 self.logger.warning(f'ONNX加载失败，回退到PyTorch: {e}')
+        
+        # ✅ 强制使用PyTorch或GPU模式
+        if force_torch:
+            self.logger.info('已启用"强制使用PyTorch"选项，跳过ONNX')
         
         # ✅ GPU模式或ONNX失败时使用PyTorch
         ckpt_path = self._get_file_path('lama_large_512px.ckpt')
@@ -552,10 +568,10 @@ class LamaLargeInpainter(LamaMPEInpainter):
                     self.logger.info('正在加载PyTorch模型...')
                     ckpt_path = self._get_file_path('lama_large_512px.ckpt')
                     if not os.path.isfile(ckpt_path):
-                        self.logger.info('PyTorch 模型 (.ckpt) 不存在，需要下载')
-                        self._downloaded = False
-                        await self._download()
-                        self._downloaded = True
+                        self.logger.error(f'PyTorch 模型文件不存在: {ckpt_path}')
+                        self.logger.error('ONNX 推理失败且 PyTorch 模型缺失，无法进行修复')
+                        self.logger.error('请确保打包时包含了完整的 models 文件夹')
+                        raise FileNotFoundError(f'模型文件缺失: {ckpt_path}，且无法下载（打包环境限制）')
                     self.model = load_lama_mpe(ckpt_path, device='cpu', use_mpe=False, large_arch=True)
                     self.model.eval()
                     if self.device.startswith('cuda') or self.device == 'mps':
@@ -566,61 +582,103 @@ class LamaLargeInpainter(LamaMPEInpainter):
     
     async def _infer_onnx(self, image: np.ndarray, mask: np.ndarray, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
         """ONNX专用推理方法"""
-        img_original = np.copy(image)
-        mask_original = np.copy(mask)
-        mask_original[mask_original < 127] = 0
-        mask_original[mask_original >= 127] = 1
-        mask_original = mask_original[:, :, None]
+        import gc
         
-        height, width, c = image.shape
-        if max(image.shape[0: 2]) > inpainting_size:
-            if height > width:
-                new_h = inpainting_size
-                new_w = int(width * new_h / height / 16) * 16
+        img_original = None
+        mask_original = None
+        img = None
+        mask_input = None
+        img_inpainted = None
+        
+        try:
+            img_original = np.copy(image)
+            mask_original = np.copy(mask)
+            mask_original[mask_original < 127] = 0
+            mask_original[mask_original >= 127] = 1
+            mask_original = mask_original[:, :, None]
+            
+            height, width, c = image.shape
+            
+            # 计算推理尺寸
+            if max(image.shape[0: 2]) > inpainting_size:
+                if height > width:
+                    new_h = inpainting_size
+                    new_w = int(width * new_h / height / 16) * 16
+                else:
+                    new_w = inpainting_size
+                    new_h = int(height * new_w / width / 16) * 16
             else:
-                new_w = inpainting_size
-                new_h = int(height * new_w / width / 16) * 16
-        else:
-            new_h = height
-            new_w = width
-        new_h = int(new_h / 16) * 16
-        new_w = int(new_w / 16) * 16
-        
-        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        
-        # ✅ 修复：使用mask_original而非mask
-        if new_h == height and new_w == width:
-            mask_resized = mask_original
-        else:
-            mask_resized = cv2.resize(mask_original, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-            if len(mask_resized.shape) == 2:
-                mask_resized = mask_resized[:, :, None]
-        
-        # 准备输入（0-1归一化，匹配ONNX模型）
-        img = image.astype(np.float32) / 255.0
-        img = np.transpose(img, (2, 0, 1))[None, ...]  # [1, 3, H, W]
-        
-        # ✅ 修复：正确处理mask维度
-        mask_input = mask_resized.astype(np.float32)[:, :, 0:1]
-        mask_input = np.transpose(mask_input, (2, 0, 1))[None, ...]  # [1, 1, H, W]
-        
-        # ONNX推理
-        ort_inputs = {
-            'image': img.astype(np.float32),
-            'mask': mask_input.astype(np.float32)
-        }
-        img_inpainted = self.session.run(None, ort_inputs)[0]
-        
-        # 后处理（0-1反归一化）
-        img_inpainted = np.transpose(img_inpainted[0], (1, 2, 0))  # [H, W, 3]
-        img_inpainted = (img_inpainted * 255.).astype(np.uint8)
-        
-        if new_h != height or new_w != width:
-            img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_LINEAR)
-        
-        ans = img_inpainted * mask_original + img_original * (1 - mask_original)
-        
-        return ans
+                new_h = height
+                new_w = width
+            new_h = int(new_h / 16) * 16
+            new_w = int(new_w / 16) * 16
+            
+            # 记录内存使用情况（用于调试）
+            estimated_memory_mb = (new_h * new_w * 3 * 4 * 2) / (1024 * 1024)  # 粗略估算
+            if verbose:
+                self.logger.debug(f'ONNX推理尺寸: {new_w}x{new_h}, 预估内存: {estimated_memory_mb:.1f}MB')
+            
+            image_resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            
+            # ✅ 修复：使用mask_original而非mask
+            if new_h == height and new_w == width:
+                mask_resized = mask_original
+            else:
+                mask_resized = cv2.resize(mask_original, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                if len(mask_resized.shape) == 2:
+                    mask_resized = mask_resized[:, :, None]
+            
+            # 准备输入（0-1归一化，匹配ONNX模型）
+            img = image_resized.astype(np.float32) / 255.0
+            img = np.transpose(img, (2, 0, 1))[None, ...]  # [1, 3, H, W]
+            
+            # ✅ 修复：正确处理mask维度
+            mask_input = mask_resized.astype(np.float32)[:, :, 0:1]
+            mask_input = np.transpose(mask_input, (2, 0, 1))[None, ...]  # [1, 1, H, W]
+            
+            # 释放不再需要的中间变量
+            del image_resized, mask_resized
+            
+            # ONNX推理
+            ort_inputs = {
+                'image': img,
+                'mask': mask_input
+            }
+            img_inpainted = self.session.run(None, ort_inputs)[0]
+            
+            # 立即释放输入数据
+            del img, mask_input, ort_inputs
+            
+            # 后处理（0-1反归一化）
+            img_inpainted = np.transpose(img_inpainted[0], (1, 2, 0))  # [H, W, 3]
+            img_inpainted = (img_inpainted * 255.).astype(np.uint8)
+            
+            if new_h != height or new_w != width:
+                img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_LINEAR)
+            
+            ans = img_inpainted * mask_original + img_original * (1 - mask_original)
+            
+            # 清理临时变量
+            del img_original, mask_original, img_inpainted
+            
+            # 强制垃圾回收，减少内存碎片
+            gc.collect()
+            
+            return ans
+            
+        except Exception as e:
+            # 清理所有临时变量
+            del img_original, mask_original, img, mask_input, img_inpainted
+            gc.collect()
+            
+            # 记录详细的错误信息
+            self.logger.error(f'ONNX推理异常: {type(e).__name__}: {str(e)}')
+            if 'bad allocation' in str(e) or 'allocation' in str(e).lower():
+                self.logger.error(f'内存分配失败 - 这可能是内存碎片化导致的')
+                self.logger.error(f'图片尺寸: {image.shape}, 推理尺寸: {new_w}x{new_h}')
+                self.logger.error('这不是总内存不足，而是无法分配连续内存块')
+                self.logger.error('将自动降级到 PyTorch 模式（如果可用）')
+            raise
 
 
 

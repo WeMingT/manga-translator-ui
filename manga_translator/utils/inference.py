@@ -321,18 +321,18 @@ class ModelWrapper(ABC):
                 if not os.access(p, os.X_OK):
                     os.chmod(p, os.stat(p).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    async def reload(self, device: str, *args, **kwargs):
+    async def reload(self, device: str, **kwargs):
         await self.unload()
-        await self.load(*args, **kwargs, device=device)
+        await self.load(device=device, **kwargs)
 
-    async def load(self, device: str, *args, **kwargs):
+    async def load(self, device: str, **kwargs):
         '''
         Loads models into memory. Has to be called before `forward`.
         '''
         if not self.is_downloaded():
             await self.download()
         if not self.is_loaded():
-            await self._load(*args, **kwargs, device=device)
+            await self._load(device=device, **kwargs)
             self._loaded = True
 
     async def unload(self):
