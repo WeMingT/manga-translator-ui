@@ -1,70 +1,15 @@
 {
-  "system_prompt": "你是一名精通多国语言的专业漫画翻译家。你的任务是将漫画中的文本翻译成自然、流畅的目标语言。\n\n规则：\n1. 保持原文的语气、风格和情感。\n2. 严格参考以下术语表进行翻译。\n3. 如果没有特定译法，请采用最通用的翻译。",
+  "system_prompt": "",
   "glossary": {
     "Person": [
       {
-        "original": "山本百八",
-        "translation": "山本百八"
-      },
-      {
-        "original": "ましろ",
-        "translation": "真白"
-      },
-      {
-        "original": "清原エリー",
-        "translation": "清原艾莉"
-      },
-      {
-        "original": "牛子",
-        "translation": "牛子"
-      },
-      {
-        "original": "小森江",
-        "translation": "小森江"
-      },
-      {
-        "original": "杉浦",
-        "translation": "杉浦"
-      },
-      {
-        "original": "このみ",
-        "translation": "小好"
-      },
-      {
-        "original": "水野",
-        "translation": "水野"
-      },
-      {
-        "original": "果穂",
-        "translation": "果穗"
+        "original": "",
+        "translation": ""
       }
     ],
-    "Location": [
-      {
-        "original": "珠川美術高等学園",
-        "translation": "珠川美术高中"
-      }
-    ],
-    "Org": [
-      {
-        "original": "清原デザイン事務所",
-        "translation": "清原设计事务所"
-      },
-      {
-        "original": "ヌニクロ",
-        "translation": "努尼库"
-      },
-      {
-        "original": "補講部",
-        "translation": "补习部"
-      }
-    ],
-    "Item": [
-      {
-        "original": "フキゲンそうな彼女",
-        "translation": "看似不悦的她"
-      }
-    ],
+    "Location": [],
+    "Org": [],
+    "Item": [],
     "Skill": [],
     "Creature": []
   }

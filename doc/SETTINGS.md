@@ -34,6 +34,13 @@
   - 程序会在每次打开下拉菜单时自动扫描 `dict` 目录
   - 添加新提示词文件后，直接点击下拉菜单即可看到新文件，无需重启
 
+- **自动提取新术语 (extract_glossary)**：自动从翻译结果中提取新术语
+  - 适用于高质量翻译器（OpenAI HQ/Gemini HQ）
+  - 勾选后，AI 会自动识别并提取人名、地名、组织名等专有名词
+  - 提取的术语会自动添加到提示词的术语表中
+  - 后续翻译时会参考这些术语，保持翻译一致性
+  - 特别适合长篇漫画的连续翻译，确保角色名等专有名词前后一致
+
 - **最大请求速率 (max_requests_per_minute)**：每分钟最大请求数（0 = 不限制）
 
 ### CLI 选项
@@ -138,6 +145,18 @@
   - **fp32**：单精度（最准确，最慢）
   - **fp16**：半精度（平衡）
   - **bf16**：BFloat16（推荐）
+
+- **强制使用PyTorch修复 (force_use_torch_inpainting)**：强制使用 PyTorch 进行图像修复
+  - 默认情况下，CPU 模式会优先使用 ONNX 引擎（速度更快）
+  - 勾选此选项后，强制使用 PyTorch 引擎进行修复
+  - 适用场景：ONNX 引擎出现问题或需要更高精度时
+  - GPU 模式下此选项无效（始终使用 PyTorch）
+
+- **极端长宽比切割阈值 (inpainting_split_ratio)**：极端长宽比图片的切割阈值
+  - 默认：3.0
+  - 当图片长宽比超过此值时，会自动切割成多块处理
+  - 避免极端长宽比图片导致修复效果不佳
+  - 建议范围：2.0-5.0
 
 ### 渲染器设置
 
@@ -336,9 +355,9 @@ twitter
 - **系统提示词**（程序内置，自动调用）：
   - `dict/system_prompt_hq.json` - 高质量翻译的系统提示词
   - `dict/system_prompt_line_break.json` - AI断句的系统提示词
+  - `dict/glossary_extraction_prompt.json` - 术语提取的系统提示词
 - **用户自定义提示词**（在界面中选择）：
   - `dict/prompt_example.json` - 提示词示例
-  - `dict/wyxxl.json` - 另一个提示词示例
   - 可以在此目录添加自己的 `.json` 提示词文件
 - 用于高质量翻译器（OpenAI HQ/Gemini HQ）
 - 可以自定义翻译风格、术语表、上下文说明等
@@ -359,22 +378,33 @@ twitter
 
 ```json
 {
-  "persona": "你是一位专业的漫画翻译家...",
-  "style_guide": ["1. 基调一致...", "2. 角色声音..."],
-  "translation_rules": ["1. 无额外内容...", "2. 音效翻译..."],
-  "project_data": {
-    "title": "午夜心旋律",
-    "character_list": [
+  "system_prompt": "你是一名精通多国语言的专业漫画翻译家。你的任务是将漫画中的文本翻译成自然、流畅的目标语言。\n\n规则：\n1. 保持原文的语气、风格和情感。\n2. 严格参考以下术语表进行翻译。\n3. 如果没有特定译法，请采用最通用的翻译。",
+  "glossary": {
+    "Person": [
       {
-        "jp_name": "霧乃 イコ（きりの イコ）",
-        "cn_name": "雾乃伊子",
-        "nicknames": ["イコ"]
+        "original": "ましろ",
+        "translation": "真白"
       }
-    ]
-  },
-  "output_format": "仅提供翻译后的文本..."
+    ],
+    "Location": [],
+    "Org": [],
+    "Item": [],
+    "Skill": [],
+    "Creature": []
+  }
 }
 ```
+
+**字段说明**：
+- `system_prompt`：系统提示词，定义翻译风格和规则
+- `glossary`：术语表，包含各类专有名词
+  - `Person`：人名
+  - `Location`：地名
+  - `Org`：组织名
+  - `Item`：物品名
+  - `Skill`：技能名
+  - `Creature`：生物名
+- 每个术语包含 `original`（原文）和 `translation`（译文）两个字段
 
 > 💡 **懒人方法**：如果觉得手写 JSON 麻烦，可以把以下内容发给 AI 帮你生成：
 > - 作品原名和翻译后的名字
