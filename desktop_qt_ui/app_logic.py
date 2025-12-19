@@ -424,6 +424,12 @@ class MainAppLogic(QObject):
         self.logger.debug(f"update_single_config: '{full_key}' = '{value}'")
         try:
             config_obj = self.config_service.get_config()
+            
+            # 检测翻译器切换，保存旧的翻译器名称
+            old_translator = None
+            if full_key == 'translator.translator':
+                old_translator = config_obj.translator.translator
+            
             keys = full_key.split('.')
             parent_obj = config_obj
             for key in keys[:-1]:
@@ -434,8 +440,15 @@ class MainAppLogic(QObject):
             self.config_service.save_config_file()
             self.logger.debug(self._t("log_config_saved", config_key=full_key, value=value))
 
-            # 当翻译器设置被更改时，直接更新翻译服务的内部状态
+            # 当翻译器设置被更改时，卸载旧模型并更新翻译服务的内部状态
             if full_key == 'translator.translator':
+                # 如果翻译器发生变化，卸载旧模型
+                if old_translator and old_translator != value:
+                    try:
+                        self._unload_translation_model(old_translator)
+                    except Exception as unload_error:
+                        self.logger.warning(f"卸载旧翻译模型时出错: {unload_error}")
+                
                 self.logger.debug(self._t("log_translator_switched", value=value))
                 self.translation_service.set_translator(value)
             
@@ -1402,12 +1415,6 @@ class MainAppLogic(QObject):
                 if not self.thread.wait(500):
                     self._ui_log("线程未在500ms内停止，将由Qt事件循环自动清理", "WARNING")
             
-            # 卸载翻译模型以释放内存
-            try:
-                self._unload_translation_models()
-            except Exception as unload_error:
-                self._ui_log(f"卸载翻译模型时出错: {unload_error}", "WARNING")
-            
             # 清理压缩包解压的临时文件
             if hasattr(self, 'archive_to_temp_map') and self.archive_to_temp_map:
                 try:
@@ -1427,15 +1434,16 @@ class MainAppLogic(QObject):
             self.thread = None
             self.worker = None
     
-    def _unload_translation_models(self):
-        """卸载翻译模型以释放内存"""
+    def _unload_translation_model(self, translator_name: str):
+        """卸载指定的翻译模型以释放内存
+        
+        Args:
+            translator_name: 翻译器名称（如 'openai', 'gemini' 等）
+        """
         try:
             import asyncio
             from manga_translator.translators import unload as unload_translation
             from manga_translator.config import Translator
-            
-            config = self.config_service.get_config()
-            translator_name = config.translator.translator
             
             if hasattr(Translator, translator_name):
                 translator_enum = Translator[translator_name]
