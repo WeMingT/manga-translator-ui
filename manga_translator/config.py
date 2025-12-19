@@ -348,6 +348,8 @@ class InpainterConfig(BaseModel):
     """Inpainting precision for lama, use bf16 while you can."""
     inpainting_split_ratio: float = 3.0
     """Aspect ratio threshold for splitting image into tiles (e.g., 3.0 means split if width/height > 3 or height/width > 3)"""
+    force_use_torch_inpainting: bool = False
+    """Force use PyTorch for inpainting instead of ONNX (useful if ONNX has memory issues)"""
 
 class ColorizerConfig(BaseModel):
     colorization_size: int = 576
