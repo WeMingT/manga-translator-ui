@@ -727,6 +727,7 @@ class EditorController(QObject):
                     # 创建InpainterConfig实例并应用配置
                     inpainter_config = InpainterConfig()
                     inpainter_config.inpainting_precision = InpaintPrecision(inpainter_config_model.inpainting_precision)
+                    inpainter_config.force_use_torch_inpainting = inpainter_config_model.force_use_torch_inpainting
 
                     # 从配置获取inpainter模型
                     inpainter_name = inpainter_config_model.inpainter
@@ -843,6 +844,7 @@ class EditorController(QObject):
 
             inpainter_config = InpainterConfig()
             inpainter_config.inpainting_precision = InpaintPrecision(inpainter_config_model.inpainting_precision)
+            inpainter_config.force_use_torch_inpainting = inpainter_config_model.force_use_torch_inpainting
 
             inpainter_name = inpainter_config_model.inpainter
             try:
@@ -920,6 +922,7 @@ class EditorController(QObject):
 
             inpainter_config = InpainterConfig()
             inpainter_config.inpainting_precision = InpaintPrecision(inpainter_config_model.inpainting_precision)
+            inpainter_config.force_use_torch_inpainting = inpainter_config_model.force_use_torch_inpainting
 
             inpainter_name = inpainter_config_model.inpainter
             try:

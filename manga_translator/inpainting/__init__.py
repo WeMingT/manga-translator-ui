@@ -28,17 +28,18 @@ def get_inpainter(key: Inpainter, *args, **kwargs) -> CommonInpainter:
         inpainter_cache[key] = inpainter(*args, **kwargs)
     return inpainter_cache[key]
 
-async def prepare(inpainter_key: Inpainter, device: str = 'cpu'):
+async def prepare(inpainter_key: Inpainter, device: str = 'cpu', force_torch: bool = False):
     inpainter = get_inpainter(inpainter_key)
     if isinstance(inpainter, OfflineInpainter):
         await inpainter.download()
-        await inpainter.load(device)
+        await inpainter.load(device, force_torch=force_torch)
 
 async def dispatch(inpainter_key: Inpainter, image: np.ndarray, mask: np.ndarray, config: Optional[InpainterConfig], inpainting_size: int = 1024, device: str = 'cpu', verbose: bool = False) -> np.ndarray:
     inpainter = get_inpainter(inpainter_key)
-    if isinstance(inpainter, OfflineInpainter):
-        await inpainter.load(device)
     config = config or InpainterConfig()
+    if isinstance(inpainter, OfflineInpainter):
+        force_torch = getattr(config, 'force_use_torch_inpainting', False)
+        await inpainter.load(device, force_torch=force_torch)
     
     # 检查是否需要切割（极端长宽比）
     h, w = image.shape[:2]

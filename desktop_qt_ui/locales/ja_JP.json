@@ -88,6 +88,7 @@
   "label_inpainting_size": "インペイントサイズ",
   "label_inpainting_precision": "インペイント精度",
   "label_inpainting_split_ratio": "極端なアスペクト比カット閾値",
+  "label_force_use_torch_inpainting": "PyTorchインペイントを強制使用",
   "label_renderer": "レンダラー",
   "label_alignment": "配置",
   "label_disable_font_border": "フォント境界線を無効化",
