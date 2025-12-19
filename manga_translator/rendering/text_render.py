@@ -174,12 +174,14 @@ def auto_add_horizontal_tags(text: str) -> str:
 
     # 步骤1：为多词英文词组添加<H>标签（至少2个单词，用空格分隔）
     # 匹配：字母/数字 + 空格 + 字母/数字（可以重复多次）
-    multi_word_pattern = r'[a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_.-]+(?:\s+[a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_.-]+)+'
+    # 注意：移除了点号(.)以避免匹配省略号
+    multi_word_pattern = r'[a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_-]+(?:\s+[a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_-]+)+'
     text = re.sub(multi_word_pattern, r'<H>\g<0></H>', text)
 
     # 步骤2：对剩余的独立英文单词添加<H>标签
     # 匹配2个及以上字符，排除已经在<H>标签内的内容
-    word_pattern = r'(?<![a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_.-])([a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_.-]{2,})(?![a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_.-])'
+    # 注意：移除了点号(.)以避免匹配省略号
+    word_pattern = r'(?<![a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_-])([a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_-]{2,})(?![a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_-])'
 
     # 只替换不在<H>标签内的匹配
     def replace_word(match):
