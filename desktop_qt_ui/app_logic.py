@@ -1402,6 +1402,12 @@ class MainAppLogic(QObject):
                 if not self.thread.wait(500):
                     self._ui_log("线程未在500ms内停止，将由Qt事件循环自动清理", "WARNING")
             
+            # 卸载翻译模型以释放内存
+            try:
+                self._unload_translation_models()
+            except Exception as unload_error:
+                self._ui_log(f"卸载翻译模型时出错: {unload_error}", "WARNING")
+            
             # 清理压缩包解压的临时文件
             if hasattr(self, 'archive_to_temp_map') and self.archive_to_temp_map:
                 try:
@@ -1420,6 +1426,45 @@ class MainAppLogic(QObject):
             # 清理引用，让Qt的deleteLater机制处理实际的对象销毁
             self.thread = None
             self.worker = None
+    
+    def _unload_translation_models(self):
+        """卸载翻译模型以释放内存"""
+        try:
+            import asyncio
+            from manga_translator.translators import unload as unload_translation
+            from manga_translator.config import Translator
+            
+            config = self.config_service.get_config()
+            translator_name = config.translator.translator
+            
+            if hasattr(Translator, translator_name):
+                translator_enum = Translator[translator_name]
+                
+                # 在新的事件循环中运行异步卸载
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(unload_translation(translator_enum))
+                    self._ui_log(f"已卸载翻译模型: {translator_name}")
+                finally:
+                    loop.close()
+                
+                # 清理内存
+                import gc
+                gc.collect()
+                
+                # 清理GPU显存（如果有）
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        self._ui_log("已清理GPU显存")
+                except ImportError:
+                    pass
+        except Exception as e:
+            self.logger.error(f"卸载翻译模型失败: {e}")
+            raise
 
     def on_task_error(self, error_message):
         # 错误信息已在 worker 中通过详细错误提示框显示，这里不再重复输出
