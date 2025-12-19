@@ -1104,12 +1104,24 @@ def parse_json_or_text_response(result_text: str) -> List[str]:
                 except ImportError:
                     pass
                 
-                # 2. 尝试提取JSON对象中的translation字段（使用正则表达式）
+                # 2. 尝试提取JSON对象中的id和translation字段（使用正则表达式，保持顺序）
                 import re
+                # 匹配 {"id": 数字, "translation": "内容"} 格式
+                object_pattern = r'\{\s*"id"\s*:\s*(\d+)\s*,\s*"translation"\s*:\s*"([^"]*(?:\\.[^"]*)*)"\s*\}'
+                matches = re.findall(object_pattern, result_text)
+                
+                if matches:
+                    logger.info(f"使用正则表达式提取到{len(matches)}条翻译（带id）")
+                    # 按id排序
+                    sorted_matches = sorted(matches, key=lambda x: int(x[0]))
+                    translations = [match[1].replace('\\"', '"').replace('\\n', '\n') for match in sorted_matches]
+                    return translations
+                
+                # 如果上面的模式不匹配，尝试只提取translation字段（不考虑id）
                 translation_pattern = r'"translation"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
                 matches = re.findall(translation_pattern, result_text)
                 if matches:
-                    logger.info(f"使用正则表达式提取到{len(matches)}条翻译")
+                    logger.warning(f"使用正则表达式提取到{len(matches)}条翻译（无id，可能顺序不正确）")
                     translations = [match.replace('\\"', '"').replace('\\n', '\n') for match in matches]
                     return translations
                 
