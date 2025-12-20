@@ -376,7 +376,7 @@ class ConfigService(QObject):
         try:
             self.current_config.app.current_preset = preset_name
             self.save_config_file()
-            self.logger.info(f"当前预设已保存: {preset_name}")
+            # 不输出日志，避免刷屏
             return True
         except Exception as e:
             self.logger.error(f"保存当前预设失败: {e}")

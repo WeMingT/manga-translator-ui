@@ -241,6 +241,19 @@ class I18nManager:
                 "File saved successfully": "文件保存成功",
                 "Configuration loaded": "配置已加载",
                 "Translation completed successfully": "翻译完成",
+                
+                # API测试
+                "Test": "测试",
+                "Testing": "测试中",
+                "Get Models": "获取模型",
+                "Select Model": "选择模型",
+                "Available models:": "可用模型：",
+                "Please enter API key first": "请先输入API密钥",
+                "Testing API connection, please wait...": "正在测试API连接，请稍候...",
+                "API connection test successful!": "API连接测试成功！",
+                "API connection test failed": "API连接测试失败",
+                "Fetching models, please wait...": "正在获取模型列表，请稍候...",
+                "Failed to get models": "获取模型列表失败",
             }
         elif locale_code == "en_US":
             return {

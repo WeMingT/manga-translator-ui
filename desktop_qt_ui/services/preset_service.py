@@ -89,7 +89,7 @@ class PresetService:
             with open(preset_path, 'w', encoding='utf-8') as f:
                 json.dump(env_vars, f, indent=2, ensure_ascii=False)
             
-            self.logger.info(f"预设已保存: {preset_name}")
+            # 不输出日志，避免刷屏
             return True
         except Exception as e:
             self.logger.error(f"保存预设失败: {e}")
@@ -107,7 +107,7 @@ class PresetService:
             with open(preset_path, 'r', encoding='utf-8') as f:
                 env_vars = json.load(f)
             
-            self.logger.info(f"预设已加载: {preset_name}")
+            # 不输出日志，避免刷屏
             return env_vars
         except Exception as e:
             self.logger.error(f"加载预设失败: {e}")
