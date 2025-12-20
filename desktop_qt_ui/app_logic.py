@@ -234,6 +234,65 @@ class MainAppLogic(QObject):
         except Exception as e:
             self.logger.error(f"Failed to update translation_map.json: {e}")
 
+    def _calculate_output_path(self, image_path: str, save_info: dict) -> str:
+        """
+        计算输出文件的完整路径（用于预检查文件是否存在）
+        
+        Args:
+            image_path: 输入图片的路径
+            save_info: 包含输出配置的字典
+                - output_folder: 输出文件夹
+                - input_folders: 输入文件夹集合
+                - format: 输出格式（可选）
+                - save_to_source_dir: 是否输出到原图目录
+                
+        Returns:
+            str: 计算后的输出文件完整路径
+        """
+        output_folder = save_info.get('output_folder')
+        input_folders = save_info.get('input_folders', set())
+        output_format = save_info.get('format')
+        save_to_source_dir = save_info.get('save_to_source_dir', False)
+        
+        file_path = image_path
+        parent_dir = os.path.normpath(os.path.dirname(file_path))
+        
+        # 检查是否启用了"输出到原图目录"模式
+        if save_to_source_dir:
+            # 输出到原图所在目录的 manga_translator_work/result 子目录
+            final_output_dir = os.path.join(parent_dir, 'manga_translator_work', 'result')
+        else:
+            # 原有逻辑：使用配置的输出目录
+            final_output_dir = output_folder
+            
+            # 检查文件是否来自文件夹
+            source_folder = self.file_to_folder_map.get(image_path)
+            if source_folder:
+                # 检查是否来自压缩包
+                if self.file_service.is_archive_file(source_folder):
+                    # 文件来自压缩包，使用压缩包名称（不含扩展名）作为输出子目录
+                    archive_name = os.path.splitext(os.path.basename(source_folder))[0]
+                    final_output_dir = os.path.join(output_folder, archive_name)
+                else:
+                    # 文件来自文件夹，保持相对路径结构
+                    relative_path = os.path.relpath(parent_dir, source_folder)
+                    # Normalize path and avoid adding '.' as a directory component
+                    if relative_path == '.':
+                        final_output_dir = os.path.join(output_folder, os.path.basename(source_folder))
+                    else:
+                        final_output_dir = os.path.join(output_folder, os.path.basename(source_folder), relative_path)
+                final_output_dir = os.path.normpath(final_output_dir)
+        
+        # 处理输出文件名和格式
+        base_filename, _ = os.path.splitext(os.path.basename(file_path))
+        if output_format and output_format.strip() and output_format.lower() not in ['none', '不指定']:
+            output_filename = f"{base_filename}.{output_format}"
+        else:
+            output_filename = os.path.basename(file_path)
+        
+        final_output_path = os.path.join(final_output_dir, output_filename)
+        return final_output_path
+
     @pyqtSlot(str)
     def on_worker_log(self, message):
         self.log_message.emit(message)
@@ -1316,7 +1375,6 @@ class MainAppLogic(QObject):
                                 # 规范化路径，避免混合斜杠
                                 translated_file = os.path.normpath(translated_file)
                                 saved_files.append(translated_file)
-                                self._ui_log(f"确认由后端批量保存的文件: {original_path}")
                             else:
                                 # This handles cases where a result with image_data is present in a batch
                                 try:
@@ -1589,12 +1647,68 @@ class TranslationWorker(QObject):
         self._current_task = None  # 保存当前运行的异步任务
         self.i18n = get_i18n_manager()
         self.logger = get_logger(__name__)
+        self.file_service = get_file_service()
     
     def _t(self, key: str, **kwargs) -> str:
         """翻译辅助方法"""
         if self.i18n:
             return self.i18n.translate(key, **kwargs)
         return key
+    
+    def _calculate_output_path(self, image_path: str, save_info: dict) -> str:
+        """
+        计算输出文件的完整路径（用于预检查文件是否存在）
+        
+        Args:
+            image_path: 输入图片的路径
+            save_info: 包含输出配置的字典
+                
+        Returns:
+            str: 计算后的输出文件完整路径
+        """
+        output_folder = save_info.get('output_folder')
+        input_folders = save_info.get('input_folders', set())
+        output_format = save_info.get('format')
+        save_to_source_dir = save_info.get('save_to_source_dir', False)
+        
+        file_path = image_path
+        parent_dir = os.path.normpath(os.path.dirname(file_path))
+        
+        # 检查是否启用了"输出到原图目录"模式
+        if save_to_source_dir:
+            # 输出到原图所在目录的 manga_translator_work/result 子目录
+            final_output_dir = os.path.join(parent_dir, 'manga_translator_work', 'result')
+        else:
+            # 原有逻辑：使用配置的输出目录
+            final_output_dir = output_folder
+            
+            # 检查文件是否来自文件夹
+            source_folder = self.file_to_folder_map.get(image_path)
+            if source_folder:
+                # 检查是否来自压缩包
+                if self.file_service.is_archive_file(source_folder):
+                    # 文件来自压缩包，使用压缩包名称（不含扩展名）作为输出子目录
+                    archive_name = os.path.splitext(os.path.basename(source_folder))[0]
+                    final_output_dir = os.path.join(output_folder, archive_name)
+                else:
+                    # 文件来自文件夹，保持相对路径结构
+                    relative_path = os.path.relpath(parent_dir, source_folder)
+                    # Normalize path and avoid adding '.' as a directory component
+                    if relative_path == '.':
+                        final_output_dir = os.path.join(output_folder, os.path.basename(source_folder))
+                    else:
+                        final_output_dir = os.path.join(output_folder, os.path.basename(source_folder), relative_path)
+                final_output_dir = os.path.normpath(final_output_dir)
+        
+        # 处理输出文件名和格式
+        base_filename, _ = os.path.splitext(os.path.basename(file_path))
+        if output_format and output_format.strip() and output_format.lower() not in ['none', '不指定']:
+            output_filename = f"{base_filename}.{output_format}"
+        else:
+            output_filename = os.path.basename(file_path)
+        
+        final_output_path = os.path.join(final_output_dir, output_filename)
+        return final_output_path
 
     def stop(self):
         self.log_received.emit("--- Stop request received.")
@@ -2070,8 +2184,13 @@ class TranslationWorker(QObject):
             skipped_files = []
             files_to_process = []
             
+            # 获取 cli_config（用于检查特殊模式）
+            cli_config = self.config_dict.get('cli', {})
+            
             if not save_info['overwrite']:
-                self.log_received.emit("--- Checking for existing files...")
+                self.log_received.emit("--- 🔍 检查已存在的文件（覆盖检测已禁用）...")
+                self.logger.info("检查已存在的文件（覆盖检测已禁用）")
+                
                 for file_path in self.files:
                     try:
                         should_skip = False
@@ -2091,7 +2210,7 @@ class TranslationWorker(QObject):
                                 should_skip = True
                         else:
                             # 普通翻译模式 - 检查图片文件
-                            output_path = translator._calculate_output_path(file_path, save_info)
+                            output_path = self._calculate_output_path(file_path, save_info)
                             if os.path.exists(output_path):
                                 should_skip = True
                         
@@ -2102,14 +2221,19 @@ class TranslationWorker(QObject):
                             files_to_process.append(file_path)
                     except Exception as e:
                         # If check fails, assume it needs processing
+                        self.logger.error(f"检查文件时出错 {file_path}: {e}")
                         files_to_process.append(file_path)
                 
                 if skipped_files:
-                    self.log_received.emit(self._t("⏭️ Skipped {count} existing files.", count=len(skipped_files)))
+                    skip_msg = self._t("⏭️ Skipped {count} existing files.", count=len(skipped_files))
+                    self.log_received.emit(skip_msg)
+                    self.log_received.emit(f"--- ℹ️ 跳过的文件将不会被处理，如需重新翻译请启用「覆盖已存在文件」选项")
+                    self.logger.info(f"已跳过 {len(skipped_files)} 个已存在的文件（覆盖检测已禁用）")
                     # Update files list to only include those needing processing
                     self.files = files_to_process
                 else:
-                    self.log_received.emit("--- No existing files found, processing all.")
+                    self.log_received.emit("--- ✅ 未发现已存在的文件，将处理所有文件")
+                    self.logger.info("未发现已存在的文件，将处理所有文件")
             
             # Update total count for progress bar logic
             total_original_count = len(original_files)
@@ -2182,7 +2306,13 @@ class TranslationWorker(QObject):
                     # Note: This is an estimation for logging purposes
                     backend_total_batches = (total_images + batch_size - 1) // batch_size if batch_size > 0 else total_images
                     
-                    self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches (Total: {orig})", total=total_images, batches=backend_total_batches, orig=total_original_count))
+                    # 显示批量处理信息
+                    if skipped_count > 0:
+                        self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
+                        self.log_received.emit(f"--- ℹ️ 另有 {skipped_count} 个文件已跳过（原始总数：{total_original_count}）")
+                    else:
+                        self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
+                    
                     self.log_received.emit(self._t("🔧 Translation workflow: {mode}", mode=workflow_mode))
                     self.log_received.emit(self._t("📁 Output directory: {dir}", dir=self.output_folder))
                     if workflow_tip:

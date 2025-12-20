@@ -358,6 +358,7 @@
   "💡 Tip: After exporting, check manga_translator_work/translations/ for imagename_translated.txt files": "💡 팁: 내보내기 후 manga_translator_work/translations/에서 imagename_translated.txt 파일을 확인하세요",
   "💡 Tip: After exporting, manually translate imagename_original.txt in manga_translator_work/originals/, then use 'Import Translation and Render' mode": "💡 팁: 내보내기 후 manga_translator_work/originals/의 imagename_original.txt를 수동으로 번역한 다음 '번역 가져오기 및 렌더링' 모드를 사용하세요",
   "💡 Tip: Will read TXT files from manga_translator_work/originals/ or translations/ and render (prioritize _original.txt)": "💡 팁: manga_translator_work/originals/ 또는 translations/에서 TXT 파일을 읽고 렌더링합니다 (_original.txt 우선)",
+  "⏭️ Skipped {count} existing files.": "⏭️ {count}개의 기존 파일을 건너뛰었습니다 (덮어쓰기 감지 비활성화)",
   "📊 Batch processing mode: {total} images in {batches} batches": "📊 배치 처리 모드: {batches}개 배치에 {total}개 이미지",
   "🔧 Translation workflow: {mode}": "🔧 번역 워크플로: {mode}",
   "📁 Output directory: {dir}": "📁 출력 디렉토리: {dir}",

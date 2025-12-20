@@ -367,6 +367,7 @@
   "💡 Tip: After exporting, check manga_translator_work/translations/ for imagename_translated.txt files": "💡 提示：导出翻译后，可在 manga_translator_work/translations/ 目录查看 图片名_translated.txt 文件",
   "💡 Tip: After exporting, manually translate imagename_original.txt in manga_translator_work/originals/, then use 'Import Translation and Render' mode": "💡 提示：导出原文后，可在 manga_translator_work/originals/ 目录手动翻译 图片名_original.txt 文件，然后使用「导入翻译并渲染」模式",
   "💡 Tip: Will read TXT files from manga_translator_work/originals/ or translations/ and render (prioritize _original.txt)": "💡 提示：将从 manga_translator_work/originals/ 或 translations/ 目录读取 TXT 文件并渲染（优先使用 _original.txt）",
+  "⏭️ Skipped {count} existing files.": "⏭️ 已跳过 {count} 个已存在的文件（覆盖检测已禁用）",
   "📊 Batch processing mode: {total} images in {batches} batches": "📊 批量处理模式：共 {total} 张图片，分 {batches} 个批次处理",
   "🔧 Translation workflow: {mode}": "🔧 翻译流程：{mode}",
   "📁 Output directory: {dir}": "📁 输出目录：{dir}",

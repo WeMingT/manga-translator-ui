@@ -366,6 +366,7 @@
   "💡 Tip: After exporting, check manga_translator_work/translations/ for imagename_translated.txt files": "💡 Tip: After exporting, check manga_translator_work/translations/ for imagename_translated.txt files",
   "💡 Tip: After exporting, manually translate imagename_original.txt in manga_translator_work/originals/, then use 'Import Translation and Render' mode": "💡 Tip: After exporting, manually translate imagename_original.txt in manga_translator_work/originals/, then use 'Import Translation and Render' mode",
   "💡 Tip: Will read TXT files from manga_translator_work/originals/ or translations/ and render (prioritize _original.txt)": "💡 Tip: Will read TXT files from manga_translator_work/originals/ or translations/ and render (prioritize _original.txt)",
+  "⏭️ Skipped {count} existing files.": "⏭️ Skipped {count} existing files (overwrite detection disabled)",
   "📊 Batch processing mode: {total} images in {batches} batches": "📊 Batch processing mode: {total} images in {batches} batches",
   "🔧 Translation workflow: {mode}": "🔧 Translation workflow: {mode}",
   "📁 Output directory: {dir}": "📁 Output directory: {dir}",

@@ -332,7 +332,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     # 过滤掉已存在的文件（如果 overwrite=False）
     skipped_count = 0
     if not overwrite:
-        print(f"🔍 检查已存在的文件...")
+        print(f"\n🔍 检查已存在的文件（覆盖检测已禁用）...")
         filtered_file_paths = []
         for file_path, config in file_paths_with_configs:
             try:
@@ -369,13 +369,16 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                     filtered_file_paths.append((file_path, config))
             except Exception as e:
                 # 如果检查失败，默认保留
+                if verbose:
+                    logger.debug(f"检查文件时出错 {file_path}: {e}")
                 filtered_file_paths.append((file_path, config))
         
         if skipped_count > 0:
-            print(f"⏭️  跳过 {skipped_count} 个已存在的文件")
+            print(f"⏭️  已跳过 {skipped_count} 个已存在的文件（覆盖检测已禁用）")
+            print(f"ℹ️  提示：如需重新翻译这些文件，请使用 --overwrite 参数")
             file_paths_with_configs = filtered_file_paths
         else:
-            print("✨ 没有发现已存在的输出文件")
+            print("✅ 未发现已存在的文件，将处理所有文件")
             
     if not file_paths_with_configs:
         print("✅ 所有文件都已跳过，无需处理")
@@ -676,7 +679,7 @@ async def run_local_mode(args):
         # 预过滤已存在的文件
         skipped_count = 0
         if not overwrite:
-            print("🔍 预检查已存在的文件...")
+            print("\n🔍 预检查已存在的文件（覆盖检测已禁用）...")
             try:
                 from manga_translator import MangaTranslator
                 config_dict = config_service.get_config().dict()
@@ -708,10 +711,11 @@ async def run_local_mode(args):
                         filtered_files.append(file_path)
                 
                 if skipped_count > 0:
-                    print(f"⏭️  跳过 {skipped_count} 个已存在的文件")
+                    print(f"⏭️  已跳过 {skipped_count} 个已存在的文件（覆盖检测已禁用）")
+                    print(f"ℹ️  提示：如需重新翻译这些文件，请使用 --overwrite 参数")
                     all_files = filtered_files
                 else:
-                    print("✨ 没有发现已存在的输出文件")
+                    print("✅ 未发现已存在的文件，将处理所有文件")
             except Exception as e:
                 print(f"⚠️ 预检查失败，将全部处理: {e}")
         

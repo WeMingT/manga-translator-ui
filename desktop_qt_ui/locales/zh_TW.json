@@ -262,6 +262,7 @@
   "Size ↑": "大小 ↑",
   "lang_TRK": "土耳其语",
   "💡 Tip: Will read TXT files from manga_translator_work/originals/ or translations/ and render (prioritize _original.txt)": "💡 提示：将从 manga_translator_work/originals/ 或 translations/ 目錄讀取 TXT 檔案并渲染（優先使用 _original.txt）",
+  "⏭️ Skipped {count} existing files.": "⏭️ 已跳過 {count} 個已存在的檔案（覆蓋檢測已停用）",
   "Eraser": "橡皮擦",
   "label_stroke_width": "描边宽度比例",
   "label_CAIYUN_TOKEN": "彩云小譯 API 令牌",
