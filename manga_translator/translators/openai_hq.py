@@ -448,6 +448,11 @@ This is an incorrect response because it includes extra text and explanations.
                 # 检查成功条件
                 if response.choices and response.choices[0].message.content and response.choices[0].finish_reason != 'content_filter':
                     result_text = response.choices[0].message.content.strip()
+                    
+                    # 统一的编码清理（处理UTF-16-LE等编码问题）
+                    from .common import sanitize_text_encoding
+                    result_text = sanitize_text_encoding(result_text)
+                    
                     self.logger.debug(f"--- OpenAI Raw Response ---\n{result_text}\n---------------------------")
                     
                     # ✅ 检测HTML错误响应（404等）- 抛出特定异常供统一错误处理
@@ -679,6 +684,10 @@ This is an incorrect response because it includes extra text and explanations.
             
             if response.choices and response.choices[0].message.content:
                 result = response.choices[0].message.content.strip()
+                
+                # 统一的编码清理（处理UTF-16-LE等编码问题）
+                from .common import sanitize_text_encoding
+                result = sanitize_text_encoding(result)
                 
                 # 去除 <think>...</think> 标签及内容（LM Studio 等本地模型的思考过程）
                 result = re.sub(r'(</think>)?<think>.*?</think>', '', result, flags=re.DOTALL)
