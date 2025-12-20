@@ -210,15 +210,16 @@ class FileService:
         normalized_path = path.replace('\\', '/')
         
         # 将整个路径分割成文本和数字部分
-        # 例如: "folder/第1话/page001.jpg" -> ["folder/第", 1, "话/page", 1, ".jpg"]
+        # 例如: "folder/第1话/page001.jpg" -> [("folder/第", 0), (1, 1), ("话/page", 0), (1, 1), (".jpg", 0)]
+        # 使用元组 (value, is_number) 来确保可以正确排序
         parts = []
         for part in re.split(r'(\d+)', normalized_path):
             if part.isdigit():
-                # 数字部分转换为整数，用于数值比较
-                parts.append(int(part))
-            else:
-                # 文本部分转换为小写，用于不区分大小写的比较
-                parts.append(part.lower())
+                # 数字部分：(整数值, 1) - 1 表示这是数字
+                parts.append((int(part), 1))
+            elif part:  # 忽略空字符串
+                # 文本部分：(小写文本, 0) - 0 表示这是文本
+                parts.append((part.lower(), 0))
         
         return parts
     
