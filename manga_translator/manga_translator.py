@@ -34,6 +34,7 @@ import matplotlib
 matplotlib.use('Agg')  # 使用非GUI后端
 from matplotlib import cm
 from .utils.path_manager import (
+    get_json_path,
     get_inpainted_path,
     find_json_path
 )
@@ -535,7 +536,6 @@ class MangaTranslator:
     def _get_default_template_path(self) -> Optional[str]:
         """获取默认模板文件路径"""
         try:
-            import sys
             # 尝试多个可能的路径
             possible_paths = [
                 os.path.join(os.path.dirname(__file__), '..', 'examples', 'translation_template.json'),
@@ -2563,7 +2563,6 @@ class MangaTranslator:
         
         # === 步骤4: 批量处理模式（顺序处理） ===
         logger.info(f'Starting batch translation: {len(images_with_configs)} images, batch size: {batch_size}')
-        import sys
         
         # Start the background cleanup job once if not already started.
         if self._detector_cleanup_task is None:

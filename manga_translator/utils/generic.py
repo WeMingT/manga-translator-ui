@@ -361,13 +361,26 @@ def load_image(img: Image.Image) -> Tuple[np.ndarray, Optional[Image.Image]]:
         return np.array(img.convert('RGB')), None
 
 def dump_image(img_pil: Image.Image, img: np.ndarray, alpha_ch: Image.Image = None):
+    # 用于 paste 的 mask，可能需要调整尺寸
+    mask_for_paste = alpha_ch
+    
     if alpha_ch is not None:
         if img.shape[2] != 4 :
-            img = np.concatenate([img.astype(np.uint8), np.array(alpha_ch).astype(np.uint8)[..., None]], axis = 2)
+            # 将 alpha 通道转换为 numpy 数组
+            alpha_array = np.array(alpha_ch).astype(np.uint8)
+            
+            # 检查尺寸是否匹配，如果不匹配则调整 alpha 通道尺寸
+            if alpha_array.shape[0] != img.shape[0] or alpha_array.shape[1] != img.shape[1]:
+                # 使用 PIL 调整 alpha 通道尺寸以匹配 img
+                alpha_ch_resized = alpha_ch.resize((img.shape[1], img.shape[0]), Image.LANCZOS)
+                alpha_array = np.array(alpha_ch_resized).astype(np.uint8)
+                mask_for_paste = alpha_ch_resized  # 更新用于 paste 的 mask
+            
+            img = np.concatenate([img.astype(np.uint8), alpha_array[..., None]], axis = 2)
     else:
         img = img.astype(np.uint8)
     result = img_pil.convert('RGBA').resize((img.shape[1], img.shape[0]))
-    result.paste(Image.fromarray(img), mask = alpha_ch)
+    result.paste(Image.fromarray(img), mask = mask_for_paste)
     return result
 
 def resize_keep_aspect(img, size):
