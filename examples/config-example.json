@@ -42,7 +42,7 @@
     "det_gamma_correct": false,
     "box_threshold": 0.5,
     "unclip_ratio": 2.5,
-    "use_yolo_obb": false,
+    "use_yolo_obb": true,
     "yolo_obb_conf": 0.4,
     "yolo_obb_iou": 0.6,
     "yolo_obb_overlap_threshold": 0.1,
