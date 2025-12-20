@@ -391,6 +391,11 @@ class GeminiTranslator(CommonTranslator):
                             continue
 
                 result_text = response.text.strip()
+                
+                # 统一的编码清理（处理UTF-16-LE等编码问题）
+                from .common import sanitize_text_encoding
+                result_text = sanitize_text_encoding(result_text)
+                
                 self.logger.debug(f"--- Gemini Raw Response ---\n{result_text}\n---------------------------")
 
                 # 使用 parse_hq_response 解析（支持 JSON Object/Array/Text）

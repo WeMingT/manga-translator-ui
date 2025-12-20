@@ -1041,6 +1041,71 @@ class OfflineTranslator(CommonTranslator, ModelWrapper):
     async def unload(self, device: str):
         return await super().unload()
 
+def sanitize_text_encoding(text: str) -> str:
+    """
+    统一的文本编码清理函数，处理各种编码问题
+    Unified text encoding sanitization to handle various encoding issues
+    
+    Args:
+        text: 输入文本
+        
+    Returns:
+        清理后的文本
+    """
+    if not text:
+        return text
+    
+    try:
+        # 1. 尝试检测并修复UTF-16-LE编码问题
+        # 如果文本包含UTF-16-LE的BOM或特征，尝试重新解码
+        if isinstance(text, bytes):
+            # 如果是bytes，尝试多种编码
+            for encoding in ['utf-8', 'utf-16-le', 'utf-16-be', 'latin-1']:
+                try:
+                    text = text.decode(encoding, errors='ignore')
+                    break
+                except (UnicodeDecodeError, AttributeError):
+                    continue
+        
+        # 2. 移除不可见的控制字符和损坏的字符
+        # 保留常用的控制字符：换行(\n)、回车(\r)、制表符(\t)
+        import unicodedata
+        cleaned = []
+        for char in text:
+            # 跳过控制字符（除了\n, \r, \t）
+            if unicodedata.category(char)[0] == 'C' and char not in '\n\r\t':
+                continue
+            # 跳过私有使用区字符（可能是损坏的编码）
+            if '\uE000' <= char <= '\uF8FF':  # 私有使用区
+                continue
+            # 跳过替换字符（表示解码失败）
+            if char == '\ufffd':
+                continue
+            cleaned.append(char)
+        
+        text = ''.join(cleaned)
+        
+        # 3. 修复常见的编码混淆问题
+        # UTF-16-LE误识别为UTF-8时会产生的特征模式
+        # 例如：每个字符后跟\x00
+        if '\x00' in text:
+            text = text.replace('\x00', '')
+        
+        # 4. 确保文本是有效的UTF-8
+        # 通过编码再解码来验证和清理
+        text = text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+        
+        return text
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger('manga_translator')
+        logger.warning(f"文本编码清理失败: {e}，返回原文本")
+        # 如果清理失败，至少移除明显的问题字符
+        if isinstance(text, str):
+            return text.replace('\ufffd', '').replace('\x00', '')
+        return str(text)
+
 def parse_hq_response(result_text: str) -> Tuple[List[str], List[Dict[str, str]]]:
     """
     专门解析HQ翻译器的响应，支持提取翻译和新术语
@@ -1054,6 +1119,10 @@ def parse_hq_response(result_text: str) -> Tuple[List[str], List[Dict[str, str]]
     import re
     
     logger = logging.getLogger('manga_translator')
+    
+    # 统一的编码清理
+    result_text = sanitize_text_encoding(result_text)
+    
     original_text = result_text # Keep for logging
     result_text = result_text.strip()
     if not result_text:

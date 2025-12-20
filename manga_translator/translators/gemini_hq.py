@@ -514,6 +514,11 @@ class GeminiHighQualityTranslator(CommonTranslator):
 
                 # 尝试访问 .text 属性，如果API因安全原因等返回空内容，这里会触发异常
                 result_text = response.text.strip()
+                
+                # 统一的编码清理（处理UTF-16-LE等编码问题）
+                from .common import sanitize_text_encoding
+                result_text = sanitize_text_encoding(result_text)
+                
                 self.logger.debug(f"--- Gemini Raw Response ---\n{result_text}\n---------------------------")
                 if not result_text:
                      # 空回处理：也尝试降级
