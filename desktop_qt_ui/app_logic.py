@@ -378,7 +378,7 @@ class MainAppLogic(QObject):
     @pyqtSlot(str, str)
     def save_env_var(self, key: str, value: str):
         self.config_service.save_env_var(key, value)
-        self.logger.info(f"Saved {key} to .env file.")
+        # 不再输出日志，避免刷屏
 
     # region 预设管理
     def get_presets_list(self) -> List[str]:
@@ -386,14 +386,44 @@ class MainAppLogic(QObject):
         return self.preset_service.get_presets_list()
     
     @pyqtSlot(str)
-    def save_preset(self, preset_name: str) -> bool:
-        """保存当前.env配置为预设"""
+    def save_preset(self, preset_name: str, copy_current: bool = False) -> bool:
+        """保存预设
+        
+        Args:
+            preset_name: 预设名称
+            copy_current: 是否复制当前配置。False=创建空白预设，True=复制当前配置
+        """
         try:
-            env_vars = self.config_service.load_env_vars()
-            success = self.preset_service.save_preset(preset_name, env_vars)
-            if success:
-                self._ui_log(f"预设已保存: {preset_name}")
+            if copy_current:
+                # 复制当前配置模式：保存当前翻译器相关的环境变量
+                current_translator = self.config_service.get_config().translator.translator
+                translator_env_vars = self.config_service.get_all_env_vars(current_translator)
+                all_env_vars = self.config_service.load_env_vars()
+                
+                # 只保存当前翻译器相关的环境变量，并且只保存非空的值
+                filtered_env_vars = {}
+                for key in translator_env_vars:
+                    value = all_env_vars.get(key, "")
+                    if value and value.strip():
+                        filtered_env_vars[key] = value
+                
+                success = self.preset_service.save_preset(preset_name, filtered_env_vars)
+                if success:
+                    # 不输出日志，避免刷屏
+                    pass
             else:
+                # 创建空白预设模式：只保存空的环境变量结构
+                current_translator = self.config_service.get_config().translator.translator
+                translator_env_vars = self.config_service.get_all_env_vars(current_translator)
+                
+                # 创建空白的环境变量字典
+                empty_env_vars = {key: "" for key in translator_env_vars}
+                
+                success = self.preset_service.save_preset(preset_name, empty_env_vars)
+                if success:
+                    self._ui_log(f"预设已创建: {preset_name} (空白预设)")
+            
+            if not success:
                 self._ui_log(f"保存预设失败: {preset_name}", "ERROR")
             return success
         except Exception as e:
@@ -413,7 +443,8 @@ class MainAppLogic(QObject):
             # 批量保存环境变量
             success = self.config_service.save_env_vars(env_vars)
             if success:
-                self._ui_log(f"预设已加载: {preset_name}")
+                # 不输出日志，避免刷屏
+                pass
             else:
                 self._ui_log(f"应用预设失败: {preset_name}", "ERROR")
             return success
@@ -436,6 +467,165 @@ class MainAppLogic(QObject):
             self.logger.error(f"删除预设失败: {e}")
             self._ui_log(f"删除预设失败: {e}", "ERROR")
             return False
+    # endregion
+    
+    # region API测试
+    async def test_api_connection_async(self, translator_key: str, api_key: str, api_base: str = None, model: str = None) -> tuple[bool, str]:
+        """异步测试API连接（如果指定了模型，会测试该模型是否可用）"""
+        try:
+            if "openai" in translator_key.lower():
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=api_base or "https://api.openai.com/v1"
+                )
+                
+                # 如果指定了模型，测试该模型是否可用
+                if model and model.strip():
+                    try:
+                        # 尝试用该模型发送一个简单的测试请求
+                        response = await client.chat.completions.create(
+                            model=model,
+                            messages=[{"role": "user", "content": "test"}],
+                            max_tokens=5
+                        )
+                        return True, f"连接成功，模型 {model} 可用"
+                    except Exception as e:
+                        # 如果模型测试失败，返回详细错误
+                        return False, f"连接成功但模型 {model} 不可用: {str(e)}"
+                else:
+                    # 没有指定模型，只测试连接
+                    models = await client.models.list()
+                    return True, "连接成功"
+            
+            elif "gemini" in translator_key.lower():
+                import google.generativeai as genai
+                
+                # 如果指定了自定义API Base，使用OpenAI兼容模式
+                if api_base and api_base != "https://generativelanguage.googleapis.com":
+                    from openai import AsyncOpenAI
+                    client = AsyncOpenAI(
+                        api_key=api_key,
+                        base_url=api_base
+                    )
+                    
+                    # 如果指定了模型，测试该模型
+                    if model and model.strip():
+                        try:
+                            response = await client.chat.completions.create(
+                                model=model,
+                                messages=[{"role": "user", "content": "test"}],
+                                max_tokens=5
+                            )
+                            return True, f"连接成功，模型 {model} 可用"
+                        except Exception as e:
+                            return False, f"连接成功但模型 {model} 不可用: {str(e)}"
+                    else:
+                        models = await client.models.list()
+                        return True, "连接成功"
+                else:
+                    # 使用官方Gemini API
+                    genai.configure(api_key=api_key)
+                    
+                    # 如果指定了模型，测试该模型
+                    if model and model.strip():
+                        try:
+                            test_model = genai.GenerativeModel(model)
+                            response = test_model.generate_content("test")
+                            return True, f"连接成功，模型 {model} 可用"
+                        except Exception as e:
+                            return False, f"连接成功但模型 {model} 不可用: {str(e)}"
+                    else:
+                        models = genai.list_models()
+                        return True, "连接成功"
+            
+            elif "sakura" in translator_key.lower():
+                # Sakura使用OpenAI兼容API
+                from openai import AsyncOpenAI
+                if not api_base:
+                    return False, "请先配置SAKURA_API_BASE"
+                client = AsyncOpenAI(
+                    api_key="sk-114514",  # Sakura使用固定密钥
+                    base_url=api_base
+                )
+                
+                # 如果指定了模型，测试该模型
+                if model and model.strip():
+                    try:
+                        response = await client.chat.completions.create(
+                            model=model,
+                            messages=[{"role": "user", "content": "test"}],
+                            max_tokens=5
+                        )
+                        return True, f"连接成功，模型 {model} 可用"
+                    except Exception as e:
+                        return False, f"连接成功但模型 {model} 不可用: {str(e)}"
+                else:
+                    models = await client.models.list()
+                    return True, "连接成功"
+            
+            else:
+                return False, "该翻译器不支持API测试"
+                
+        except Exception as e:
+            return False, f"连接失败: {str(e)}"
+    
+    async def get_available_models_async(self, translator_key: str, api_key: str, api_base: str = None) -> tuple[bool, List[str], str]:
+        """异步获取可用模型列表"""
+        try:
+            if "openai" in translator_key.lower():
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=api_base or "https://api.openai.com/v1"
+                )
+                models_response = await client.models.list()
+                
+                # 获取所有模型ID，不过滤
+                model_ids = [m.id for m in models_response.data]
+                model_ids.sort(reverse=True)  # 新模型在前
+                
+                return True, model_ids, "获取成功"
+            
+            elif "gemini" in translator_key.lower():
+                import google.generativeai as genai
+                
+                # 如果指定了自定义API Base，使用OpenAI兼容模式
+                if api_base and api_base != "https://generativelanguage.googleapis.com":
+                    from openai import AsyncOpenAI
+                    client = AsyncOpenAI(
+                        api_key=api_key,
+                        base_url=api_base
+                    )
+                    models_response = await client.models.list()
+                    model_ids = [m.id for m in models_response.data]
+                    return True, model_ids, "获取成功"
+                else:
+                    # 使用官方Gemini API - 返回所有模型，不过滤
+                    genai.configure(api_key=api_key)
+                    models = genai.list_models()
+                    # 获取所有模型名称
+                    model_names = [m.name.replace("models/", "") for m in models]
+                    return True, model_names, "获取成功"
+            
+            elif "sakura" in translator_key.lower():
+                # Sakura使用OpenAI兼容API
+                from openai import AsyncOpenAI
+                if not api_base:
+                    return False, [], "请先配置SAKURA_API_BASE"
+                client = AsyncOpenAI(
+                    api_key="sk-114514",
+                    base_url=api_base
+                )
+                models_response = await client.models.list()
+                model_ids = [m.id for m in models_response.data]
+                return True, model_ids, "获取成功"
+            
+            else:
+                return False, [], "该翻译器不支持获取模型列表"
+                
+        except Exception as e:
+            return False, [], f"获取失败: {str(e)}"
     # endregion
 
     # region 配置管理

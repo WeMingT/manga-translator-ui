@@ -563,5 +563,17 @@
   "web_image": "圖片",
   "web_today": "今天",
   "web_this_week": "本週",
-  "web_this_month": "本月"
+  "web_this_month": "本月",
+  "Test": "測試",
+  "Testing": "測試中",
+  "Get Models": "獲取模型",
+  "Select Model": "選擇模型",
+  "Available models:": "可用模型：",
+  "Please enter API key first": "請先輸入API密鑰",
+  "Testing API connection, please wait...": "正在測試API連接，請稍候...",
+  "API connection test successful!": "API連接測試成功！",
+  "API connection test failed": "API連接測試失敗",
+  "Fetching models, please wait...": "正在獲取模型列表，請稍候...",
+  "Failed to get models": "獲取模型列表失敗",
+  "No models available": "沒有可用的模型"
 }

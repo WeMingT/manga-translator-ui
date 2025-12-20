@@ -667,5 +667,17 @@
   "web_used": "Used",
   "web_unlimited_quota_info": "You have unlimited quota",
   "web_used_today": "Used today",
-  "web_active_sessions": "Active Sessions"
+  "web_active_sessions": "Active Sessions",
+  "Test": "Test",
+  "Testing": "Testing",
+  "Get Models": "Get Models",
+  "Select Model": "Select Model",
+  "Available models:": "Available models:",
+  "Please enter API key first": "Please enter API key first",
+  "Testing API connection, please wait...": "Testing API connection, please wait...",
+  "API connection test successful!": "API connection test successful!",
+  "API connection test failed": "API connection test failed",
+  "Fetching models, please wait...": "Fetching models, please wait...",
+  "Failed to get models": "Failed to get models",
+  "No models available": "No models available"
 }

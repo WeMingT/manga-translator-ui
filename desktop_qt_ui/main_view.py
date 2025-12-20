@@ -223,6 +223,7 @@ class MainView(QWidget):
                 env_input_widget = QWidget()
                 self.env_layout = QGridLayout(env_input_widget)
                 self.env_layout.setColumnStretch(1, 1)  # 让输入框列可以拉伸
+                self.env_layout.setColumnStretch(2, 0)  # 按钮列不拉伸
                 self.env_layout.setHorizontalSpacing(10)
                 self.env_layout.setVerticalSpacing(8)
                 self.env_layout.setContentsMargins(0, 0, 0, 0)
@@ -1075,7 +1076,7 @@ class MainView(QWidget):
 
     def _create_env_widgets(self, keys: list, current_values: dict):
         """为给定的键创建标签和输入框"""
-        from PyQt6.QtWidgets import QGridLayout
+        from PyQt6.QtWidgets import QGridLayout, QPushButton, QHBoxLayout
         row = 0
         for key in keys:
             value = current_values.get(key, "")
@@ -1083,10 +1084,26 @@ class MainView(QWidget):
             label = QLabel(f"{label_text}:")
             widget = QLineEdit(value)
             widget.textChanged.connect(partial(self._debounced_save_env_var, key))
+            
             # 使用 GridLayout 的 addWidget 而不是 FormLayout 的 addRow
             if isinstance(self.env_layout, QGridLayout):
                 self.env_layout.addWidget(label, row, 0, Qt.AlignmentFlag.AlignLeft)
                 self.env_layout.addWidget(widget, row, 1)
+                
+                # 为API_KEY字段添加测试按钮
+                if "API_KEY" in key or "AUTH_KEY" in key or "TOKEN" in key:
+                    test_button = QPushButton(self._t("Test"))
+                    test_button.setFixedWidth(60)
+                    test_button.clicked.connect(partial(self._on_test_api_clicked, key))
+                    self.env_layout.addWidget(test_button, row, 2)
+                
+                # 为MODEL字段添加获取模型列表按钮
+                elif "MODEL" in key:
+                    get_models_button = QPushButton(self._t("Get Models"))
+                    get_models_button.setFixedWidth(100)
+                    get_models_button.clicked.connect(partial(self._on_get_models_clicked, key))
+                    self.env_layout.addWidget(get_models_button, row, 2)
+                
                 row += 1
             else:
                 self.env_layout.addRow(label, widget)
@@ -1101,6 +1118,216 @@ class MainView(QWidget):
             pass  # No connection to disconnect, which is fine.
         self._env_debounce_timer.timeout.connect(lambda: self.env_var_changed.emit(key, text))
         self._env_debounce_timer.start()
+
+    def _on_test_api_clicked(self, key: str):
+        """测试API连接"""
+        from PyQt6.QtWidgets import QMessageBox, QProgressDialog
+        from PyQt6.QtCore import Qt
+        import asyncio
+        
+        # 获取当前API密钥
+        if key not in self.env_widgets:
+            return
+        
+        _, widget = self.env_widgets[key]
+        api_key = widget.text().strip()
+        
+        if not api_key:
+            QMessageBox.warning(
+                self,
+                self._t("Warning"),
+                self._t("Please enter API key first")
+            )
+            return
+        
+        # 获取当前翻译器
+        translator_combo = self.findChild(QComboBox, "translator.translator")
+        if not translator_combo:
+            return
+        
+        translator_display = translator_combo.currentText()
+        reverse_map = {v: k for k, v in self.controller.get_display_mapping('translator').items()}
+        translator_key = reverse_map.get(translator_display, translator_display.lower())
+        
+        # 获取API Base（如果有）
+        api_base = None
+        for env_key in self.env_widgets.keys():
+            if "API_BASE" in env_key or "BASE" in env_key:
+                _, base_widget = self.env_widgets[env_key]
+                api_base = base_widget.text().strip() or None
+                break
+        
+        # 获取模型（如果有）
+        model = None
+        for env_key in self.env_widgets.keys():
+            if "MODEL" in env_key:
+                _, model_widget = self.env_widgets[env_key]
+                model = model_widget.text().strip() or None
+                break
+        
+        # 创建进度对话框
+        progress = QProgressDialog(self._t("Testing API connection, please wait..."), None, 0, 0, self)
+        progress.setWindowTitle(self._t("Testing"))
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.show()
+        
+        # 在新线程中执行异步测试
+        def run_test():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(
+                self.controller.test_api_connection_async(translator_key, api_key, api_base, model)
+            )
+            loop.close()
+            return result
+        
+        from PyQt6.QtCore import QThread
+        
+        class TestThread(QThread):
+            finished_signal = pyqtSignal(bool, str)
+            
+            def run(self):
+                try:
+                    success, message = run_test()
+                    self.finished_signal.emit(success, message)
+                except Exception as e:
+                    self.finished_signal.emit(False, str(e))
+        
+        def on_test_finished(success, message):
+            progress.close()
+            if success:
+                QMessageBox.information(
+                    self,
+                    self._t("Success"),
+                    self._t("API connection test successful!")
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    self._t("Error"),
+                    f"{self._t('API connection test failed')}: {message}"
+                )
+        
+        test_thread = TestThread()
+        test_thread.finished_signal.connect(on_test_finished)
+        test_thread.start()
+        
+        # 保持线程引用，防止被垃圾回收
+        self._test_thread = test_thread
+
+    def _on_get_models_clicked(self, key: str):
+        """获取可用模型列表"""
+        from PyQt6.QtWidgets import QMessageBox, QInputDialog, QProgressDialog
+        from PyQt6.QtCore import Qt
+        import asyncio
+        
+        # 获取当前翻译器
+        translator_combo = self.findChild(QComboBox, "translator.translator")
+        if not translator_combo:
+            return
+        
+        translator_display = translator_combo.currentText()
+        reverse_map = {v: k for k, v in self.controller.get_display_mapping('translator').items()}
+        translator_key = reverse_map.get(translator_display, translator_display.lower())
+        
+        # 检查是否有API密钥
+        api_key = None
+        api_key_field = None
+        for env_key in self.env_widgets.keys():
+            if "API_KEY" in env_key or "AUTH_KEY" in env_key:
+                api_key_field = env_key
+                _, api_widget = self.env_widgets[api_key_field]
+                api_key = api_widget.text().strip()
+                break
+        
+        if not api_key:
+            QMessageBox.warning(
+                self,
+                self._t("Warning"),
+                self._t("Please enter API key first")
+            )
+            return
+        
+        # 获取API Base（如果有）
+        api_base = None
+        for env_key in self.env_widgets.keys():
+            if "API_BASE" in env_key or "BASE" in env_key:
+                _, base_widget = self.env_widgets[env_key]
+                api_base = base_widget.text().strip() or None
+                break
+        
+        # 创建进度对话框
+        progress = QProgressDialog(self._t("Fetching models, please wait..."), None, 0, 0, self)
+        progress.setWindowTitle(self._t("Get Models"))
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.show()
+        
+        # 在新线程中执行异步获取
+        def run_get_models():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(
+                self.controller.get_available_models_async(translator_key, api_key, api_base)
+            )
+            loop.close()
+            return result
+        
+        from PyQt6.QtCore import QThread
+        
+        class GetModelsThread(QThread):
+            finished_signal = pyqtSignal(bool, list, str)
+            
+            def run(self):
+                try:
+                    success, models, message = run_get_models()
+                    self.finished_signal.emit(success, models, message)
+                except Exception as e:
+                    self.finished_signal.emit(False, [], str(e))
+        
+        def on_get_models_finished(success, models, message):
+            progress.close()
+            if success:
+                if models:
+                    # 显示模型选择对话框
+                    selected_model, ok = QInputDialog.getItem(
+                        self,
+                        self._t("Select Model"),
+                        self._t("Available models:"),
+                        models,
+                        0,
+                        False
+                    )
+                    
+                    if ok and selected_model:
+                        # 填充到MODEL字段
+                        if key in self.env_widgets:
+                            _, widget = self.env_widgets[key]
+                            widget.setText(selected_model)
+                            # 触发保存
+                            self.env_var_changed.emit(key, selected_model)
+                else:
+                    # 成功但没有模型
+                    QMessageBox.warning(
+                        self,
+                        self._t("Warning"),
+                        self._t("No models available")
+                    )
+            else:
+                # 失败
+                QMessageBox.critical(
+                    self,
+                    self._t("Error"),
+                    f"{self._t('Failed to get models')}: {message}"
+                )
+        
+        get_models_thread = GetModelsThread()
+        get_models_thread.finished_signal.connect(on_get_models_finished)
+        get_models_thread.start()
+        
+        # 保持线程引用，防止被垃圾回收
+        self._get_models_thread = get_models_thread
 
     def _refresh_preset_list(self):
         """刷新预设列表"""
@@ -1152,21 +1379,16 @@ class MainView(QWidget):
                 if reply != QMessageBox.StandardButton.Yes:
                     return
             
-            # 保存当前.env配置为预设
-            success = self.controller.save_preset(preset_name)
+            # 创建空白预设（copy_current=False）
+            success = self.controller.save_preset(preset_name, copy_current=False)
             if success:
                 self._refresh_preset_list()
                 self.preset_combo.setCurrentText(preset_name)
-                QMessageBox.information(
-                    self,
-                    self._t("Success"),
-                    self._t("Preset saved successfully")
-                )
             else:
                 QMessageBox.critical(
                     self,
                     self._t("Error"),
-                    self._t("Failed to save preset")
+                    self._t("Failed to create preset")
                 )
 
     def _on_delete_preset_clicked(self):
@@ -1213,9 +1435,9 @@ class MainView(QWidget):
         # 获取当前预设名称
         old_preset_name = getattr(self, '_current_preset_name', '')
         
-        # 如果有旧预设，先保存当前环境变量到旧预设
+        # 如果有旧预设，先保存当前环境变量到旧预设（复制当前配置）
         if old_preset_name and old_preset_name != new_preset_name:
-            self.controller.save_preset(old_preset_name)
+            self.controller.save_preset(old_preset_name, copy_current=True)
         
         # 加载新预设
         success = self.controller.load_preset(new_preset_name)

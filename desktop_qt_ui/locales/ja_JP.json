@@ -549,5 +549,17 @@
   "web_total_files": "総ファイル数",
   "web_total_storage": "総ストレージ",
   "web_storage_used": "使用済み容量",
-  "web_storage_available": "利用可能容量"
+  "web_storage_available": "利用可能容量",
+  "Test": "テスト",
+  "Testing": "テスト中",
+  "Get Models": "モデルを取得",
+  "Select Model": "モデルを選択",
+  "Available models:": "利用可能なモデル：",
+  "Please enter API key first": "先にAPIキーを入力してください",
+  "Testing API connection, please wait...": "API接続をテスト中、お待ちください...",
+  "API connection test successful!": "API接続テスト成功！",
+  "API connection test failed": "API接続テスト失敗",
+  "Fetching models, please wait...": "モデルリストを取得中、お待ちください...",
+  "Failed to get models": "モデルリストの取得に失敗しました",
+  "No models available": "利用可能なモデルがありません"
 }
