@@ -719,13 +719,9 @@ class MangaTranslator:
                 if 'lines' in region_data and isinstance(region_data['lines'], list):
                     # Fix: Use np.float64 to match TextBlock expectation, not np.int32
                     lines_arr = np.array(region_data['lines'], dtype=np.float64)
-                    logger.debug(f"[加载JSON] 原始lines类型: {type(region_data['lines'])}, 转换后shape: {lines_arr.shape}, dtype: {lines_arr.dtype}")
-                    if lines_arr.size > 0:
-                        logger.debug(f"[加载JSON] 第一个坐标值: {lines_arr.flat[0]}, 类型: {type(lines_arr.flat[0])}")
                     # 验证并修正形状，确保是 (N, 4, 2)
                     if lines_arr.ndim == 2 and lines_arr.shape == (4, 2):
                         lines_arr = lines_arr.reshape(1, 4, 2)
-                        logger.debug(f"[加载JSON] 修正shape从(4,2)到(1,4,2)")
                     elif lines_arr.ndim != 3 or lines_arr.shape[1] != 4 or lines_arr.shape[2] != 2:
                         logger.warning(f"[加载JSON] 无效的lines形状: {lines_arr.shape}, 跳过此区域")
                         continue
@@ -2745,19 +2741,14 @@ class MangaTranslator:
                         # 如果执行了超分，需要将mask和坐标也超分
                         if config.upscale.upscale_ratio:
                             upscale_ratio = parse_upscale_ratio(config.upscale.upscale_ratio)
-                            logger.info(f"[超分缩放] 解析超分倍率: {config.upscale.upscale_ratio} -> {upscale_ratio}, 类型: {type(upscale_ratio)}")
                             if upscale_ratio > 0:
                                 if ctx.mask_raw is not None:
                                     ctx.mask_raw = cv2.resize(ctx.mask_raw, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
                                 if ctx.mask is not None:
                                     ctx.mask = cv2.resize(ctx.mask, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
                                 
-                                for idx, region in enumerate(ctx.text_regions):
-                                    logger.debug(f"[超分缩放] 区域{idx}: 缩放前lines.shape={region.lines.shape}, dtype={region.lines.dtype}")
-                                    if region.lines.size > 0:
-                                        logger.debug(f"[超分缩放] 区域{idx}: 第一个坐标值={region.lines.flat[0]}, 类型={type(region.lines.flat[0])}")
+                                for region in ctx.text_regions:
                                     region.lines = region.lines * upscale_ratio
-                                    logger.debug(f"[超分缩放] 区域{idx}: 缩放后lines.shape={region.lines.shape}, dtype={region.lines.dtype}")
                                     if hasattr(region, 'font_size') and region.font_size:
                                         region.font_size = int(region.font_size * upscale_ratio)
                         
