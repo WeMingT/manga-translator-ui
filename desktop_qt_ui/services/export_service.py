@@ -427,18 +427,6 @@ class ExportService:
         # 添加调试信息
         self.logger.info(f"保存区域数据到: {json_path}")
         self.logger.info(f"区域数量: {len(save_data)}")
-        for i, region in enumerate(save_data):
-            lines = region.get('lines', [])
-            if isinstance(lines, np.ndarray):
-                shape = lines.shape
-                dtype = lines.dtype
-                self.logger.info(f"区域 {i}: lines形状={shape}, dtype={dtype}, translation='{region.get('translation', '')[:50]}...'")
-                # 额外检查：打印第一个坐标点的值和类型
-                if lines.size > 0:
-                    first_point = lines.flat[0]
-                    self.logger.info(f"  第一个坐标值: {first_point}, 类型: {type(first_point)}")
-            else:
-                self.logger.info(f"区域 {i}: lines不是numpy数组，类型={type(lines)}, translation='{region.get('translation', '')[:50]}...'")
         
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(formatted_data, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
