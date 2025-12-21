@@ -22,6 +22,16 @@ from PyQt6.QtWidgets import (
 _thumbnail_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="thumbnail_loader")
 
 
+def shutdown_thumbnail_executor():
+    """关闭缩略图加载线程池"""
+    global _thumbnail_executor
+    if _thumbnail_executor:
+        try:
+            _thumbnail_executor.shutdown(wait=False)
+        except Exception:
+            pass
+
+
 class ThumbnailSignals(QObject):
     """用于从工作线程发送信号到主线程"""
     thumbnail_loaded = pyqtSignal(str, QPixmap)  # file_path, pixmap

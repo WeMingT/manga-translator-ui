@@ -1802,6 +1802,13 @@ class MainAppLogic(QObject):
                 self.worker = None
                 self.state_manager.set_translating(False)
             
+            # 关闭缩略图加载线程池
+            try:
+                from desktop_qt_ui.widgets.file_list_view import shutdown_thumbnail_executor
+                shutdown_thumbnail_executor()
+            except Exception:
+                pass
+            
             if self.translation_service:
                 pass
         except Exception as e:
