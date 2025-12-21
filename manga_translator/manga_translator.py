@@ -3331,8 +3331,10 @@ class MangaTranslator:
                     
                 region_start_idx = len(all_texts)
                 for region_idx, region in enumerate(ctx.text_regions):
-                    all_texts.append(region.text)
-                    batch_text_mapping.append((ctx_idx, region_idx))
+                    # 跳过 None 值，避免后续处理时出错
+                    if region.text is not None:
+                        all_texts.append(region.text)
+                        batch_text_mapping.append((ctx_idx, region_idx))
                 
             if not all_texts:
                 # 当前批次没有需要翻译的文本
