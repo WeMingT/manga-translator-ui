@@ -744,8 +744,6 @@ class CommonTranslator(InfererModule):
         if len(translations) != len(queries):
             return False, f"Translation count mismatch: expected {len(queries)}, got {len(translations)}"
 
-        import string
-
         # 2. 检查空翻译（原文不为空但译文为空）- 已禁用
         # empty_translation_errors = []
         # for i, (source, translation) in enumerate(zip(queries, translations)):
@@ -755,13 +753,13 @@ class CommonTranslator(InfererModule):
         # if empty_translation_errors:
         #     return False, f"Empty translation detected at positions: {empty_translation_errors}"
 
-        # 3. 检查合并翻译（原文是正常文本但译文只有标点）
-        for i, (source, translation) in enumerate(zip(queries, translations)):
-            is_source_simple = all(char in string.punctuation or char.isspace() for char in source)
-            is_translation_simple = all(char in string.punctuation or char.isspace() for char in translation)
-
-            if is_translation_simple and not is_source_simple:
-                return False, f"Detected potential merged translation at position {i+1}"
+        # 3. 检查合并翻译（原文是正常文本但译文只有标点）- 已禁用
+        # for i, (source, translation) in enumerate(zip(queries, translations)):
+        #     is_source_simple = all(char in string.punctuation or char.isspace() for char in source)
+        #     is_translation_simple = all(char in string.punctuation or char.isspace() for char in translation)
+        #
+        #     if is_translation_simple and not is_source_simple:
+        #         return False, f"Detected potential merged translation at position {i+1}"
 
         # 4. 检查可疑符号（模型幻觉）- 已禁用
         # SUSPICIOUS_SYMBOLS = ["ହ", "ି", "ഹ"]
@@ -769,8 +767,6 @@ class CommonTranslator(InfererModule):
         #     for translation in translations:
         #         if symbol in translation:
         #             return False, f"Suspicious symbol '{symbol}' detected in translation"
-
-        return True, ""
 
         return True, ""
 
