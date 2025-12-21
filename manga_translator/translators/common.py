@@ -551,7 +551,8 @@ class CommonTranslator(InfererModule):
                 prompt += f"=== Image {i+1} ===\n"
                 prompt += f"Text regions ({len(data['original_texts'])} regions):\n"
                 for j, text in enumerate(data['original_texts']):
-                    prompt += f"  {j+1}. {text}\n"
+                    if text is not None:
+                        prompt += f"  {j+1}. {text}\n"
                 prompt += "\n"
         else:
             prompt += "Please translate the following manga text regions:\n\n"
@@ -564,6 +565,11 @@ class CommonTranslator(InfererModule):
             text_regions = data.get('text_regions', [])
             
             for region_idx, text in enumerate(data['original_texts']):
+                # 跳过 None 值
+                if text is None:
+                    self.logger.warning(f"跳过 None 文本 (img_idx={img_idx}, region_idx={region_idx})")
+                    continue
+                
                 # 预处理文本：移除换行符
                 text_clean = text.replace('\n', ' ').replace('\ufffd', '')
                 

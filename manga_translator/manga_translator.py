@@ -1643,6 +1643,11 @@ class MangaTranslator:
 
         new_text_regions = []
         for region in text_regions:
+            # 跳过text为None的区域
+            if region.text is None:
+                logger.warning(f'跳过text为None的区域')
+                continue
+                
             # Remove leading spaces after pre-translation dictionary replacement                
             original_text = region.text  
             stripped_text = original_text.strip()  
@@ -1729,10 +1734,12 @@ class MangaTranslator:
               
             region.text = stripped_text.strip()     
             
-            if len(region.text) < config.ocr.min_text_length \
+            # 过滤空文本、过短文本、无价值文本
+            if not region.text \
+                    or len(region.text) < config.ocr.min_text_length \
                     or not is_valuable_text(region.text) \
                     or (not config.translator.no_text_lang_skip and langcodes.tag_distance(region.source_lang, config.translator.target_lang) == 0):
-                if region.text.strip():
+                if region.text and region.text.strip():
                     logger.info(f'Filtered out: {region.text}')
                     if len(region.text) < config.ocr.min_text_length:
                         logger.info('Reason: Text length is less than the minimum required length.')
@@ -1740,6 +1747,8 @@ class MangaTranslator:
                         logger.info('Reason: Text is not considered valuable.')
                     elif langcodes.tag_distance(region.source_lang, config.translator.target_lang) == 0:
                         logger.info('Reason: Text language matches the target language and no_text_lang_skip is False.')
+                elif not region.text:
+                    logger.info('Filtered out: Empty text region')
             else:
                 if config.render.font_color_fg or config.render.font_color_bg:
                     if config.render.font_color_bg:
@@ -3368,7 +3377,7 @@ class MangaTranslator:
                     for ctx, _ in batch:
                         if ctx.text_regions:
                             image_data = {
-                                'original_texts': [region.text for region in ctx.text_regions]
+                                'original_texts': [region.text for region in ctx.text_regions if region.text is not None]
                             }
                             batch_original_texts.append(image_data)
                     
@@ -3410,7 +3419,7 @@ class MangaTranslator:
                                 img_data = {
                                     'image': ctx.input if hasattr(ctx, 'input') else None,
                                     'text_regions': ctx.text_regions,
-                                    'original_texts': [region.text for region in ctx.text_regions],
+                                    'original_texts': [region.text for region in ctx.text_regions if region.text is not None],
                                     'text_order': text_order,
                                     'upscaled_size': upscaled_size
                                 }
@@ -3642,7 +3651,7 @@ class MangaTranslator:
                     return ctx, config
 
                 # 收集该context的所有文本
-                texts = [region.text for region in ctx.text_regions]
+                texts = [region.text for region in ctx.text_regions if region.text is not None]
 
                 if not texts:
                     return ctx, config
@@ -4519,7 +4528,7 @@ class MangaTranslator:
                 image_data = {
                     'image': ctx.input,
                     'text_regions': ctx.text_regions if ctx.text_regions else [],
-                    'original_texts': [region.text for region in ctx.text_regions] if ctx.text_regions else [],
+                    'original_texts': [region.text for region in ctx.text_regions if region.text is not None] if ctx.text_regions else [],
                     'text_order': text_order,
                     'upscaled_size': upscaled_size
                 }
