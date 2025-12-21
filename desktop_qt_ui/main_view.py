@@ -1329,21 +1329,45 @@ class MainView(QWidget):
         # 保持线程引用，防止被垃圾回收
         self._get_models_thread = get_models_thread
 
-    def _refresh_preset_list(self):
-        """刷新预设列表"""
+    def _refresh_preset_list(self, deleted_preset_name: str = None):
+        """刷新预设列表
+        
+        Args:
+            deleted_preset_name: 被删除的预设名称，用于智能选择下一个预设
+        """
         if not hasattr(self, 'preset_combo'):
             return
         
         current_text = self.preset_combo.currentText()
+        current_index = self.preset_combo.currentIndex()
+        
         self.preset_combo.blockSignals(True)
         self.preset_combo.clear()
         
         presets = self.controller.get_presets_list()
+        
+        # 如果没有预设了，创建一个空白的默认预设
+        if not presets:
+            self.controller.save_preset("默认", copy_current=False)
+            presets = self.controller.get_presets_list()
+        
         if presets:
             self.preset_combo.addItems(presets)
-            # 恢复之前选择的预设
+            
+            # 如果之前选择的预设还存在，恢复选择
             if current_text and current_text in presets:
                 self.preset_combo.setCurrentText(current_text)
+                self.preset_combo.blockSignals(False)
+            else:
+                # 如果之前的预设被删除了，智能选择下一个
+                # 优先选择原来位置的下一个，如果没有就选上一个
+                new_index = min(current_index, len(presets) - 1)
+                self.preset_combo.setCurrentIndex(new_index)
+                new_preset = self.preset_combo.currentText()
+                self.preset_combo.blockSignals(False)
+                # 手动触发预设切换，刷新UI
+                self._on_preset_changed(new_preset)
+                return
         
         self.preset_combo.blockSignals(False)
 
@@ -1414,7 +1438,7 @@ class MainView(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             success = self.controller.delete_preset(preset_name)
             if success:
-                self._refresh_preset_list()
+                self._refresh_preset_list(deleted_preset_name=preset_name)
                 QMessageBox.information(
                     self,
                     self._t("Success"),
@@ -1428,28 +1452,35 @@ class MainView(QWidget):
                 )
 
     def _on_preset_changed(self, new_preset_name: str):
-        """切换预设时自动保存当前预设并加载新预设"""
+        """切换预设时加载新预设"""
         if not new_preset_name:
             return
         
         # 获取当前预设名称
         old_preset_name = getattr(self, '_current_preset_name', '')
         
-        # 如果有旧预设，先保存当前环境变量到旧预设（复制当前配置）
-        if old_preset_name and old_preset_name != new_preset_name:
-            self.controller.save_preset(old_preset_name, copy_current=True)
+        # 如果是同一个预设，不需要重新加载
+        if old_preset_name == new_preset_name:
+            return
         
-        # 加载新预设
+        # 加载新预设（不自动保存旧预设，避免覆盖）
         success = self.controller.load_preset(new_preset_name)
         if success:
             # 更新当前预设名称
             self._current_preset_name = new_preset_name
             # 保存当前预设到配置文件（持久化）
             self.controller.config_service.set_current_preset(new_preset_name)
-            # 重新加载当前翻译器的环境变量显示
-            translator_combo = self.findChild(QComboBox, "translator.translator")
-            if translator_combo:
-                self._on_translator_changed(translator_combo.currentText())
+            
+            # 重新加载环境变量（从.env文件读取最新值）
+            current_env_values = self.config_service.load_env_vars()
+            
+            # 更新所有环境变量输入框的值
+            for key, (label, widget) in self.env_widgets.items():
+                new_value = current_env_values.get(key, "")
+                # 阻止信号触发，避免循环保存
+                widget.blockSignals(True)
+                widget.setText(new_value)
+                widget.blockSignals(False)
 
     def update_output_path_display(self, path: str):
         """Slot to update the text of the output folder input field."""

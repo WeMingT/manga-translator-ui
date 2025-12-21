@@ -478,6 +478,10 @@ class ConfigService(QObject):
             for key, value in env_vars.items():
                 if not self.save_env_var(key, value):
                     return False
+            
+            # 清除缓存，确保下次读取时获取最新值
+            self._env_cache = None
+            
             return True
         except Exception as e:
             self.logger.error(f"批量保存环境变量失败: {e}")
