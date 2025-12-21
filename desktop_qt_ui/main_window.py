@@ -411,7 +411,7 @@ class MainWindow(QMainWindow):
         """
         Switches to the editor view and loads the necessary files.
         file_to_load: 单个文件路径（双击文件时使用）
-        files_to_load: 翻译后的文件列表
+        files_to_load: 翻译后的文件列表（从翻译完成进入时使用）
         """
         import os
 
@@ -451,22 +451,30 @@ class MainWindow(QMainWindow):
                         translated_files.append(translated_file)
                         translated_folder_map[translated_file] = output_folder
 
-            # 传递完整的树结构给编辑器
-            self.editor_logic.load_file_lists(
-                source_files=expanded_files, 
-                translated_files=translated_files,
-                folder_tree=folder_tree
-            )
-
-            # 如果指定了要加载的文件，加载第一个翻译后的文件
-            if file_to_load:
-                self.editor_logic.load_image_into_editor(file_to_load)
-            elif files_to_load and len(files_to_load) > 0:
-                # files_to_load是翻译后的文件列表，加载第一个
+            # 判断是否从翻译完成进入（有 files_to_load 参数）
+            # 如果是，文件列表应该显示翻译后的文件，而不是源文件
+            if files_to_load and len(files_to_load) > 0:
+                # 从翻译完成进入：显示翻译后的文件列表
+                self.editor_logic.load_file_lists(
+                    source_files=translated_files,  # 显示翻译后的文件
+                    translated_files=translated_files,
+                    folder_tree=folder_tree
+                )
+                # 加载第一个翻译后的文件
                 self.editor_logic.load_image_into_editor(files_to_load[0])
-            elif translated_files:
-                # 如果没有指定，加载第一个翻译后的文件
-                self.editor_logic.load_image_into_editor(translated_files[0])
+            else:
+                # 手动打开编辑器：显示源文件列表
+                self.editor_logic.load_file_lists(
+                    source_files=expanded_files, 
+                    translated_files=translated_files,
+                    folder_tree=folder_tree
+                )
+                # 如果指定了要加载的文件
+                if file_to_load:
+                    self.editor_logic.load_image_into_editor(file_to_load)
+                elif translated_files:
+                    # 如果没有指定，加载第一个翻译后的文件
+                    self.editor_logic.load_image_into_editor(translated_files[0])
 
             self.stacked_widget.setCurrentWidget(self.editor_view)
         except Exception as e:
