@@ -1244,9 +1244,7 @@ async def dispatch(
         debug_img = None
 
     for region, dst_points in tqdm(zip(text_regions, dst_points_list), '[render]', total=len(text_regions)):
-        logger.info(f"[RENDER] 开始渲染区域，文本长度: {len(region.translation) if region.translation else 0}, 前50字符: {region.translation[:50] if region.translation else 'N/A'}...")
         img = render(img, region, dst_points, not config.render.no_hyphenation, config.render.line_spacing, config.render.disable_font_border, config)
-        logger.info(f"[RENDER] 完成渲染区域")
     
     if return_debug_img and debug_img is not None:
         return img, debug_img
@@ -1261,7 +1259,6 @@ def render(
     disable_font_border,
     config: Config
 ):
-    logger.info(f"[RENDER] render函数开始，文本长度: {len(region.translation) if region.translation else 0}")
     global _global_default_font_path
     
     # Set region-specific font if specified, otherwise use global default
@@ -1405,9 +1402,8 @@ def render(
         text_to_render = re.sub(r'<H>(.*?)</H>', r'\1', text_to_render, flags=re.IGNORECASE | re.DOTALL)
 
     # 使用 freetype 渲染器（稳定可靠）
-    logger.debug(f"[RENDER] 准备调用text_render，横排: {render_horizontally}, 文本长度: {len(text_to_render)}")
+    # 使用 freetype 渲染器（稳定可靠）
     if render_horizontally:
-        logger.info(f"[RENDER] 调用put_text_horizontal，font_size={region.font_size}, width={round(norm_h[0])}, height={round(norm_v[0])}")
         temp_box = text_render.put_text_horizontal(
             region.font_size,
             text_to_render,
@@ -1423,9 +1419,7 @@ def render(
             config,
             len(region.lines)  # Pass region count
         )
-        logger.info(f"[RENDER] put_text_horizontal完成")
     else:
-        logger.info(f"[RENDER] 调用put_text_vertical，font_size={region.font_size}, height={round(norm_v[0])}")
         temp_box = text_render.put_text_vertical(
             region.font_size,
             text_to_render,
@@ -1437,7 +1431,6 @@ def render(
             config,
             len(region.lines)  # Pass region count
         )
-        logger.info(f"[RENDER] put_text_vertical完成")
     
     if temp_box is None:
         logger.warning(f"[RENDER SKIPPED] Text rendering returned None. Text: '{region.translation[:100]}...'")
