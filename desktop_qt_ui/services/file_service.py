@@ -140,7 +140,9 @@ class FileService:
             self.logger.debug(f"Loaded {len(regions)} regions from {os.path.basename(json_path)}")
 
         except Exception as e:
+            import traceback
             self.logger.error(f"Failed to load or parse JSON file {json_path}: {e}")
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return [], None, None
 
         return regions, raw_mask, original_size
