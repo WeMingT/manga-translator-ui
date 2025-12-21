@@ -141,13 +141,20 @@ def generate_line_break_combinations(text: str):
         # No breaks, return original text
         return [(text, "no_breaks", None)]
     
+    n_breaks = len(breaks)
+    
+    # 限制：如果断句标记超过10个，只保留原文，不进行优化
+    # 因为组合数量会爆炸（2^n），导致计算时间过长
+    if n_breaks > 10:
+        logger.warning(f"[OPTIMIZE_LINE_BREAKS] 断句标记过多({n_breaks}个)，跳过优化以避免性能问题")
+        return [(text, "all_breaks", None)]
+    
     combinations = []
     
     # Add original (keep all breaks)
     combinations.append((text, "all_breaks", None))
     
     # Generate all possible combinations (remove 1, 2, 3, ... n breaks)
-    n_breaks = len(breaks)
     for r in range(1, n_breaks + 1):
         for combo in itertools.combinations(range(n_breaks), r):
             # Create a version with selected breaks removed
