@@ -393,15 +393,12 @@ class MainAppLogic(QObject):
         """
         try:
             if copy_current:
-                # 复制当前配置模式：保存当前翻译器相关的环境变量
-                current_translator = self.config_service.get_config().translator.translator
-                translator_env_vars = self.config_service.get_all_env_vars(current_translator)
+                # 复制当前配置模式：保存.env中所有翻译器的环境变量
                 all_env_vars = self.config_service.load_env_vars()
                 
-                # 只保存当前翻译器相关的环境变量，并且只保存非空的值
+                # 保存所有非空的环境变量
                 filtered_env_vars = {}
-                for key in translator_env_vars:
-                    value = all_env_vars.get(key, "")
+                for key, value in all_env_vars.items():
                     if value and value.strip():
                         filtered_env_vars[key] = value
                 
@@ -410,7 +407,7 @@ class MainAppLogic(QObject):
                     # 不输出日志，避免刷屏
                     pass
             else:
-                # 创建空白预设模式：只保存空的环境变量结构
+                # 创建空白预设模式：只保存当前翻译器的空环境变量结构
                 current_translator = self.config_service.get_config().translator.translator
                 translator_env_vars = self.config_service.get_all_env_vars(current_translator)
                 
@@ -431,19 +428,26 @@ class MainAppLogic(QObject):
     
     @pyqtSlot(str)
     def load_preset(self, preset_name: str) -> bool:
-        """加载预设并应用到.env"""
+        """加载预设并更新环境变量到.env"""
         try:
-            env_vars = self.preset_service.load_preset(preset_name)
-            if env_vars is None:
+            preset_env_vars = self.preset_service.load_preset(preset_name)
+            if preset_env_vars is None:
                 self._ui_log(f"加载预设失败: {preset_name}", "ERROR")
                 return False
             
-            # 批量保存环境变量
-            success = self.config_service.save_env_vars(env_vars)
-            if success:
-                # 不输出日志，避免刷屏
-                pass
-            else:
+            # 获取当前翻译器需要的所有环境变量
+            current_translator = self.config_service.get_config().translator.translator
+            translator_env_vars = self.config_service.get_all_env_vars(current_translator)
+            
+            # 准备要更新的环境变量
+            env_vars_to_update = {}
+            for key in translator_env_vars:
+                # 使用预设中的值，如果预设中没有或为空，则设为空字符串
+                env_vars_to_update[key] = preset_env_vars.get(key, "")
+            
+            # 更新当前翻译器的环境变量
+            success = self.config_service.save_env_vars(env_vars_to_update)
+            if not success:
                 self._ui_log(f"应用预设失败: {preset_name}", "ERROR")
             return success
         except Exception as e:
