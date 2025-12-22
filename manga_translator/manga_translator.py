@@ -2630,6 +2630,39 @@ class MangaTranslator:
         # === 步骤4: 批量处理模式（顺序处理） ===
         logger.info(f'Starting batch translation: {len(images_with_configs)} images, batch size: {batch_size}')
         
+        # ✅ 修复：如果 images_with_configs 中包含文件路径字符串（并发模式格式），需要先加载图片
+        # 这种情况发生在：用户启用并发模式，但因为特殊模式（如仅上色）导致并发被禁用
+        needs_image_loading = False
+        if images_with_configs:
+            first_item = images_with_configs[0]
+            if isinstance(first_item, tuple):
+                first_image = first_item[0]
+                # 检查是否是字符串路径
+                if isinstance(first_image, str):
+                    needs_image_loading = True
+                    logger.info("检测到文件路径格式，将先加载图片...")
+        
+        if needs_image_loading:
+            from PIL import Image as PILImage
+            loaded_images_with_configs = []
+            for item in images_with_configs:
+                if isinstance(item, tuple):
+                    file_path, config = item
+                    try:
+                        # 加载图片
+                        with open(file_path, 'rb') as f:
+                            image = PILImage.open(f)
+                            image.load()  # 立即加载图片数据
+                        image.name = file_path  # 保存文件路径
+                        loaded_images_with_configs.append((image, config))
+                    except Exception as e:
+                        logger.error(f"加载图片失败 {file_path}: {e}")
+                        continue
+                else:
+                    loaded_images_with_configs.append(item)
+            images_with_configs = loaded_images_with_configs
+            logger.info(f"成功加载 {len(images_with_configs)} 张图片")
+        
         # Start the background cleanup job once if not already started.
         if self._detector_cleanup_task is None:
             self._detector_cleanup_task = asyncio.create_task(self._detector_cleanup_job())
