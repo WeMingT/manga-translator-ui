@@ -712,6 +712,10 @@ REM 使用命名环境（避免中文路径问题）
 set CONDA_ENV_NAME=manga-env
 set CONDA_ENV_EXISTS=0
 
+REM 预先接受Conda服务条款（避免交互式提示卡住）
+call conda config --set channel_priority flexible >nul 2>&1
+call conda tos accept >nul 2>&1
+
 REM 检查环境是否存在 - 使用 conda info --envs 避免编码错误
 echo 正在检查环境...
 REM 使用 /B 选项进行精确匹配行首，避免误匹配路径中的文本
