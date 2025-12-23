@@ -222,6 +222,12 @@ def run_pip_requirements(requirements_file, desc=None):
     def is_pytorch_package(pkg_name):
         """检查是否是需要从 PyTorch 源下载的包"""
         pkg_lower = pkg_name.lower()
+        
+        # 排除不应该从 PyTorch 源下载的包（即使名字以 torch 开头）
+        excluded_packages = ['torchsummary', 'torchmetrics']
+        if pkg_lower in excluded_packages:
+            return False
+        
         for prefix in pytorch_packages:
             if pkg_lower.startswith(prefix):
                 return True
