@@ -90,6 +90,7 @@
 1. **下载安装脚本**：
    - [点击下载 步骤1-首次安装.bat](https://github.com/hgmzhn/manga-translator-ui/raw/main/步骤1-首次安装.bat)
    - 保存到你想安装程序的目录（如 `D:\manga-translator-ui\`）
+   - ⚠️ **这个目录将作为安装的根目录**，所有程序文件都会安装在此目录下
 
 2. **运行安装**：
    - 双击 `步骤1-首次安装.bat`
