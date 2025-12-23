@@ -401,6 +401,14 @@ class ConcurrentPipeline:
                     logger.warning(f"[修复] 检测到严重错误，停止修复 (已完成 {inpaint_count}/{self.total_images})")
                     break
                 
+                # 检查是否完成所有任务：检测+OCR完成 且 队列为空
+                if self.detection_ocr_done and self.inpaint_queue.empty():
+                    # 再等待一小段时间，确保没有新任务
+                    await asyncio.sleep(0.5)
+                    if self.inpaint_queue.empty():
+                        logger.info(f"[修复线程] 所有任务已完成 ({inpaint_count}/{self.total_images})")
+                        break
+                
                 # 尝试获取任务（超时1秒）
                 try:
                     image_name, config = await asyncio.wait_for(self.inpaint_queue.get(), timeout=1.0)
@@ -464,14 +472,6 @@ class ConcurrentPipeline:
                         logger.info(f"[修复] {ctx.image_name} 翻译+修复都完成，加入渲染队列")
                     else:
                         logger.error(f"[修复] 找不到 {ctx.image_name} 的基础上下文")
-                
-                # 检查是否完成所有任务：检测+OCR完成 且 队列为空
-                if self.detection_ocr_done and self.inpaint_queue.empty():
-                    # 再等待一小段时间，确保没有新任务
-                    await asyncio.sleep(0.5)
-                    if self.inpaint_queue.empty():
-                        logger.info(f"[修复线程] 所有任务已完成 ({inpaint_count}/{self.total_images})")
-                        break
                 
             except Exception as e:
                 # 安全地获取异常信息

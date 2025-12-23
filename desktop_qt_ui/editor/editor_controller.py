@@ -350,6 +350,14 @@ class EditorController(QObject):
         """
         import gc
         
+        # 关闭加载提示（如果存在）
+        if hasattr(self, '_loading_toast') and self._loading_toast:
+            try:
+                self._loading_toast.close()
+                self._loading_toast = None
+            except Exception:
+                pass
+        
         # 取消所有正在运行的后台任务
         self.async_service.cancel_all_tasks()
 

@@ -234,11 +234,10 @@ class MainWindow(QMainWindow):
         self.enter_editor_mode(file_to_load=file_path)
     
     def _on_file_removed_update_editor(self, file_path: str):
-        """当文件被移除时，更新编辑器"""
+        """当主页文件被移除时，更新编辑器（如果编辑器正在显示该文件）"""
         if self.stacked_widget.currentWidget() == self.editor_view:
             # 检查当前加载的图片是否被移除
             current_image = self.editor_controller.model.get_source_image_path()
-            should_clear_canvas = False
             
             if current_image:
                 import os
@@ -247,42 +246,29 @@ class MainWindow(QMainWindow):
                 
                 # 如果移除的是当前图片
                 if norm_current == norm_removed:
-                    should_clear_canvas = True
+                    self.editor_controller.model.set_image(None)
+                    self.editor_controller._clear_editor_state()
                 # 如果移除的是文件夹，检查当前图片是否在该文件夹内
                 elif os.path.isdir(file_path):
                     try:
                         # 检查当前图片是否在被移除的文件夹内
                         if os.path.commonpath([norm_current, norm_removed]) == norm_removed:
-                            should_clear_canvas = True
+                            self.editor_controller.model.set_image(None)
+                            self.editor_controller._clear_editor_state()
                     except ValueError:
                         # 不同驱动器，跳过
                         pass
             
-            # 如果需要清空画布
-            if should_clear_canvas:
-                self.editor_controller.model.set_image(None)
-                self.editor_controller._clear_editor_state()
-            
-            # 检查是否还有文件
-            if not self.app_logic.source_files:
-                # 没有文件了，清空编辑器
-                self.editor_logic.clear_list()
-                # 如果画布还没清空，清空它
-                if not should_clear_canvas:
-                    self.editor_controller.model.set_image(None)
-                    self.editor_controller._clear_editor_state()
-            # 如果还有文件，不需要重建列表，因为视图已经在 _on_file_remove_requested 中移除了
+            # 注意：编辑器有自己独立的文件列表，不需要同步主页的删除操作
+            # 只有当主页文件全部清空时，才清空编辑器列表
     
     def _on_files_cleared_update_editor(self):
         """当文件列表被清空时，清空编辑器"""
         if self.stacked_widget.currentWidget() == self.editor_view:
             # 如果当前在编辑器视图，清空编辑器
             self.logger.info("Files cleared. Clearing editor.")
-            # 清空文件列表
+            # 清空文件列表（内部会自动清空画布和状态）
             self.editor_logic.clear_list()
-            # 清空画布
-            self.editor_controller.model.set_image(None)
-            self.editor_controller._clear_editor_state()
 
     def _change_language(self, locale_code: str):
         """切换语言"""
@@ -390,10 +376,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
-            self.logger.info(f"QMessageBox returned: {reply}")
 
             if reply == QMessageBox.StandardButton.Yes:
-                self.logger.info("User chose to open results in editor.")
                 self.enter_editor_mode(files_to_load=saved_files)
         except Exception as e:
             self.logger.error(f"on_task_completed 发生异常: {e}", exc_info=True)
@@ -420,8 +404,6 @@ class MainWindow(QMainWindow):
             tree_structure = self.app_logic.get_folder_tree_structure()
             expanded_files = tree_structure['files']
             folder_tree = tree_structure['tree']
-            
-            self.logger.info(f"Entering editor mode with {len(expanded_files)} files")
 
             # 传递翻译后的图片列表给编辑器
             # 从file_to_folder_map获取翻译后的图片路径
@@ -453,12 +435,13 @@ class MainWindow(QMainWindow):
 
             # 判断是否从翻译完成进入（有 files_to_load 参数）
             if files_to_load and len(files_to_load) > 0:
-                # 从翻译完成进入：直接使用翻译后的文件列表
-                # 直接传递翻译后的文件，让编辑器像手动添加一样处理
+                # 从翻译完成进入：显示翻译后的文件列表
+                # 不使用源文件的 folder_tree，让编辑器根据翻译后的文件自己构建树结构
                 self.editor_logic.load_file_lists(
-                    source_files=translated_files,  # 直接使用翻译后的文件
-                    translated_files=[],  # 清空翻译文件列表
-                    folder_tree=None  # 不使用树结构，让编辑器自己构建
+                    source_files=expanded_files,      # 传递源文件列表（用于配对）
+                    translated_files=translated_files, # 传递翻译后的文件列表
+                    folder_tree=None,                 # 不使用源文件的树结构
+                    show_translated=True              # 显示翻译后的文件列表
                 )
                 
                 # 加载第一个翻译后的文件
