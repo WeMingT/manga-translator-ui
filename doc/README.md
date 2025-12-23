@@ -252,15 +252,18 @@
    - **渲染图片**：使用加载的翻译内容渲染图片
    - **不进行翻译**，直接渲染
 
+**TXT 文件导入优先级**：
+- **优先使用 `_original.txt`**（原文文件，用于手动翻译后导入）⭐ 最高优先级
+  - 位置：`manga_translator_work/originals/图片名_original.txt`
+  - 说明：将手动翻译的内容替换此文件中的原文内容
+- 如果不存在，使用 `_translated.txt`（翻译文件）
+  - 位置：`manga_translator_work/translations/图片名_translated.txt`
+- 如果都不存在，直接使用 JSON 文件中的翻译
+
 **使用场景**：
 - 修改了 TXT 文件中的翻译内容，需要导入并重新渲染
 - 修改了 JSON 文件中的翻译内容，需要重新渲染
 - 修改了渲染参数（字体、颜色、排版等），需要重新渲染
-
-**TXT 文件优先级**：
-- 优先使用 `_original.txt`（原文文件，用于手动翻译后导入）
-- 如果不存在，使用 `_translated.txt`（翻译文件）
-- 如果都不存在，直接使用 JSON 文件中的翻译
 
 #### 图片可编辑选项
 
@@ -328,6 +331,9 @@
 
 - **修复图片**：`manga_translator_work/inpainted/图片名_inpainted.png`
   - 擦除文字后的图片
+
+- **翻译结果**：`manga_translator_work/result/图片名.png`
+  - 开启"输出到原图目录"功能时，翻译完成的图片输出到此目录
 
 ---
 

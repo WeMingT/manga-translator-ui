@@ -54,6 +54,30 @@
 
 ---
 
+## ✨ 核心功能
+
+### 翻译功能
+
+- 🔍 **智能文本检测** - 自动识别漫画中的文字区域
+- 📝 **多语言 OCR** - 支持日语、中文、英语等多种语言
+- 🌐 **5 种翻译引擎** - OpenAI、Gemini（普通+高质量）、Sakura
+- 🎯 **高质量翻译** - 支持 GPT-4o、Gemini 多模态 AI 翻译
+- 📚 **自动提取术语** - AI 自动识别并积累专有名词，保持翻译一致性
+- 🤖 **AI 智能断句** - 自动优化文本换行，减少不必要的断行
+- 🎨 **智能嵌字** - 自动排版译文，支持多种字体
+- 📦 **批量处理** - 一次处理整个文件夹
+
+### 可视化编辑器
+
+- ✏️ **区域编辑** - 移动、旋转、变形文本框
+- 📐 **文本编辑** - 手动翻译、样式调整
+- 🖌️ **蒙版编辑** - 画笔工具、橡皮擦
+- ⏪ **撤销/重做** - 完整操作历史
+
+**完整功能特性** → [doc/FEATURES.md](doc/FEATURES.md)
+
+---
+
 ## 🚀 快速开始
 
 ### 📥 安装方式
@@ -201,30 +225,6 @@ python -m manga_translator --help
 
 ---
 
-## ✨ 核心功能
-
-### 翻译功能
-
-- 🔍 **智能文本检测** - 自动识别漫画中的文字区域
-- 📝 **多语言 OCR** - 支持日语、中文、英语等多种语言
-- 🌐 **5 种翻译引擎** - OpenAI、Gemini（普通+高质量）、Sakura
-- 🎯 **高质量翻译** - 支持 GPT-4o、Gemini 多模态 AI 翻译
-- 📚 **自动提取术语** - AI 自动识别并积累专有名词，保持翻译一致性
-- 🤖 **AI 智能断句** - 自动优化文本换行，减少不必要的断行
-- 🎨 **智能嵌字** - 自动排版译文，支持多种字体
-- 📦 **批量处理** - 一次处理整个文件夹
-
-### 可视化编辑器
-
-- ✏️ **区域编辑** - 移动、旋转、变形文本框
-- 📐 **文本编辑** - 手动翻译、样式调整
-- 🖌️ **蒙版编辑** - 画笔工具、橡皮擦
-- ⏪ **撤销/重做** - 完整操作历史
-
-**完整功能特性** → [doc/FEATURES.md](doc/FEATURES.md)
-
----
-
 ## 📋 工作流程
 
 本程序支持多种工作流程：
@@ -290,13 +290,33 @@ python -m manga_translator --help
 
 ## ❤️ 支持作者
 
-如果这个项目对你有帮助，欢迎请作者喝杯咖啡 ☕
+如果这个项目对你有帮助，欢迎请作者喝杯奶茶 🧋
 
 <div align="center">
 
-<img src="doc/images/mm_reward_qrcode_1765200960689.png" width="200" alt="打赏码">
+<table style="border: none;">
+<tr>
+<td align="center" style="padding: 10px;">
+<div style="border: 2px solid #e0e0e0; border-radius: 10px; padding: 15px; background: #f9f9f9; display: inline-block;">
+  <div style="background: white; padding: 10px; border-radius: 8px;">
+    <img src="doc/images/mm_reward_qrcode_1765200960689.png" width="180" alt="微信赞赏码">
+  </div>
+  <p style="margin: 8px 0 0 0; font-size: 14px; color: #666;">💚 微信赞赏</p>
+</div>
+</td>
+<td width="30"></td>
+<td align="center" style="padding: 10px;">
+<div style="border: 2px solid #e0e0e0; border-radius: 10px; padding: 15px; background: #f9f9f9; display: inline-block;">
+  <div style="background: white; padding: 10px; border-radius: 8px;">
+    <img src="doc/images/IMG_20251223_173711.jpg" width="180" alt="支付宝赞助码">
+  </div>
+  <p style="margin: 8px 0 0 0; font-size: 14px; color: #666;">💙 支付宝赞助</p>
+</div>
+</td>
+</tr>
+</table>
 
-感谢每一位支持者的鼓励！
+<p style="font-size: 13px; color: #888; margin-top: 10px;">感谢你的支持 ✨</p>
 
 </div>
 
