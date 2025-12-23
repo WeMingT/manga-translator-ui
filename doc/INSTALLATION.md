@@ -279,10 +279,19 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 - 🌐 用户界面：http://localhost:8000
 - 🔧 管理界面：http://localhost:8000/admin.html
 
-### 镜像地址
+### 镜像仓库
 
-- **CPU 版本**：`hgmzhn/manga-translator:latest-cpu`
-- **GPU 版本**：`hgmzhn/manga-translator:latest-gpu`
+本项目的 Docker 镜像同时发布在两个镜像仓库，选择下载速度更快的即可：
+
+**Docker Hub（推荐）**：
+- CPU 版本：`hgmzhn/manga-translator:latest-cpu`
+- GPU 版本：`hgmzhn/manga-translator:latest-gpu`
+
+**GitHub Container Registry（备用，国内可能更快）**：
+- CPU 版本：`ghcr.io/hgmzhn/manga-translator:latest-cpu`
+- GPU 版本：`ghcr.io/hgmzhn/manga-translator:latest-gpu`
+
+> 💡 **提示**：两个仓库的镜像完全相同，选择下载速度更快的即可。
 
 ### 端口映射
 
