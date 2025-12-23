@@ -212,7 +212,6 @@ class AsyncJobManager:
                     job.mark_cancelled()
                     count += 1
         
-        self.logger.info(f"Cancelled {count} active jobs")
         return count
     
     def get_job(self, job_id: str) -> Optional[AsyncJob]:

@@ -5,7 +5,8 @@ from typing import List, Optional
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QFileDialog
 
-from services import get_config_service
+from editor.file_list_model import FileListModel, FileType, FileItem
+from services import get_config_service, get_logger
 from widgets.folder_dialog import select_folders
 
 
@@ -19,10 +20,13 @@ class EditorLogic(QObject):
     def __init__(self, controller, parent=None):
         super().__init__(parent)
         self.controller = controller
-        self.source_files: List[str] = []
-        self.translated_files: List[str] = []
-        self.translation_map_cache = {}
         self.config_service = get_config_service()
+        self.logger = get_logger(__name__)
+        
+        # 使用新的文件列表模型
+        self.file_model = FileListModel()
+        
+        # 保留树形结构支持
         self.folder_tree: dict = {}  # 保存文件夹树结构
 
     # --- File Management Methods ---
@@ -65,50 +69,68 @@ class EditorLogic(QObject):
                 self.add_folder(folder_path)
 
     def add_files(self, files: List[str]):
+        """添加文件到列表"""
         if not files:
             return
-        new_files = [f for f in files if f not in self.source_files]
-        if new_files:
-            # 检查是否是第一次添加文件（列表为空）
-            is_first_add = len(self.source_files) == 0
-
-            self.source_files.extend(new_files)
-            self.file_list_changed.emit(self.source_files)
-
+        
+        # 使用新模型添加文件
+        added_items = self.file_model.add_files(files)
+        
+        if added_items:
+            # 检查是否是第一次添加文件
+            is_first_add = len(self.file_model.files) == len(added_items)
+            
+            # 发射信号更新UI
+            file_paths = [item.path for item in self.file_model.files]
+            self.file_list_changed.emit(file_paths)
+            
             # 如果是第一次添加文件，自动加载第一个
-            if is_first_add and len(new_files) > 0:
+            if is_first_add and len(added_items) > 0:
                 try:
-                    self.load_image_into_editor(new_files[0])
+                    self.load_image_into_editor(added_items[0].path)
                 except Exception:
                     pass  # 静默失败，避免崩溃
 
     def add_folder(self, folder_path: str):
+        """添加文件夹到列表"""
         if not folder_path or not os.path.isdir(folder_path):
             return
         
-        # 检查是否是第一次添加文件（列表为空）
-        is_first_add = len(self.source_files) == 0
+        # 检查是否是第一次添加文件
+        is_first_add = len(self.file_model.files) == 0
         
-        # 添加文件夹路径到source_files，让FileListView创建树形结构
-        if folder_path not in self.source_files:
-            self.source_files.append(folder_path)
-            self.file_list_changed.emit(self.source_files)
+        # 扫描文件夹中的所有图片
+        image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.webp', '.avif'}
+        files_to_add = []
+        
+        try:
+            for root, dirs, files in os.walk(folder_path):
+                # 跳过 manga_translator_work 目录
+                if 'manga_translator_work' in root:
+                    continue
+                    
+                for f in sorted(files):
+                    if os.path.splitext(f)[1].lower() in image_extensions:
+                        file_path = os.path.join(root, f)
+                        files_to_add.append(file_path)
+        except OSError as e:
+            self.logger.error(f"扫描文件夹失败: {e}")
+            return
+        
+        if files_to_add:
+            # 添加文件
+            added_items = self.file_model.add_files(files_to_add)
+            
+            # 发射信号更新UI
+            file_paths = [item.path for item in self.file_model.files]
+            self.file_list_changed.emit(file_paths)
             
             # 如果是第一次添加，自动加载第一个图片
-            if is_first_add:
-                image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.webp', '.avif'}
+            if is_first_add and added_items:
                 try:
-                    for root, dirs, files in os.walk(folder_path):
-                        for f in sorted(files):
-                            if os.path.splitext(f)[1].lower() in image_extensions:
-                                first_image = os.path.join(root, f)
-                                try:
-                                    self.load_image_into_editor(first_image)
-                                except Exception:
-                                    pass  # 静默失败，避免崩溃
-                                return
-                except OSError:
-                    pass  # 静默失败
+                    self.load_image_into_editor(added_items[0].path)
+                except Exception:
+                    pass  # 静默失败，避免崩溃
 
     @pyqtSlot(list)
     def add_files_from_paths(self, paths: List[str]):
@@ -136,106 +158,104 @@ class EditorLogic(QObject):
     @pyqtSlot(str)
     def remove_file(self, file_path: str, emit_signal: bool = False):
         """
-        移除文件或文件夹（可能是源文件、翻译后的文件、或文件夹）
+        移除文件或文件夹
         
         Args:
             file_path: 要移除的文件或文件夹路径
             emit_signal: 是否发射 file_list_changed 信号（默认 False，由视图自己处理）
         """
-        norm_file = os.path.normpath(file_path) if file_path else None
+        norm_path = os.path.normpath(file_path)
         
-        # 检查是否是文件夹
-        if norm_file in self.folder_tree:
-            # 这是一个文件夹，检查当前图片是否在其中
+        # 获取要删除的文件项，检查是否有关联的源文件或翻译文件
+        file_item = self.file_model.get_file_item(file_path)
+        paths_to_check = [norm_path]
+        
+        if file_item:
+            # 如果是翻译后的文件，添加源文件路径
+            if file_item.source_path:
+                paths_to_check.append(os.path.normpath(file_item.source_path))
+            # 如果是源文件，添加翻译后的文件路径
+            if file_item.translated_path:
+                paths_to_check.append(os.path.normpath(file_item.translated_path))
+        
+        # 检查是否是文件夹（在 folder_tree 中）
+        if norm_path in self.folder_tree:
+            # 移除文件夹下的所有文件
+            files_to_remove = []
+            for file_item in self.file_model.files:
+                item_norm_path = os.path.normpath(file_item.path)
+                try:
+                    # 检查文件是否在该文件夹内
+                    if item_norm_path.startswith(norm_path + os.sep) or item_norm_path == norm_path:
+                        files_to_remove.append(file_item.path)
+                except Exception:
+                    pass
+            
+            # 批量移除文件
+            for file_to_remove in files_to_remove:
+                self.file_model.remove_file(file_to_remove)
+                # 释放缓存
+                if hasattr(self.controller, 'resource_manager'):
+                    self.controller.resource_manager.release_image_from_cache(file_to_remove)
+            
+            # 从 folder_tree 中删除
+            del self.folder_tree[norm_path]
+            
+            # 检查当前加载的图片是否在被删除的文件夹内
             current_image_path = self.controller.model.get_source_image_path()
             if current_image_path:
                 norm_current = os.path.normpath(current_image_path)
-                # 检查当前图片是否在被删除的文件夹内
                 try:
-                    if norm_current.startswith(norm_file + os.sep) or norm_current == norm_file:
+                    if norm_current.startswith(norm_path + os.sep) or norm_current == norm_path:
                         self.controller.model.set_image(None)
-                        self.controller._clear_editor_state()
-                except:
+                        self.controller._clear_editor_state(release_image_cache=True)
+                except Exception:
                     pass
+        else:
+            # 移除单个文件
+            removed = self.file_model.remove_file(file_path)
             
-            # 从 folder_tree 中删除
-            del self.folder_tree[norm_file]
+            if not removed:
+                return
             
-            # 从 source_files 和 translated_files 中删除该文件夹下的所有文件
-            files_to_remove = []
-            for source_file in self.source_files:
-                norm_source = os.path.normpath(source_file)
-                try:
-                    if norm_source.startswith(norm_file + os.sep):
-                        files_to_remove.append(source_file)
-                except:
-                    pass
+            # 检查当前加载的图片是否是被移除的文件（或其关联文件）
+            current_image_path = self.controller.model.get_source_image_path()
+            if current_image_path:
+                norm_current = os.path.normpath(current_image_path)
+                
+                # 检查当前图片是否匹配要删除的文件或其关联文件
+                if norm_current in paths_to_check:
+                    self.controller.model.set_image(None)
+                    self.controller._clear_editor_state(release_image_cache=True)
             
-            for f in files_to_remove:
-                self.source_files.remove(f)
-            
-            # 同样处理 translated_files
-            files_to_remove = []
-            for trans_file in self.translated_files:
-                norm_trans = os.path.normpath(trans_file)
-                try:
-                    if norm_trans.startswith(norm_file + os.sep):
-                        files_to_remove.append(trans_file)
-                except:
-                    pass
-            
-            for f in files_to_remove:
-                self.translated_files.remove(f)
-            
-            return
+            # 从资源管理器的缓存中释放被移除的图片及其关联文件
+            if hasattr(self.controller, 'resource_manager'):
+                for path in paths_to_check:
+                    self.controller.resource_manager.release_image_from_cache(path)
         
-        # 检查是否是文件
-        # 查找文件对（源文件和翻译文件）
-        source_path, translated_path = self._find_file_pair(file_path)
-        norm_source = os.path.normpath(source_path) if source_path else None
-        
-        # 从 source_files 中删除（需要规范化路径进行比较）
-        files_to_remove = []
-        if source_path:
-            norm_source = os.path.normpath(source_path)
-            for f in self.source_files:
-                if os.path.normpath(f) == norm_source:
-                    files_to_remove.append(f)
+        # 检查是否还有文件，如果没有了就清空画布
+        if len(self.file_model.files) == 0:
+            self.controller.model.set_image(None)
+            self.controller._clear_editor_state(release_image_cache=True)
             
-            for f in files_to_remove:
-                self.source_files.remove(f)
+            # 清空所有图片缓存
+            if hasattr(self.controller, 'resource_manager'):
+                self.controller.resource_manager.clear_image_cache()
         
-        # 从 translated_files 中删除（需要规范化路径进行比较）
-        files_to_remove = []
-        if translated_path:
-            norm_trans = os.path.normpath(translated_path)
-            for f in self.translated_files:
-                if os.path.normpath(f) == norm_trans:
-                    files_to_remove.append(f)
-            
-            for f in files_to_remove:
-                self.translated_files.remove(f)
-        
-        # 检查当前加载的图片是否是被移除的文件
-        current_image_path = self.controller.model.get_source_image_path()
-        if current_image_path:
-            norm_current = os.path.normpath(current_image_path)
-            if norm_current == norm_file or norm_current == norm_source:
-                self.controller.model.set_image(None)
-                self.controller._clear_editor_state(release_image_cache=True)
-        
-        # 从资源管理器的缓存中释放被移除的图片
-        if hasattr(self.controller, 'resource_manager'):
-            if source_path:
-                self.controller.resource_manager.release_image_from_cache(source_path)
-            if translated_path:
-                self.controller.resource_manager.release_image_from_cache(translated_path)
+        # 如果需要发射信号，更新UI
+        if emit_signal:
+            file_paths = [item.path for item in self.file_model.files]
+            if self.folder_tree:
+                self.file_list_with_tree_changed.emit(file_paths, self.folder_tree)
+            else:
+                self.file_list_changed.emit(file_paths)
 
     @pyqtSlot()
     def clear_list(self):
-        self.source_files.clear()
-        self.translated_files.clear()
+        """清空文件列表"""
+        self.file_model.clear()
         self.folder_tree.clear()
+        
         # 清空列表时发射空列表
         self.file_list_changed.emit([])
         
@@ -250,39 +270,67 @@ class EditorLogic(QObject):
 
     # --- Image Loading Methods ---
 
-    def load_file_lists(self, source_files: List[str], translated_files: List[str], folder_tree: dict = None):
+    def load_file_lists(self, source_files: List[str], translated_files: List[str], folder_tree: dict = None, show_translated: bool = False):
         """
-        Receives the file lists from the coordinator to populate the editor.
-        folder_tree: 完整的文件夹树结构 {folder_path: {'files': [...], 'subfolders': [...]}}
+        从主窗口接收文件列表（用于翻译完成后进入编辑器）
+        
+        Args:
+            source_files: 源文件列表
+            translated_files: 翻译后的文件列表
+            folder_tree: 文件夹树结构
+            show_translated: 是否显示翻译后的文件列表
         """
-        self.source_files = source_files
-        self.translated_files = translated_files
         self.folder_tree = folder_tree if folder_tree else {}
-        self.translation_map_cache.clear() # Clear cache when lists change
+        
+        # 决定显示哪个文件列表
+        files_to_show = translated_files if (show_translated and translated_files) else source_files
+        
+        # 添加文件到新模型
+        self.file_model.clear()
+        self.file_model.add_files(files_to_show)
         
         # 如果有folder_tree，使用树形结构显示
         if folder_tree:
-            self.file_list_with_tree_changed.emit(source_files, folder_tree)
+            self.file_list_with_tree_changed.emit(files_to_show, folder_tree)
         else:
             # 否则使用平铺列表
-            self.file_list_changed.emit(source_files)
+            self.file_list_changed.emit(files_to_show)
 
     @pyqtSlot(str)
     def load_image_into_editor(self, file_path: str):
         """
-        Loads a specific image into the editor view by finding its pair and calling the controller.
-        如果是翻译后的图片，直接加载翻译后的图片（查看器模式）
-        如果是源文件，加载源文件（编辑模式）
+        加载图片到编辑器（统一接口）
+        
+        根据文件类型自动处理：
+        - 原图（有JSON）：加载原图和JSON进行编辑
+        - 翻译后的图（有map）：只显示翻译后的图（查看模式）
+        - 未翻译的图：提示进行翻译
         """
-        source_path, translated_path = self._find_file_pair(file_path)
-
-        # 如果传入的是翻译后的文件（translated_path == file_path），直接加载翻译后的文件
-        if translated_path and os.path.normpath(file_path) == os.path.normpath(translated_path):
-            self.controller.load_image_and_regions(translated_path)
-        elif source_path:
-            self.controller.load_image_and_regions(source_path)
-        else:
-            # Fallback for safety
+        # 获取文件项
+        file_item = self.file_model.get_file_item(file_path)
+        
+        if not file_item:
+            # 文件不在列表中，尝试识别
+            self.file_model.add_files([file_path])
+            file_item = self.file_model.get_file_item(file_path)
+        
+        if not file_item:
+            self.logger.error(f"无法识别文件: {file_path}")
+            return
+        
+        # 根据文件类型处理
+        if file_item.file_type == FileType.SOURCE:
+            # 原图：加载原图和JSON
+            self.controller.load_image_and_regions(file_path)
+        
+        elif file_item.file_type == FileType.TRANSLATED:
+            # 翻译后的图：只显示翻译后的图
+            self.controller.load_image_and_regions(file_path)
+        
+        elif file_item.file_type == FileType.UNTRANSLATED:
+            # 未翻译的图：提示进行翻译
+            self.logger.warning(f"未翻译的图片: {file_path}")
+            # 仍然加载图片，但不加载JSON
             self.controller.load_image_and_regions(file_path)
 
     def _find_file_pair(self, file_path: str) -> (str, Optional[str]):

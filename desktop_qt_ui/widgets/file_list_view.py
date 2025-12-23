@@ -982,6 +982,10 @@ class FileListView(QTreeWidget):
                     return False, None
             
             find_and_remove_item()
+            
+            # 删除后清除选择状态，避免自动触发加载
+            self.clearSelection()
+            
         finally:
             # 重新连接选择信号
             try:
