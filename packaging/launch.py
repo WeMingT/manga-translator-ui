@@ -164,7 +164,7 @@ def run_pip_requirements(requirements_file, desc=None):
     # 解析 requirements 文件，提取有效的包和索引源
     packages = []
     primary_index_url = None  # 存储 --index-url 参数（主源）
-    extra_index_urls = []  # 存储 --extra-index-url 参数
+    extra_index_urls = []  # 存储 --extra-index-url 参数（launch.py 中忽略，仅供 pip 直接安装时使用）
     
     with open(req_path, 'r', encoding='utf-8') as f:
         for line in f:
@@ -172,17 +172,15 @@ def run_pip_requirements(requirements_file, desc=None):
             # 跳过空行、注释
             if not line or line.startswith('#'):
                 continue
+            # 解析 --extra-index-url 选项（忽略，不添加到 extra_index_urls）
+            if line.startswith('--extra-index-url'):
+                # 完全忽略 --extra-index-url，让 torch 相关包只能从主源下载
+                continue
             # 解析 --index-url 选项（主源）
             if line.startswith('--index-url'):
                 parts = line.split(None, 1)
                 if len(parts) == 2:
                     primary_index_url = parts[1].strip()
-                continue
-            # 解析 --extra-index-url 选项
-            if line.startswith('--extra-index-url'):
-                parts = line.split(None, 1)  # 按空白分割，最多分2部分
-                if len(parts) == 2:
-                    extra_index_urls.append(parts[1].strip())
                 continue
             # 跳过其他 pip 选项
             if line.startswith('-'):
