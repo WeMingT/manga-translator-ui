@@ -1918,20 +1918,12 @@ class TranslationWorker(QObject):
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
         
-        # 添加GPU显存清理（自动清理模式）
-        self.log_received.emit("--- [CLEANUP] Cleaning up GPU memory...")
+        # 使用统一的内存清理模块
         try:
-            import gc
-            import torch
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                self.log_received.emit("--- [CLEANUP] GPU memory cleared")
-            else:
-                self.log_received.emit("--- [CLEANUP] GPU not available, skipped GPU cleanup")
+            from desktop_qt_ui.utils.memory_cleanup import full_memory_cleanup
+            full_memory_cleanup(log_callback=lambda msg: self.log_received.emit(msg))
         except Exception as e:
-            self.log_received.emit(f"--- [CLEANUP] Warning: Failed to cleanup GPU: {e}")
+            self.log_received.emit(f"--- [CLEANUP] Warning: Failed to cleanup: {e}")
 
     def _build_friendly_error_message(self, error_message: str, error_traceback: str) -> str:
         """
@@ -2719,20 +2711,6 @@ class TranslationWorker(QObject):
                 self.log_received.emit(f"💾 文件已保存到：{self.output_folder}")
             
             self.finished.emit(results)
-            
-            # ✅ 翻译完成后打印内存快照（调试用）
-            try:
-                import tracemalloc
-                snapshot = tracemalloc.take_snapshot()
-                top_stats = snapshot.statistics('lineno')
-                self.log_received.emit("\n" + "="*80)
-                self.log_received.emit("📊 内存占用 TOP 100:")
-                self.log_received.emit("="*80)
-                for i, stat in enumerate(top_stats[:100], 1):
-                    self.log_received.emit(f"{i}. {stat}")
-                self.log_received.emit("="*80 + "\n")
-            except Exception as e:
-                self.log_received.emit(f"Failed to print memory snapshot: {e}")
 
         except asyncio.CancelledError as e:
             self.log_received.emit(f"Task cancelled: {e}")
@@ -2755,12 +2733,16 @@ class TranslationWorker(QObject):
         finally:
             manga_logger.removeHandler(log_handler)
 
-            # 翻译结束后清空翻译器缓存，确保下次翻译使用最新的 .env 配置
+            # 翻译结束后进行完整的内存清理（特别是CPU模式）
             try:
-                from manga_translator.translators import translator_cache
-                translator_cache.clear()
+                # 清理翻译器对象引用
+                if 'translator' in locals():
+                    del translator
+                
+                from desktop_qt_ui.utils.memory_cleanup import full_memory_cleanup
+                full_memory_cleanup(log_callback=lambda msg: self.log_received.emit(msg))
             except Exception as e:
-                self.log_received.emit(f"--- [CLEANUP] Warning: Failed to clear cache: {e}")
+                self.log_received.emit(f"--- [CLEANUP] Warning: 内存清理时出错: {e}")
 
     @pyqtSlot()
     def process(self):
