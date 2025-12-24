@@ -1470,7 +1470,8 @@ class MangaTranslator:
         try:
             # --- Primary OCR run ---
             primary_ocr_engine = config.ocr.ocr
-            logger.info(f"Running primary OCR with: {primary_ocr_engine.value}")
+            ocr_name = primary_ocr_engine.value if hasattr(primary_ocr_engine, 'value') else primary_ocr_engine
+            logger.info(f"Running primary OCR with: {ocr_name}")
             textlines = await dispatch_ocr(primary_ocr_engine, ctx.img_rgb, ctx.textlines, config.ocr, self.device, self.verbose)
 
             # --- BEGIN: HYBRID OCR LOGIC ---
@@ -1492,7 +1493,8 @@ class MangaTranslator:
                     # We can reuse the same config object, just switching the engine
                     secondary_config = config.ocr
                     
-                    logger.info(f"Running secondary OCR with: {secondary_ocr_engine.value}")
+                    secondary_ocr_name = secondary_ocr_engine.value if hasattr(secondary_ocr_engine, 'value') else secondary_ocr_engine
+                    logger.info(f"Running secondary OCR with: {secondary_ocr_name}")
                     secondary_results = await dispatch_ocr(secondary_ocr_engine, ctx.img_rgb, failed_textlines, secondary_config, self.device, self.verbose)
                     
                     # Merge the results back into the original list
@@ -2668,333 +2670,322 @@ class MangaTranslator:
 
         # 分批处理所有图片
         for batch_start in range(0, total_images, batch_size):
-            await asyncio.sleep(0)  # 检查是否被取消
-            self._check_cancelled()  # 检查取消标志
-
-            batch_end = min(batch_start + batch_size, total_images)
-            current_batch_images = images_with_configs[batch_start:batch_end]
-
-            # 计算全局图片编号（考虑前端分批加载的偏移量）
-            global_batch_start = global_offset + batch_start + 1
-            global_batch_end = global_offset + batch_end
-            global_batch_num = (global_offset + batch_start) // batch_size + 1
-            global_total_batches = (display_total + batch_size - 1) // batch_size
-            
-            logger.info(f"Processing rolling batch {global_batch_num}/{global_total_batches} (images {global_batch_start}-{global_batch_end})")
-            
-            # 报告批次进度给前端
-            await self._report_progress(f"batch:{global_batch_start}:{global_batch_end}:{display_total}")
-
-            # --- 阶段1: 预处理（检测、OCR、文本行合并） ---
+            current_batch_images = []
             preprocessed_contexts = []
+            translated_contexts = []
             
-            # 特殊情况：load_text模式（从JSON加载翻译）
-            if self.load_text:
-                logger.info("Load text mode: Loading translations from JSON and skipping detection/OCR/translation")
+            try:
+                await asyncio.sleep(0)  # 检查是否被取消
+                self._check_cancelled()  # 检查取消标志
+
+                batch_end = min(batch_start + batch_size, total_images)
+                current_batch_images = images_with_configs[batch_start:batch_end]
+
+                # 计算全局图片编号（考虑前端分批加载的偏移量）
+                global_batch_start = global_offset + batch_start + 1
+                global_batch_end = global_offset + batch_end
+                global_batch_num = (global_offset + batch_start) // batch_size + 1
+                global_total_batches = (display_total + batch_size - 1) // batch_size
+                
+                logger.info(f"Processing rolling batch {global_batch_num}/{global_total_batches} (images {global_batch_start}-{global_batch_end})")
+                
+                # 报告批次进度给前端
+                await self._report_progress(f"batch:{global_batch_start}:{global_batch_end}:{display_total}")
+
+                # --- 阶段1: 预处理（检测、OCR、文本行合并） ---
+                
+                # 特殊情况：load_text模式（从JSON加载翻译）
+                if self.load_text:
+                    logger.info("Load text mode: Loading translations from JSON and skipping detection/OCR/translation")
+                    for i, (image, config) in enumerate(current_batch_images):
+                        await asyncio.sleep(0)
+                        self._check_cancelled()  # 检查取消标志
+                        try:
+                            self._set_image_context(config, image)
+                            image_name = image.name if hasattr(image, 'name') else None
+                            
+                            # 直接处理 load_text 模式，不调用 translate() 避免无限循环
+                            ctx = Context()
+                            ctx.input = image
+                            ctx.image_name = image_name
+                            ctx.verbose = self.verbose
+                            ctx.save_quality = self.save_quality
+                            ctx.config = config
+                            
+                            # 加载翻译数据
+                            loaded_regions, loaded_mask, mask_is_refined = self._load_text_and_regions_from_file(image_name, config)
+                            if loaded_regions is None:
+                                json_path = os.path.splitext(image_name)[0] + '_translations.json' if image_name else 'unknown'
+                                raise FileNotFoundError(f"Translation file not found or invalid: {json_path}")
+                            
+                            # 如果regions是空列表，记录日志但继续处理（渲染原图）
+                            if not loaded_regions:
+                                logger.info(f"No text regions found in JSON for {os.path.basename(image_name)}, will render original image")
+                            
+                            # 设置字体大小和默认translation
+                            for region in loaded_regions:
+                                if not hasattr(region, 'font_size') or not region.font_size:
+                                    try:
+                                        # 确保lines形状正确 (N, 4, 2)
+                                        if region.lines.ndim == 3 and region.lines.shape[1] >= 4 and region.lines.shape[2] >= 2:
+                                            box_height = np.max(region.lines[:,:,1]) - np.min(region.lines[:,:,1])
+                                            region.font_size = min(int(box_height * 0.8), 128)
+                                        else:
+                                            logger.warning(f"Invalid lines shape {region.lines.shape}, using default font_size=24")
+                                            region.font_size = 24
+                                    except Exception as e:
+                                        logger.warning(f"Error calculating font_size from lines: {e}, using default font_size=24")
+                                        region.font_size = 24
+                                
+                                # 如果translation为空或None，使用原文text作为默认值
+                                if not region.translation:
+                                    region.translation = region.text
+                                    logger.debug(f"Region translation is empty, using original text: {region.text[:50]}...")
+                            
+                            ctx.text_regions = loaded_regions
+                            
+                            # 执行上色和超分
+                            if config.colorizer.colorizer != Colorizer.none:
+                                await self._report_progress('colorizing')
+                                ctx.img_colorized = await self._run_colorizer(config, ctx)
+                            else:
+                                ctx.img_colorized = ctx.input
+                            
+                            if config.upscale.upscale_ratio:
+                                await self._report_progress('upscaling')
+                                ctx.upscaled = await self._run_upscaling(config, ctx)
+                            else:
+                                ctx.upscaled = ctx.img_colorized
+                            
+                            ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
+                            
+                            # 验证加载的图片
+                            if ctx.img_rgb is None or ctx.img_rgb.size == 0:
+                                logger.error(f"[批量] 加载图片失败: img_rgb为空或无效")
+                                continue
+                            
+                            if len(ctx.img_rgb.shape) < 2 or ctx.img_rgb.shape[0] == 0 or ctx.img_rgb.shape[1] == 0:
+                                logger.error(f"[批量] 加载的图片尺寸无效: {ctx.img_rgb.shape}")
+                                continue
+                            
+                            # 处理 mask
+                            if loaded_mask is not None:
+                                if mask_is_refined:
+                                    ctx.mask = loaded_mask
+                                else:
+                                    ctx.mask_raw = loaded_mask
+                            else:
+                                if ctx.mask_raw is None:
+                                    mask = np.zeros_like(ctx.img_rgb[:, :, 0])
+                                    polygons = [p.reshape((-1, 1, 2)) for r in ctx.text_regions for p in r.lines]
+                                    cv2.fillPoly(mask, polygons, 255)
+                                    ctx.mask_raw = mask
+                            
+                            # 如果执行了超分，需要将mask和坐标也超分
+                            if config.upscale.upscale_ratio:
+                                upscale_ratio = parse_upscale_ratio(config.upscale.upscale_ratio)
+                                if upscale_ratio > 0:
+                                    if ctx.mask_raw is not None:
+                                        ctx.mask_raw = cv2.resize(ctx.mask_raw, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+                                    if ctx.mask is not None:
+                                        ctx.mask = cv2.resize(ctx.mask, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
+                                    
+                                    for region in ctx.text_regions:
+                                        region.lines = region.lines * upscale_ratio
+                                        if hasattr(region, 'font_size') and region.font_size:
+                                            region.font_size = int(region.font_size * upscale_ratio)
+                            
+                            # 如果没有文本区域，跳过mask refinement、inpainting和rendering，直接返回原图
+                            if not ctx.text_regions:
+                                logger.info(f"No text regions to render for {os.path.basename(image_name)}, returning original image")
+                                await self._report_progress('finished', True)
+                                ctx.result = ctx.upscaled  # 返回上采样后的原图
+                                ctx = await self._revert_upscale(config, ctx)
+                            else:
+                                # Mask refinement
+                                if ctx.mask is None:
+                                    await self._report_progress('mask-generation')
+                                    ctx.mask = await self._run_mask_refinement(config, ctx)
+                                
+                                # Inpainting
+                                await self._report_progress('inpainting')
+                                ctx.img_inpainted = await self._run_inpainting(config, ctx)
+                                
+                                # Rendering
+                                await self._report_progress('rendering')
+                                ctx.img_rendered = await self._run_text_rendering(config, ctx)
+                                
+                                await self._report_progress('finished', True)
+                                ctx.result = dump_image(ctx.input, ctx.img_rendered, ctx.img_alpha)
+                                ctx = await self._revert_upscale(config, ctx)
+                            
+                            preprocessed_contexts.append((ctx, config))
+                        except Exception as e:
+                            logger.error(f"Error loading text for image {i+1} in batch: {e}")
+                            ctx = Context()
+                            ctx.input = image
+                            ctx.text_regions = []
+                            if hasattr(image, 'name'):
+                                ctx.image_name = image.name
+                            ctx.translation_error = str(e)
+                            ctx.result = image
+                            preprocessed_contexts.append((ctx, config))
+                    
+                    # load_text模式下已经完成了所有处理（包括渲染），直接保存并返回
+                    for ctx, config in preprocessed_contexts:
+                        if save_info and ctx.result:
+                            try:
+                                overwrite = save_info.get('overwrite', True)
+                                final_output_path = self._calculate_output_path(ctx.image_name, save_info)
+                                if self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "LOAD_TEXT"):
+                                    # 标记成功
+                                    ctx.success = True
+                            except Exception as save_err:
+                                logger.error(f"Error saving load_text result for {os.path.basename(ctx.image_name)}: {save_err}")
+                        
+                        results.append(ctx)
+                    
+                    # load_text模式处理完成，继续下一批
+                    continue
+
+                # 标准模式：执行检测、OCR等预处理
                 for i, (image, config) in enumerate(current_batch_images):
+                    # 检查是否被取消
                     await asyncio.sleep(0)
                     self._check_cancelled()  # 检查取消标志
                     try:
                         self._set_image_context(config, image)
-                        image_name = image.name if hasattr(image, 'name') else None
-                        
-                        # 直接处理 load_text 模式，不调用 translate() 避免无限循环
-                        ctx = Context()
-                        ctx.input = image
-                        ctx.image_name = image_name
-                        ctx.verbose = self.verbose
-                        ctx.save_quality = self.save_quality
-                        ctx.config = config
-                        
-                        # 加载翻译数据
-                        loaded_regions, loaded_mask, mask_is_refined = self._load_text_and_regions_from_file(image_name, config)
-                        if loaded_regions is None:
-                            json_path = os.path.splitext(image_name)[0] + '_translations.json' if image_name else 'unknown'
-                            raise FileNotFoundError(f"Translation file not found or invalid: {json_path}")
-                        
-                        # 如果regions是空列表，记录日志但继续处理（渲染原图）
-                        if not loaded_regions:
-                            logger.info(f"No text regions found in JSON for {os.path.basename(image_name)}, will render original image")
-                        
-                        # 设置字体大小和默认translation
-                        for region in loaded_regions:
-                            if not hasattr(region, 'font_size') or not region.font_size:
-                                try:
-                                    # 确保lines形状正确 (N, 4, 2)
-                                    if region.lines.ndim == 3 and region.lines.shape[1] >= 4 and region.lines.shape[2] >= 2:
-                                        box_height = np.max(region.lines[:,:,1]) - np.min(region.lines[:,:,1])
-                                        region.font_size = min(int(box_height * 0.8), 128)
-                                    else:
-                                        logger.warning(f"Invalid lines shape {region.lines.shape}, using default font_size=24")
-                                        region.font_size = 24
-                                except Exception as e:
-                                    logger.warning(f"Error calculating font_size from lines: {e}, using default font_size=24")
-                                    region.font_size = 24
-                            
-                            # 如果translation为空或None，使用原文text作为默认值
-                            if not region.translation:
-                                region.translation = region.text
-                                logger.debug(f"Region translation is empty, using original text: {region.text[:50]}...")
-                        
-                        ctx.text_regions = loaded_regions
-                        
-                        # 执行上色和超分
-                        if config.colorizer.colorizer != Colorizer.none:
-                            await self._report_progress('colorizing')
-                            ctx.img_colorized = await self._run_colorizer(config, ctx)
-                        else:
-                            ctx.img_colorized = ctx.input
-                        
-                        if config.upscale.upscale_ratio:
-                            await self._report_progress('upscaling')
-                            ctx.upscaled = await self._run_upscaling(config, ctx)
-                        else:
-                            ctx.upscaled = ctx.img_colorized
-                        
-                        ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
-                        
-                        # 验证加载的图片
-                        if ctx.img_rgb is None or ctx.img_rgb.size == 0:
-                            logger.error(f"[批量] 加载图片失败: img_rgb为空或无效")
-                            continue
-                        
-                        if len(ctx.img_rgb.shape) < 2 or ctx.img_rgb.shape[0] == 0 or ctx.img_rgb.shape[1] == 0:
-                            logger.error(f"[批量] 加载的图片尺寸无效: {ctx.img_rgb.shape}")
-                            continue
-                        
-                        # 处理 mask
-                        if loaded_mask is not None:
-                            if mask_is_refined:
-                                ctx.mask = loaded_mask
-                            else:
-                                ctx.mask_raw = loaded_mask
-                        else:
-                            if ctx.mask_raw is None:
-                                mask = np.zeros_like(ctx.img_rgb[:, :, 0])
-                                polygons = [p.reshape((-1, 1, 2)) for r in ctx.text_regions for p in r.lines]
-                                cv2.fillPoly(mask, polygons, 255)
-                                ctx.mask_raw = mask
-                        
-                        # 如果执行了超分，需要将mask和坐标也超分
-                        if config.upscale.upscale_ratio:
-                            upscale_ratio = parse_upscale_ratio(config.upscale.upscale_ratio)
-                            if upscale_ratio > 0:
-                                if ctx.mask_raw is not None:
-                                    ctx.mask_raw = cv2.resize(ctx.mask_raw, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
-                                if ctx.mask is not None:
-                                    ctx.mask = cv2.resize(ctx.mask, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
-                                
-                                for region in ctx.text_regions:
-                                    region.lines = region.lines * upscale_ratio
-                                    if hasattr(region, 'font_size') and region.font_size:
-                                        region.font_size = int(region.font_size * upscale_ratio)
-                        
-                        # 如果没有文本区域，跳过mask refinement、inpainting和rendering，直接返回原图
-                        if not ctx.text_regions:
-                            logger.info(f"No text regions to render for {os.path.basename(image_name)}, returning original image")
-                            await self._report_progress('finished', True)
-                            ctx.result = ctx.upscaled  # 返回上采样后的原图
-                            ctx = await self._revert_upscale(config, ctx)
-                        else:
-                            # Mask refinement
-                            if ctx.mask is None:
-                                await self._report_progress('mask-generation')
-                                ctx.mask = await self._run_mask_refinement(config, ctx)
-                            
-                            # Inpainting
-                            await self._report_progress('inpainting')
-                            ctx.img_inpainted = await self._run_inpainting(config, ctx)
-                            
-                            # Rendering
-                            await self._report_progress('rendering')
-                            ctx.img_rendered = await self._run_text_rendering(config, ctx)
-                            
-                            await self._report_progress('finished', True)
-                            ctx.result = dump_image(ctx.input, ctx.img_rendered, ctx.img_alpha)
-                            ctx = await self._revert_upscale(config, ctx)
-                        
+                        # ✅ 保存context以便渲染阶段复用，避免生成两个文件夹
+                        from .utils.generic import get_image_md5
+                        image_md5 = get_image_md5(image)
+                        self._save_current_image_context(image_md5)
+                        ctx = await self._translate_until_translation(image, config)
+                        if hasattr(image, 'name'):
+                            ctx.image_name = image.name
                         preprocessed_contexts.append((ctx, config))
                     except Exception as e:
-                        logger.error(f"Error loading text for image {i+1} in batch: {e}")
+                        logger.error(f"Error pre-processing image {i+1} in batch: {e}")
                         ctx = Context()
                         ctx.input = image
                         ctx.text_regions = []
                         if hasattr(image, 'name'):
                             ctx.image_name = image.name
-                        ctx.translation_error = str(e)
-                        ctx.result = image
                         preprocessed_contexts.append((ctx, config))
-                
-                # load_text模式下已经完成了所有处理（包括渲染），直接保存并返回
-                for ctx, config in preprocessed_contexts:
-                    if save_info and ctx.result:
-                        try:
-                            overwrite = save_info.get('overwrite', True)
-                            final_output_path = self._calculate_output_path(ctx.image_name, save_info)
-                            if self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "LOAD_TEXT"):
-                                # 标记成功
-                                ctx.success = True
-                        except Exception as save_err:
-                            logger.error(f"Error saving load_text result for {os.path.basename(ctx.image_name)}: {save_err}")
-                    
-                    results.append(ctx)
-                
-                # load_text模式处理完成，继续下一批
-                continue
 
-            # 标准模式：执行检测、OCR等预处理
-            for i, (image, config) in enumerate(current_batch_images):
-                # 检查是否被取消
-                await asyncio.sleep(0)
-                self._check_cancelled()  # 检查取消标志
-                try:
-                    self._set_image_context(config, image)
-                    # ✅ 保存context以便渲染阶段复用，避免生成两个文件夹
-                    from .utils.generic import get_image_md5
-                    image_md5 = get_image_md5(image)
-                    self._save_current_image_context(image_md5)
-                    ctx = await self._translate_until_translation(image, config)
-                    if hasattr(image, 'name'):
-                        ctx.image_name = image.name
-                    preprocessed_contexts.append((ctx, config))
-                except Exception as e:
-                    logger.error(f"Error pre-processing image {i+1} in batch: {e}")
-                    ctx = Context()
-                    ctx.input = image
-                    ctx.text_regions = []
-                    if hasattr(image, 'name'):
-                        ctx.image_name = image.name
-                    preprocessed_contexts.append((ctx, config))
+                # --- 阶段2: 翻译 ---
+                if self.colorize_only:
+                    # 特殊情况：仅上色模式，跳过翻译
+                    logger.info("Colorize Only mode: Skipping translation and rendering stages.")
+                    translated_contexts = preprocessed_contexts
+                elif is_template_save_mode:
+                    # 特殊情况：导出原文模式，跳过翻译
+                    logger.info("Template+SaveText mode: Skipping translation, will export original text only.")
+                    translated_contexts = preprocessed_contexts
+                else:
+                    # 标准翻译流程
+                    try:
+                        translated_contexts = await self._batch_translate_contexts(preprocessed_contexts, batch_size)
+                    except Exception as e:
+                        logger.error(f"Error during batch translation stage: {e}")
+                        raise
 
-            # --- 阶段2: 翻译 ---
-            if self.colorize_only:
-                # 特殊情况：仅上色模式，跳过翻译
-                logger.info("Colorize Only mode: Skipping translation and rendering stages.")
-                translated_contexts = preprocessed_contexts
-            elif is_template_save_mode:
-                # 特殊情况：导出原文模式，跳过翻译
-                logger.info("Template+SaveText mode: Skipping translation, will export original text only.")
-                translated_contexts = preprocessed_contexts
-            else:
-                # 标准翻译流程
-                try:
-                    translated_contexts = await self._batch_translate_contexts(preprocessed_contexts, batch_size)
-                except Exception as e:
-                    logger.error(f"Error during batch translation stage: {e}")
-                    raise
-
-            # --- 阶段3: 渲染和保存 ---
-            # 特殊情况：导出原文模式（跳过渲染，只保存JSON和导出原文）
-            if is_template_save_mode:
-                logger.info("Template+SaveText mode: Skipping rendering, exporting original text only.")
-                for ctx, config in translated_contexts:
-                    if hasattr(ctx, 'text_regions') and ctx.text_regions is not None and hasattr(ctx, 'image_name') and ctx.image_name:
-                        # 保存JSON文件
-                        self._save_text_to_file(ctx.image_name, ctx, config)
-                        try:
-                            json_path = find_json_path(ctx.image_name)
-                            if json_path and os.path.exists(json_path):
-                                from desktop_qt_ui.services.workflow_service import generate_original_text, get_template_path_from_config
-                                template_path = get_template_path_from_config()
-                                if template_path and os.path.exists(template_path):
-                                    # 导出原文
-                                    original_result = generate_original_text(json_path, template_path)
-                                    logger.info(f"Original text export for {os.path.basename(ctx.image_name)}: {original_result}")
+                # --- 阶段3: 渲染和保存 ---
+                # 特殊情况：导出原文模式（跳过渲染，只保存JSON和导出原文）
+                if is_template_save_mode:
+                    logger.info("Template+SaveText mode: Skipping rendering, exporting original text only.")
+                    for ctx, config in translated_contexts:
+                        if hasattr(ctx, 'text_regions') and ctx.text_regions is not None and hasattr(ctx, 'image_name') and ctx.image_name:
+                            # 保存JSON文件
+                            self._save_text_to_file(ctx.image_name, ctx, config)
+                            try:
+                                json_path = find_json_path(ctx.image_name)
+                                if json_path and os.path.exists(json_path):
+                                    from desktop_qt_ui.services.workflow_service import generate_original_text, get_template_path_from_config
+                                    template_path = get_template_path_from_config()
+                                    if template_path and os.path.exists(template_path):
+                                        # 导出原文
+                                        original_result = generate_original_text(json_path, template_path)
+                                        logger.info(f"Original text export for {os.path.basename(ctx.image_name)}: {original_result}")
+                                    else:
+                                        logger.warning(f"Template file not found for {os.path.basename(ctx.image_name)}: {template_path}")
                                 else:
-                                    logger.warning(f"Template file not found for {os.path.basename(ctx.image_name)}: {template_path}")
-                            else:
-                                logger.warning(f"JSON file not found for {os.path.basename(ctx.image_name)}")
-                        except Exception as e:
-                            logger.error(f"Failed to export original text for {os.path.basename(ctx.image_name)}: {e}")
-                    # ✅ 标记成功（导出原文完成）
-                    ctx.success = True
-                    results.append(ctx)
+                                    logger.warning(f"JSON file not found for {os.path.basename(ctx.image_name)}")
+                            except Exception as e:
+                                logger.error(f"Failed to export original text for {os.path.basename(ctx.image_name)}: {e}")
+                        # ✅ 标记成功（导出原文完成）
+                        ctx.success = True
+                        results.append(ctx)
+                    
+                    continue  # 跳过渲染，继续下一批次
                 
-                # ✅ 批次完成后立即清理内存
-                self._cleanup_batch_memory(
-                    current_batch_images=current_batch_images,
-                    preprocessed_contexts=preprocessed_contexts,
-                    translated_contexts=translated_contexts,
-                    keep_results=True
-                )
-                
-                continue  # 跳过渲染，继续下一批次
+                # 特殊情况：生成并导出模式（跳过渲染）
+                if self.generate_and_export:
+                    logger.info("'Generate and Export' mode enabled for standard batch. Skipping rendering.")
+                    for ctx, config in translated_contexts:
+                        if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
+                            self._save_text_to_file(ctx.image_name, ctx, config)
+                            try:
+                                json_path = find_json_path(ctx.image_name)
+                                if json_path and os.path.exists(json_path):
+                                    from desktop_qt_ui.services.workflow_service import generate_translated_text, get_template_path_from_config
+                                    template_path = get_template_path_from_config()
+                                    if template_path and os.path.exists(template_path):
+                                        # 导出翻译
+                                        translated_result = generate_translated_text(json_path, template_path)
+                                        logger.info(f"Translated text export for {os.path.basename(ctx.image_name)}: {translated_result}")
+                                    else:
+                                        logger.warning(f"Template file not found for {os.path.basename(ctx.image_name)}: {template_path}")
+                                else:
+                                    logger.warning(f"JSON file not found for {os.path.basename(ctx.image_name)}")
+                            except Exception as e:
+                                logger.error(f"Failed to export clean text for {os.path.basename(ctx.image_name)}: {e}")
+                        # ✅ 标记成功（导出翻译完成）
+                        ctx.success = True
+                        results.append(ctx)
+                    
+                    continue  # 跳过渲染，继续下一批次
+
+                # 标准流程：渲染并保存
+                for ctx, config in translated_contexts:
+                    await asyncio.sleep(0)  # 检查是否被取消
+                    self._check_cancelled()  # 检查取消标志
+                    try:
+                        if hasattr(ctx, 'input'):
+                            from .utils.generic import get_image_md5
+                            image_md5 = get_image_md5(ctx.input)
+                            if not self._restore_image_context(image_md5):
+                                self._set_image_context(config, ctx.input)
+                        
+                        # Colorize Only Mode: Skip rendering pipeline
+                        if not self.colorize_only:
+                            ctx = await self._complete_translation_pipeline(ctx, config)
+                        if save_info and ctx.result:
+                            try:
+                                overwrite = save_info.get('overwrite', True)
+                                final_output_path = self._calculate_output_path(ctx.image_name, save_info)
+                                self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "BATCH")
+                            except Exception as save_err:
+                                logger.error(f"Error saving standard batch result for {os.path.basename(ctx.image_name)}: {save_err}")
+
+                        # 只在save_text或text_output_file启用时保存JSON（包括空的text_regions）
+                        if (self.save_text or self.text_output_file) and hasattr(ctx, 'text_regions') and ctx.text_regions is not None and hasattr(ctx, 'image_name') and ctx.image_name:
+                            # 使用循环变量中的config，而不是从ctx中获取
+                            self._save_text_to_file(ctx.image_name, ctx, config)
+
+                        results.append(ctx)
+                    except Exception as e:
+                        logger.error(f"Error rendering image in batch: {e}")
+                        results.append(ctx)
             
-            # 特殊情况：生成并导出模式（跳过渲染）
-            if self.generate_and_export:
-                logger.info("'Generate and Export' mode enabled for standard batch. Skipping rendering.")
-                for ctx, config in translated_contexts:
-                    if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
-                        self._save_text_to_file(ctx.image_name, ctx, config)
-                        try:
-                            json_path = find_json_path(ctx.image_name)
-                            if json_path and os.path.exists(json_path):
-                                from desktop_qt_ui.services.workflow_service import generate_translated_text, get_template_path_from_config
-                                template_path = get_template_path_from_config()
-                                if template_path and os.path.exists(template_path):
-                                    # 导出翻译
-                                    translated_result = generate_translated_text(json_path, template_path)
-                                    logger.info(f"Translated text export for {os.path.basename(ctx.image_name)}: {translated_result}")
-                                else:
-                                    logger.warning(f"Template file not found for {os.path.basename(ctx.image_name)}: {template_path}")
-                            else:
-                                logger.warning(f"JSON file not found for {os.path.basename(ctx.image_name)}")
-                        except Exception as e:
-                            logger.error(f"Failed to export clean text for {os.path.basename(ctx.image_name)}: {e}")
-                    # ✅ 标记成功（导出翻译完成）
-                    ctx.success = True
-                    results.append(ctx)
-                
-                # ✅ 批次完成后立即清理内存
+            finally:
+                # ✅ 批次完成后（无论成功还是失败）立即清理内存
                 self._cleanup_batch_memory(
                     current_batch_images=current_batch_images,
                     preprocessed_contexts=preprocessed_contexts,
                     translated_contexts=translated_contexts,
                     keep_results=True
                 )
-                
-                continue  # 跳过渲染，继续下一批次
-
-            # 标准流程：渲染并保存
-            for ctx, config in translated_contexts:
-                await asyncio.sleep(0)  # 检查是否被取消
-                self._check_cancelled()  # 检查取消标志
-                try:
-                    if hasattr(ctx, 'input'):
-                        from .utils.generic import get_image_md5
-                        image_md5 = get_image_md5(ctx.input)
-                        if not self._restore_image_context(image_md5):
-                            self._set_image_context(config, ctx.input)
-                    
-                    # Colorize Only Mode: Skip rendering pipeline
-                    if not self.colorize_only:
-                        ctx = await self._complete_translation_pipeline(ctx, config)
-                    if save_info and ctx.result:
-                        try:
-                            overwrite = save_info.get('overwrite', True)
-                            final_output_path = self._calculate_output_path(ctx.image_name, save_info)
-                            self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "BATCH")
-                        except Exception as save_err:
-                            logger.error(f"Error saving standard batch result for {os.path.basename(ctx.image_name)}: {save_err}")
-
-                    # 只在save_text或text_output_file启用时保存JSON（包括空的text_regions）
-                    if (self.save_text or self.text_output_file) and hasattr(ctx, 'text_regions') and ctx.text_regions is not None and hasattr(ctx, 'image_name') and ctx.image_name:
-                        # 使用循环变量中的config，而不是从ctx中获取
-                        self._save_text_to_file(ctx.image_name, ctx, config)
-
-                    results.append(ctx)
-                except Exception as e:
-                    logger.error(f"Error rendering image in batch: {e}")
-                    results.append(ctx)
-
-            # ✅ 批次完成后立即清理内存
-            self._cleanup_batch_memory(
-                current_batch_images=current_batch_images,
-                preprocessed_contexts=preprocessed_contexts,
-                translated_contexts=translated_contexts,
-                keep_results=True
-            )
-            logger.debug(f'[MEMORY] Batch {batch_start//batch_size + 1} cleanup completed')
+                logger.debug(f'[MEMORY] Batch {batch_start//batch_size + 1} cleanup completed')
 
         logger.info(f"Batch translation completed: processed {len(results)} images")
         return results
