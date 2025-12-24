@@ -400,3 +400,125 @@ def get_translator_status() -> dict:
             "models_ttl": server_config.get('models_ttl', 0),
             "use_gpu": server_config.get('use_gpu', False)
         }
+
+
+def cleanup_after_request():
+    """
+    请求级内存清理（每次翻译请求结束后调用）
+    
+    清理翻译器内部的中间状态，但保留已加载的模型。
+    这是解决Web UI内存不释放问题的核心函数。
+    
+    清理内容：
+    - 翻译器的批处理上下文缓存
+    - 图片上下文（MD5缓存等）
+    - 页面翻译历史
+    - 其他中间状态
+    """
+    import gc
+    
+    with _translator_lock:
+        if _global_translator is not None:
+            logger.debug("[MEMORY] 开始请求级内存清理...")
+            
+            try:
+                # 1. 清理批处理上下文
+                if hasattr(_global_translator, '_batch_contexts'):
+                    _global_translator._batch_contexts.clear()
+                if hasattr(_global_translator, '_batch_configs'):
+                    _global_translator._batch_configs.clear()
+                
+                # 2. 清理图片上下文缓存
+                if hasattr(_global_translator, '_current_image_context'):
+                    _global_translator._current_image_context = None
+                if hasattr(_global_translator, '_saved_image_contexts'):
+                    _global_translator._saved_image_contexts.clear()
+                
+                # 3. 清理页面翻译历史
+                if hasattr(_global_translator, 'all_page_translations'):
+                    _global_translator.all_page_translations.clear()
+                if hasattr(_global_translator, '_original_page_texts'):
+                    _global_translator._original_page_texts.clear()
+                
+                # 4. 清理取消回调
+                if hasattr(_global_translator, '_cancel_check_callback'):
+                    _global_translator._cancel_check_callback = None
+                
+                logger.debug("[MEMORY] 翻译器内部状态已清理")
+                
+            except Exception as e:
+                logger.warning(f"[MEMORY] 清理翻译器状态时出错: {e}")
+    
+    # 5. 强制垃圾回收
+    gc.collect()
+    
+    # 6. 清理 GPU 显存
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    
+    # 7. Windows 特定：强制释放物理内存
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, -1, -1)
+    except Exception:
+        pass
+    
+    logger.debug("[MEMORY] 请求级内存清理完成")
+
+
+def cleanup_context(ctx):
+    """
+    彻底清理Context对象中的所有资源
+    
+    Args:
+        ctx: 翻译上下文对象
+        keep_result: 是否保留result（用于返回给前端）
+    """
+    if ctx is None:
+        return
+    
+    import gc
+    
+    # 需要清理的所有属性列表
+    attrs_to_clear = [
+        # 图片数据（最大的内存占用）
+        'input', 'img_rgb', 'img_alpha', 'img_colorized', 'upscaled',
+        'img_inpainted', 'img_rendered', 'mask', 'mask_raw',
+        # 高质量翻译相关数据
+        'high_quality_batch_data', 'annotated_image',
+        # 其他可能的大对象
+        'textlines', 'text_regions',
+        # 工作流结果（前端已取走后可清理）
+        '_workflow_result',
+    ]
+    
+    for attr in attrs_to_clear:
+        if hasattr(ctx, attr):
+            obj = getattr(ctx, attr)
+            if obj is not None:
+                # 如果是PIL Image，先关闭
+                if hasattr(obj, 'close'):
+                    try:
+                        obj.close()
+                    except Exception:
+                        pass
+                # 如果是列表，清空
+                elif isinstance(obj, list):
+                    obj.clear()
+                # 如果是字典，清空
+                elif isinstance(obj, dict):
+                    obj.clear()
+                # 删除引用
+                try:
+                    delattr(ctx, attr)
+                except Exception:
+                    setattr(ctx, attr, None)
+    
+    # result 单独处理（通常需要保留给前端）
+    # 调用方负责在使用完result后调用此函数清理
+    
+    gc.collect()
