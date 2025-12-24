@@ -182,8 +182,9 @@ def _run_translate_sync(pil_image, config: Config, task_id: str = None, cancel_c
             # 清除线程局部的事件循环引用（Docker环境关键）
             asyncio.set_event_loop(None)
             
-            # 强制垃圾回收，清理线程局部存储
-            gc.collect()
+            # 请求级内存清理：清理翻译器内部状态，保留模型
+            from manga_translator.server.core.task_manager import cleanup_after_request
+            cleanup_after_request()
             
         except Exception as e:
             logger.warning(f"线程清理时出错: {e}")
@@ -243,8 +244,9 @@ def _run_translate_batch_sync(images_with_configs: list, batch_size: int, task_i
             # 清除线程局部的事件循环引用（Docker环境关键）
             asyncio.set_event_loop(None)
             
-            # 强制垃圾回收，清理线程局部存储
-            gc.collect()
+            # 请求级内存清理：清理翻译器内部状态，保留模型
+            from manga_translator.server.core.task_manager import cleanup_after_request
+            cleanup_after_request()
             
         except Exception as e:
             logger.warning(f"线程清理时出错: {e}")
@@ -363,32 +365,14 @@ async def get_ctx(req: Request, config: Config, image: str|bytes, workflow: str 
         return ctx
     
     finally:
+        # 关闭输入图片
         try:
             pil_image.close()
         except:
             pass
         
-        if 'ctx' in locals() and ctx:
-            for attr in ['img_rgb', 'img_inpainted', 'mask', 'mask_raw', 'high_quality_batch_data']:
-                if hasattr(ctx, attr):
-                    setattr(ctx, attr, None)
-        
-        if 'translator' in locals() and translator:
-            try:
-                if hasattr(translator, 'unload_models'):
-                    translator.unload_models()
-            except:
-                pass
-        
-        import gc
-        gc.collect()
-        
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except:
-            pass
+        # 注意：ctx的清理和内存回收已在_run_translate_sync的cleanup_after_request中处理
+        # 这里只需要处理本函数创建的局部资源
 
 
 async def while_streaming(req: Request, transform, config: Config, image: bytes | str, workflow: str = "normal", original_filename: str = None):
@@ -619,34 +603,21 @@ async def while_streaming(req: Request, transform, config: Config, image: bytes 
         finally:
             add_log("Cleaning up", "DEBUG")
             try:
+                # 使用统一的Context清理函数
                 if 'ctx' in locals() and ctx:
-                    for attr in ['result', 'img_rgb', 'img_inpainted', 'img_rendered', 'img_colorized', 'mask', 'mask_raw', 'high_quality_batch_data']:
-                        if hasattr(ctx, attr):
-                            setattr(ctx, attr, None)
+                    from manga_translator.server.core.task_manager import cleanup_context
+                    cleanup_context(ctx)
                 
+                # 关闭输入图片
                 if 'pil_image' in locals() and pil_image:
                     try:
                         pil_image.close()
                     except:
                         pass
                 
-                if 'translator' in locals() and translator:
-                    try:
-                        if hasattr(translator, 'unload_models'):
-                            translator.unload_models()
-                    except:
-                        pass
-                
-                import gc
-                gc.collect()
-                
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        add_log("GPU memory cleared", "DEBUG")
-                except:
-                    pass
+                # 注意：不要调用translator.unload_models()
+                # 因为我们使用全局翻译器，模型应该被保留复用
+                # 内存清理由cleanup_after_request在_run_translate_sync中处理
                 
                 add_log("Cleanup done", "DEBUG")
             except Exception as cleanup_error:
@@ -782,32 +753,9 @@ async def get_batch_ctx(req: Request, config: Config, images: list[str|bytes], b
                 except:
                     pass
             
-            # 清理 contexts 中的大对象（但保留 result 和 text_regions 用于返回）
-            for ctx in contexts:
-                if ctx:
-                    for attr in ['img_rgb', 'img_inpainted', 'mask', 'mask_raw', 'high_quality_batch_data']:
-                        if hasattr(ctx, attr):
-                            setattr(ctx, attr, None)
+            # 注意：contexts的清理和内存回收已在_run_translate_batch_sync的cleanup_after_request中处理
+            # 不要调用translator.unload_models()，因为我们使用全局翻译器，模型应该被保留复用
             
-            # 清理翻译器实例
-            if 'translator' in locals() and translator:
-                try:
-                    if hasattr(translator, 'unload_models'):
-                        translator.unload_models()
-                except:
-                    pass
-            
-            # 强制垃圾回收
-            import gc
-            gc.collect()
-            
-            # 清理 GPU 显存
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except:
-                pass
         except Exception as cleanup_error:
             logger.warning(f"批量翻译资源清理失败: {cleanup_error}")
 
