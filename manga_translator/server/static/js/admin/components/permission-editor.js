@@ -416,21 +416,41 @@ class PermissionEditor {
                 <h3>${this.t('label_translator', '翻译器')}</h3>
                 ${this.createFormRow(this.t('label_translator', '翻译器'), this.createSelect('translator', 'translator', opts.translator), '', 'translator', 'translator')}
                 ${this.createFormRow(this.t('label_target_lang', '目标语言'), this.createSelect('translator', 'target_lang', opts.target_lang), '', 'translator', 'target_lang')}
-                ${this.createFormRow(this.t('label_high_quality_prompt_path', '高质量翻译提示词'), this.createSelect('translator', 'high_quality_prompt_path', opts.high_quality_prompt_path), '', 'translator', 'high_quality_prompt_path')}
-                ${this.createFormRow(this.t('label_max_requests_per_minute', '每分钟最大请求数'), this.createInput('translator', 'max_requests_per_minute', 'number'), '', 'translator', 'max_requests_per_minute')}
+                ${this.createFormRow(this.t('label_high_quality_prompt_path', '自定义提示词'), this.createSelect('translator', 'high_quality_prompt_path', opts.high_quality_prompt_path), '', 'translator', 'high_quality_prompt_path')}
+                ${this.createFormRow(this.t('label_extract_glossary', '自动提取新术语'), this.createCheckbox('translator', 'extract_glossary'), '自动从翻译中提取新术语并保存到提示词文件', 'translator', 'extract_glossary')}
+                ${this.createFormRow(this.t('label_no_text_lang_skip', '不跳过目标语言文本'), this.createCheckbox('translator', 'no_text_lang_skip'), '即使文本已是目标语言也进行翻译', 'translator', 'no_text_lang_skip')}
+                ${this.createFormRow(this.t('label_gpt_config', 'GPT 配置文件'), this.createInput('translator', 'gpt_config', 'text'), '相对路径，如：examples/gpt_config-example.yaml', 'translator', 'gpt_config')}
+                ${this.createFormRow(this.t('label_max_requests_per_minute', '每分钟最大请求数'), this.createInput('translator', 'max_requests_per_minute', 'number'), '0表示无限制', 'translator', 'max_requests_per_minute')}
             </div>
             <div class="form-section">
                 <h3>${this.t('label_ocr', 'OCR设置')}</h3>
                 ${this.createFormRow(this.t('label_ocr', 'OCR模型'), this.createSelect('ocr', 'ocr', opts.ocr), '', 'ocr', 'ocr')}
                 ${this.createFormRow(this.t('label_secondary_ocr', '备用OCR'), this.createSelect('ocr', 'secondary_ocr', opts.secondary_ocr), '', 'ocr', 'secondary_ocr')}
                 ${this.createFormRow(this.t('label_use_hybrid_ocr', '启用混合OCR'), this.createCheckbox('ocr', 'use_hybrid_ocr'), '', 'ocr', 'use_hybrid_ocr')}
+                ${this.createFormRow(this.t('label_use_mocr_merge', '合并 MangaOCR 结果'), this.createCheckbox('ocr', 'use_mocr_merge'), '使用Manga OCR的边界框合并', 'ocr', 'use_mocr_merge')}
                 ${this.createFormRow(this.t('label_min_text_length', '最小文本长度'), this.createInput('ocr', 'min_text_length', 'number'), '', 'ocr', 'min_text_length')}
+                ${this.createFormRow(this.t('label_ignore_bubble', '忽略非气泡文本'), this.createInput('ocr', 'ignore_bubble', 'number'), '忽略非气泡区域文本的阈值(1-50)，推荐5-10', 'ocr', 'ignore_bubble')}
+                ${this.createFormRow(this.t('label_prob', '文本区域最低概率 (prob)'), this.createInput('ocr', 'prob', 'number'), '文本区域的最小概率阈值', 'ocr', 'prob')}
+                ${this.createFormRow(this.t('label_merge_gamma', '合并-距离容忍度'), this.createInput('ocr', 'merge_gamma', 'number'), '值越高越宽容，默认0.8', 'ocr', 'merge_gamma')}
+                ${this.createFormRow(this.t('label_merge_sigma', '合并-离群容忍度'), this.createInput('ocr', 'merge_sigma', 'number'), '值越高越宽容，默认2.5', 'ocr', 'merge_sigma')}
+                ${this.createFormRow(this.t('label_merge_edge_ratio_threshold', '合并-边缘距离比例阈值'), this.createInput('ocr', 'merge_edge_ratio_threshold', 'number'), '0表示禁用，默认0.0', 'ocr', 'merge_edge_ratio_threshold')}
             </div>
             <div class="form-section">
-                <h3>${this.t('label_detector', '检测设置')}</h3>
+                <h3>${this.t('label_detector', '文本检测器')}</h3>
                 ${this.createFormRow(this.t('label_detector', '文本检测器'), this.createSelect('detector', 'detector', opts.detector), '', 'detector', 'detector')}
                 ${this.createFormRow(this.t('label_detection_size', '检测大小'), this.createInput('detector', 'detection_size', 'number'), '', 'detector', 'detection_size')}
                 ${this.createFormRow(this.t('label_text_threshold', '文本阈值'), this.createInput('detector', 'text_threshold', 'number'), '', 'detector', 'text_threshold')}
+                ${this.createFormRow(this.t('label_box_threshold', '边界框生成阈值'), this.createInput('detector', 'box_threshold', 'number'), '边界框生成阈值，默认0.5', 'detector', 'box_threshold')}
+                ${this.createFormRow(this.t('label_unclip_ratio', 'Unclip比例'), this.createInput('detector', 'unclip_ratio', 'number'), '文本骨架扩展比例，默认2.5', 'detector', 'unclip_ratio')}
+                ${this.createFormRow(this.t('label_min_box_area_ratio', '最小检测框面积占比'), this.createInput('detector', 'min_box_area_ratio', 'number'), '相对图片总像素，默认0.0009(0.09%)', 'detector', 'min_box_area_ratio')}
+                ${this.createFormRow(this.t('label_det_rotate', '旋转图像进行检测'), this.createCheckbox('detector', 'det_rotate'), '旋转图像进行检测，可能提高检测效果', 'detector', 'det_rotate')}
+                ${this.createFormRow(this.t('label_det_auto_rotate', '旋转图像以优先检测垂直文本行'), this.createCheckbox('detector', 'det_auto_rotate'), '自动旋转以优先检测垂直文本', 'detector', 'det_auto_rotate')}
+                ${this.createFormRow(this.t('label_det_invert', '反转图像颜色进行检测'), this.createCheckbox('detector', 'det_invert'), '反转图像颜色进行检测', 'detector', 'det_invert')}
+                ${this.createFormRow(this.t('label_det_gamma_correct', '应用伽马校正进行检测'), this.createCheckbox('detector', 'det_gamma_correct'), '应用伽马校正，可能提高检测效果', 'detector', 'det_gamma_correct')}
+                ${this.createFormRow(this.t('label_use_yolo_obb', '启用YOLO辅助检测'), this.createCheckbox('detector', 'use_yolo_obb'), '启用YOLO旋转边界框辅助检测', 'detector', 'use_yolo_obb')}
+                ${this.createFormRow(this.t('label_yolo_obb_conf', 'YOLO置信度阈值'), this.createInput('detector', 'yolo_obb_conf', 'number'), '默认0.4', 'detector', 'yolo_obb_conf')}
+                ${this.createFormRow(this.t('label_yolo_obb_iou', 'YOLO交叉比(IoU)'), this.createInput('detector', 'yolo_obb_iou', 'number'), 'NMS的IoU阈值，默认0.6', 'detector', 'yolo_obb_iou')}
+                ${this.createFormRow(this.t('label_yolo_obb_overlap_threshold', 'YOLO辅助检测重叠率删除阈值'), this.createInput('detector', 'yolo_obb_overlap_threshold', 'number'), '重叠比例阈值(0.0-1.0)，默认0.1', 'detector', 'yolo_obb_overlap_threshold')}
             </div>
         `;
     }
@@ -472,21 +492,28 @@ class PermissionEditor {
             <div class="form-section">
                 <h3>${this.t('label_inpainter', '修复设置')}</h3>
                 ${this.createFormRow(this.t('label_inpainter', '修复模型'), this.createSelect('inpainter', 'inpainter', opts.inpainter), '', 'inpainter', 'inpainter')}
-                ${this.createFormRow(this.t('label_inpainting_size', '修复大小'), this.createInput('inpainter', 'inpainting_size', 'number'), '', 'inpainter', 'inpainting_size')}
+                ${this.createFormRow(this.t('label_inpainting_size', '修复大小'), this.createInput('inpainter', 'inpainting_size', 'number'), '太大会导致OOM', 'inpainter', 'inpainting_size')}
                 ${this.createFormRow(this.t('label_inpainting_precision', '修复精度'), this.createSelect('inpainter', 'inpainting_precision', opts.inpainting_precision), '', 'inpainter', 'inpainting_precision')}
+                ${this.createFormRow(this.t('label_inpainting_split_ratio', '极端长宽比切割阈值'), this.createInput('inpainter', 'inpainting_split_ratio', 'number'), '宽高比阈值，超过则分块处理，默认3.0', 'inpainter', 'inpainting_split_ratio')}
+                ${this.createFormRow(this.t('label_force_use_torch_inpainting', '强制使用PyTorch修复'), this.createCheckbox('inpainter', 'force_use_torch_inpainting'), '不使用ONNX，在ONNX内存问题时有用', 'inpainter', 'force_use_torch_inpainting')}
             </div>
             <div class="form-section">
                 <h3>${this.t('label_upscaler', '放大设置')}</h3>
                 ${this.createFormRow(this.t('label_upscaler', '超分模型'), this.createSelect('upscale', 'upscaler', opts.upscaler), '', 'upscale', 'upscaler')}
                 ${this.createFormRow(this.t('label_upscale_ratio', '超分倍数'), this.createSelect('upscale', 'upscale_ratio', opts.upscale_ratio), '', 'upscale', 'upscale_ratio')}
-                ${this.createFormRow(this.t('label_revert_upscaling', '还原超分'), this.createCheckbox('upscale', 'revert_upscaling'), '', 'upscale', 'revert_upscaling')}
-                ${this.createFormRow(this.t('label_tile_size', '分块大小(0=不分割)'), this.createInput('upscale', 'tile_size', 'number'), '', 'upscale', 'tile_size')}
+                ${this.createFormRow(this.t('label_revert_upscaling', '还原超分'), this.createCheckbox('upscale', 'revert_upscaling'), '翻译后缩回原始尺寸', 'upscale', 'revert_upscaling')}
+                ${this.createFormRow(this.t('label_tile_size', '分块大小'), this.createInput('upscale', 'tile_size', 'number'), '0=不分割，默认400', 'upscale', 'tile_size')}
             </div>
             <div class="form-section">
                 <h3>${this.t('label_colorizer', '上色设置')}</h3>
                 ${this.createFormRow(this.t('label_colorizer', '上色模型'), this.createSelect('colorizer', 'colorizer', opts.colorizer), '', 'colorizer', 'colorizer')}
-                ${this.createFormRow(this.t('label_colorization_size', '上色大小'), this.createInput('colorizer', 'colorization_size', 'number'), '', 'colorizer', 'colorization_size')}
-                ${this.createFormRow(this.t('label_denoise_sigma', '降噪强度'), this.createInput('colorizer', 'denoise_sigma', 'number'), '', 'colorizer', 'denoise_sigma')}
+                ${this.createFormRow(this.t('label_colorization_size', '上色大小'), this.createInput('colorizer', 'colorization_size', 'number'), '-1使用完整图像尺寸', 'colorizer', 'colorization_size')}
+                ${this.createFormRow(this.t('label_denoise_sigma', '降噪强度'), this.createInput('colorizer', 'denoise_sigma', 'number'), '范围0-255，默认30，-1关闭', 'colorizer', 'denoise_sigma')}
+            </div>
+            <div class="form-section">
+                <h3>全局设置</h3>
+                ${this.createFormRow(this.t('label_kernel_size', '卷积核大小'), this.createInput('_global', 'kernel_size', 'number'), '文本擦除区域的卷积核大小，默认3', '_global', 'kernel_size')}
+                ${this.createFormRow(this.t('label_mask_dilation_offset', '遮罩扩张偏移'), this.createInput('_global', 'mask_dilation_offset', 'number'), '扩展文本掩码以清除残留像素，默认20', '_global', 'mask_dilation_offset')}
             </div>
         `;
     }
@@ -510,6 +537,10 @@ class PermissionEditor {
                 ${this.createFormRow(this.t('label_font_size_offset', '字体大小偏移量'), this.createInput('render', 'font_size_offset', 'number'), '', 'render', 'font_size_offset')}
                 ${this.createFormRow(this.t('label_font_size_minimum', '最小字体大小'), this.createInput('render', 'font_size_minimum', 'number'), '', 'render', 'font_size_minimum')}
                 ${this.createFormRow(this.t('label_max_font_size', '最大字体大小'), this.createInput('render', 'max_font_size', 'number'), '', 'render', 'max_font_size')}
+                ${this.createFormRow(this.t('label_font_scale_ratio', '字体缩放比例'), this.createInput('render', 'font_scale_ratio', 'number'), '', 'render', 'font_scale_ratio')}
+                ${this.createFormRow(this.t('label_font_color', '字体颜色'), this.createInput('render', 'font_color', 'text'), '如：FFFFFF或FFFFFF:000000', 'render', 'font_color')}
+                ${this.createFormRow(this.t('label_line_spacing', '行间距'), this.createInput('render', 'line_spacing', 'number'), '', 'render', 'line_spacing')}
+                ${this.createFormRow(this.t('label_stroke_width', '描边宽度比例'), this.createInput('render', 'stroke_width', 'number'), '相对字体大小，默认0.07', 'render', 'stroke_width')}
             </div>
             <div class="form-section">
                 <h3>${this.t('Options', '选项')}</h3>
@@ -518,6 +549,12 @@ class PermissionEditor {
                 ${this.createFormRow(this.t('label_disable_font_border', '禁用字体边框'), this.createCheckbox('render', 'disable_font_border'), '', 'render', 'disable_font_border')}
                 ${this.createFormRow(this.t('label_disable_auto_wrap', 'AI断句'), this.createCheckbox('render', 'disable_auto_wrap'), '', 'render', 'disable_auto_wrap')}
                 ${this.createFormRow(this.t('label_rtl', '从右到左'), this.createCheckbox('render', 'rtl'), '', 'render', 'rtl')}
+                ${this.createFormRow(this.t('label_no_hyphenation', '禁用连字符'), this.createCheckbox('render', 'no_hyphenation'), '', 'render', 'no_hyphenation')}
+                ${this.createFormRow(this.t('label_auto_rotate_symbols', '竖排内横排'), this.createCheckbox('render', 'auto_rotate_symbols'), '自动旋转垂直文本中的符号', 'render', 'auto_rotate_symbols')}
+                ${this.createFormRow(this.t('label_center_text_in_bubble', '垂直居中'), this.createCheckbox('render', 'center_text_in_bubble'), '气泡内文本垂直居中', 'render', 'center_text_in_bubble')}
+                ${this.createFormRow(this.t('label_optimize_line_breaks', 'AI断句自动扩大文字'), this.createCheckbox('render', 'optimize_line_breaks'), '自动优化换行以找到最佳字体大小', 'render', 'optimize_line_breaks')}
+                ${this.createFormRow(this.t('label_check_br_and_retry', 'AI断句检查'), this.createCheckbox('render', 'check_br_and_retry'), '检查翻译是否包含换行标记并重试', 'render', 'check_br_and_retry')}
+                ${this.createFormRow(this.t('label_strict_smart_scaling', 'AI断句自动扩大文字下不扩大文本框'), this.createCheckbox('render', 'strict_smart_scaling'), '智能缩放模式下防止文本框扩展', 'render', 'strict_smart_scaling')}
             </div>
         `;
     }
