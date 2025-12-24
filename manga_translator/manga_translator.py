@@ -2305,10 +2305,17 @@ class MangaTranslator:
             else:
                 output = result
         
-        # ✅ 渲染完成后立即清理img_rgb（不再需要）
+        # ✅ 渲染完成后立即清理不再需要的图像数据
         if hasattr(ctx, 'img_rgb') and ctx.img_rgb is not None:
             del ctx.img_rgb
             ctx.img_rgb = None
+        if hasattr(ctx, 'img_inpainted') and ctx.img_inpainted is not None:
+            del ctx.img_inpainted
+            ctx.img_inpainted = None
+        
+        # 强制垃圾回收，释放内存
+        import gc
+        gc.collect()
         
         return output
 
