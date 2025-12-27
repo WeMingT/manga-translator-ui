@@ -4,10 +4,14 @@
 Manga Translator - 命令行入口
 支持多种运行模式：cli, local, ws, shared
 """
+import os
 import sys
 import asyncio
 import logging
 import warnings
+
+# 在 PyTorch 初始化前设置显存优化，允许使用共享显存
+os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
 
 # 隐藏第三方库的警告
 warnings.filterwarnings('ignore', message='.*Triton.*')

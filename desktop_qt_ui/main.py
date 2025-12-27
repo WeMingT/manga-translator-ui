@@ -3,6 +3,9 @@ import os
 import logging
 import warnings
 
+# 在 PyTorch 初始化前设置显存优化，允许使用共享显存
+os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
+
 # 设置 Hugging Face 镜像站（国内用户加速下载）
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 os.environ['HF_HUB_ENDPOINT'] = 'https://hf-mirror.com'

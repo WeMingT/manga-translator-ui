@@ -1245,6 +1245,9 @@ async def dispatch(
         debug_img = None
 
     for region, dst_points in tqdm(zip(text_regions, dst_points_list), '[render]', total=len(text_regions)):
+        # 保存缩放算法计算的 dst_points 到 region，供 PSD 导出使用
+        # 注意：这是缩放后的真实文本区域，不是 render 函数中扩展后的区域
+        region.dst_points = dst_points
         img = render(img, region, dst_points, not config.render.no_hyphenation, config.render.line_spacing, config.render.disable_font_border, config)
     
     if return_debug_img and debug_img is not None:
@@ -1546,6 +1549,14 @@ def render(
         logger.info(f"Adjusted text position to fit within image: offset=({offset_x}, {offset_y}), original_bbox=({x}, {y}, {w}, {h})")
 
     M, _ = cv2.findHomography(src_points, adjusted_dst_points[0], cv2.RANSAC, 5.0)
+    
+    # OpenCV remap 限制：尺寸不能超过 SHRT_MAX (32767)
+    SHRT_MAX = 32767
+    if box.shape[0] > SHRT_MAX or box.shape[1] > SHRT_MAX or img.shape[0] > SHRT_MAX or img.shape[1] > SHRT_MAX:
+        logger.error(f"[RENDER SKIPPED] Image or box size exceeds OpenCV limit (32767). "
+                     f"box={box.shape[:2]}, img={img.shape[:2]}, text='{region.translation[:50] if hasattr(region, 'translation') else 'N/A'}...'")
+        return img
+    
     # 使用INTER_LANCZOS4获得最高质量的插值,避免字体模糊
     rgba_region = cv2.warpPerspective(box, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
     x_adj, y_adj, w_adj, h_adj = cv2.boundingRect(np.round(adjusted_dst_points[0]).astype(np.int32))
@@ -1578,6 +1589,7 @@ def render(
             logger.warning(f"Text region size mismatch: canvas={canvas_region.shape[:2]}, target={target_region.shape[:2]}, skipping region")
     else:
         logger.warning(f"Text region completely outside image bounds after adjustment: x={x_adj}, y={y_adj}, w={w_adj}, h={h_adj}, image_size=({img_w}, {img_h}). Text: '{region.translation[:50] if hasattr(region, 'translation') else 'N/A'}...'")
+    
     return img
 
 async def dispatch_eng_render(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '', line_spacing: int = 0, disable_font_border: bool = False) -> np.ndarray:
