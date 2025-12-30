@@ -62,7 +62,8 @@ def extend_rect(x, y, w, h, max_x, max_y, extend_size):
     h1 = min(h + extend_size * 2, max_y - y1 - 1)
     return x1, y1, w1, h1
 
-def complete_mask_fill(text_lines: List[Tuple[int, int, int, int]]):
+def complete_mask_fill(text_lines: List[Tuple[int, int, int, int]], mask_shape):
+    final_mask = np.zeros(mask_shape, dtype=np.uint8)
     for (x, y, w, h) in text_lines:
         final_mask = cv2.rectangle(final_mask, (x, y), (x + w, y + h), (255), -1)
     return final_mask

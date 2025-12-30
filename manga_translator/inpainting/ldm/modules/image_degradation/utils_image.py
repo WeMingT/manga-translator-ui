@@ -7,7 +7,11 @@ import cv2
 from torchvision.utils import make_grid
 from datetime import datetime
 from manga_translator.utils.generic import imwrite_unicode
-#import matplotlib.pyplot as plt   # TODO: check with Dominik, also bsrgan.py vs bsrgan_light.py
+
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 
 
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
@@ -36,6 +40,8 @@ def get_timestamp():
 
 
 def imshow(x, title=None, cbar=False, figsize=None):
+    if plt is None:
+        raise ImportError("matplotlib is required for imshow")
     plt.figure(figsize=figsize)
     plt.imshow(np.squeeze(x), interpolation='nearest', cmap='gray')
     if title:
@@ -46,6 +52,8 @@ def imshow(x, title=None, cbar=False, figsize=None):
 
 
 def surf(Z, cmap='rainbow', figsize=None):
+    if plt is None:
+        raise ImportError("matplotlib is required for surf")
     plt.figure(figsize=figsize)
     ax3 = plt.axes(projection='3d')
 
