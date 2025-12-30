@@ -22,7 +22,7 @@ from manga_translator.config import (
     Upscaler,
 )
 from manga_translator.save import OUTPUT_FORMATS
-from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal, pyqtSlot, QTimer, Qt
 from PyQt6.QtWidgets import QFileDialog
 
 from services import (
@@ -68,13 +68,15 @@ class MainAppLogic(QObject):
         self.i18n = get_i18n_manager()
         self.preset_service = get_preset_service()
 
-        self.thread = None
-        self.worker = None
+        # ✅ 使用线程池替代QThread，避免线程管理问题
+        self.thread_pool = QThreadPool.globalInstance()
+        self.current_worker = None  # 当前运行的worker
         self.saved_files_count = 0
         self.saved_files_list = []  # 收集所有保存的文件路径
 
         self.source_files: List[str] = [] # Holds both files and folders
         self.file_to_folder_map: Dict[str, Optional[str]] = {} # 记录文件来自哪个文件夹
+        self.archive_to_temp_map: Dict[str, str] = {} # 记录压缩包解压的临时目录
         self.excluded_subfolders: set = set() # 记录被删除的子文件夹路径
         self.folder_tree_cache: Dict[str, dict] = {} # 缓存文件夹的完整树结构 {top_folder: tree_structure}
 
@@ -1362,35 +1364,26 @@ class MainAppLogic(QObject):
         self.state_manager.set_translating(True)
         self.state_manager.set_status_message("正在准备文件...")
         
-        self.thread = QThread()
-        self.scanner_worker = FileScannerWorker(
+        # ✅ 使用线程池运行扫描任务
+        scanner_worker = FileScannerRunnable(
             source_files=self.source_files,
             excluded_subfolders=self.excluded_subfolders,
-            file_service=self.file_service
+            file_service=self.file_service,
+            finished_callback=self.on_scanning_finished,
+            error_callback=self.on_scanning_error,
+            progress_callback=self.on_worker_log
         )
-        self.scanner_worker.moveToThread(self.thread)
         
-        self.thread.started.connect(self.scanner_worker.process)
-        self.scanner_worker.finished.connect(self.thread.quit)
-        self.scanner_worker.finished.connect(self.scanner_worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-        
-        # 连接结果信号
-        self.scanner_worker.finished.connect(self.on_scanning_finished)
-        self.scanner_worker.error.connect(self.on_scanning_error)
-        self.scanner_worker.progress.connect(self.on_worker_log) # 复用日志输出
-        
-        self.thread.start()
-        self._ui_log("文件扫描线程已启动")
+        self.current_worker = scanner_worker
+        self.thread_pool.start(scanner_worker)
+        self._ui_log("文件扫描任务已启动")
 
-    @pyqtSlot(list, dict, dict, set)
     def on_scanning_finished(self, resolved_files, file_map, archive_map, excluded):
         """文件扫描完成，启动翻译任务"""
         self._ui_log(f"文件扫描完成，共找到 {len(resolved_files)} 个文件")
         
-        # 清理扫描线程引用
-        self.scanner_worker = None
-        self.thread = None
+        # ✅ 清理worker引用
+        self.current_worker = None
         
         # 更新状态
         # 此时我们需要合并旧的文件映射（如果有必要），但在这种重扫模式下，
@@ -1420,9 +1413,9 @@ class MainAppLogic(QObject):
         # 启动真正的翻译任务
         self._start_translation_worker(resolved_files)
 
-    @pyqtSlot(str)
     def on_scanning_error(self, error_msg):
         self._ui_log(f"扫描文件时出错: {error_msg}", "ERROR")
+        self.current_worker = None
         self.state_manager.set_translating(False)
         self.state_manager.set_status_message("扫描失败")
         from PyQt6.QtWidgets import QMessageBox
@@ -1433,29 +1426,23 @@ class MainAppLogic(QObject):
         self.saved_files_count = 0
         self.saved_files_list = []
         
-        self.thread = QThread()
-        self.worker = TranslationWorker(
+        # ✅ 使用线程池运行翻译任务
+        translation_worker = TranslationRunnable(
             files=files_to_process,
             config_dict=self.config_service.get_config().dict(),
             output_folder=self.config_service.get_config().app.last_output_path,
             root_dir=self.config_service.root_dir,
-            file_to_folder_map=self.file_to_folder_map.copy()
+            file_to_folder_map=self.file_to_folder_map.copy(),
+            finished_callback=self.on_task_finished,
+            error_callback=self.on_task_error,
+            progress_callback=self.on_task_progress,
+            log_callback=self.on_worker_log,
+            file_processed_callback=self.on_file_completed
         )
         
-        self.worker.moveToThread(self.thread)
-
-        self.thread.started.connect(self.worker.process)
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-        self.worker.finished.connect(self.on_task_finished)
-        self.worker.error.connect(self.on_task_error)
-        self.worker.progress.connect(self.on_task_progress)
-        self.worker.log_received.connect(self.on_worker_log)
-        self.worker.file_processed.connect(self.on_file_completed)
-
-        self.thread.start()
-        self._ui_log("翻译工作线程已启动。")
+        self.current_worker = translation_worker
+        self.thread_pool.start(translation_worker)
+        self._ui_log("翻译任务已启动")
         self.state_manager.set_translating(True)
         self.state_manager.set_status_message("正在翻译...")
 
@@ -1484,22 +1471,7 @@ class MainAppLogic(QObject):
             self._ui_log("一个任务已经在运行中。", "WARNING")
             return
         
-        # 如果有旧线程还在运行，等待它结束
-        if self.thread is not None and self.thread.isRunning():
-            self._ui_log("检测到旧线程还在运行，正在请求停止...", "WARNING")
-            self.state_manager.set_status_message("正在停止旧任务...")
-            if self.worker:
-                try:
-                    self.worker.stop()
-                except Exception:
-                    pass
-            self.thread.quit()
-            if not self.thread.wait(5000):
-                self.thread.terminate()
-                self.thread.wait()
-            self.thread = None
-            self.worker = None
-            self.state_manager.set_translating(False)
+        # ✅ 线程池会自动管理任务，无需检查旧线程
 
         # 检查输出目录是否合法 (提前检查)
         output_path = self.config_service.get_config().app.last_output_path
@@ -1635,23 +1607,7 @@ class MainAppLogic(QObject):
         """延迟清理任务相关资源"""
         try:
             # 清理线程引用（线程应该已经通过deleteLater自动清理）
-            # 只在线程仍在运行时进行额外处理
-            # 使用 sip 检查对象是否已被删除
-            thread_valid = False
-            try:
-                if self.thread is not None:
-                    # 尝试访问线程属性来检查是否有效
-                    thread_valid = self.thread.isRunning()
-            except RuntimeError:
-                # C++ 对象已被删除
-                thread_valid = False
-            
-            if thread_valid:
-                self._ui_log("任务完成但线程仍在运行，请求退出...", "WARNING")
-                self.thread.quit()
-                # 不阻塞UI太久，最多等待500ms
-                if not self.thread.wait(500):
-                    self._ui_log("线程未在500ms内停止，将由Qt事件循环自动清理", "WARNING")
+            # ✅ 线程池自动管理，无需手动清理线程
             
             # 清理压缩包解压的临时文件
             if hasattr(self, 'archive_to_temp_map') and self.archive_to_temp_map:
@@ -1668,9 +1624,8 @@ class MainAppLogic(QObject):
             if "has been deleted" not in str(e):
                 self._ui_log(f"清理任务资源时出错: {e}", "WARNING")
         finally:
-            # 清理引用，让Qt的deleteLater机制处理实际的对象销毁
-            self.thread = None
-            self.worker = None
+            # ✅ 清理worker引用
+            self.current_worker = None
     
     def on_task_error(self, error_message):
         # 错误信息已在 worker 中通过详细错误提示框显示，这里不再重复输出
@@ -1681,16 +1636,8 @@ class MainAppLogic(QObject):
         if hasattr(self, 'main_view') and self.main_view:
             self.main_view.reset_progress()
         
-        # 清理线程
-        if self.thread and self.thread.isRunning():
-            self._ui_log("错误发生但线程仍在运行，请求退出...", "WARNING")
-            self.thread.quit()
-            if not self.thread.wait(2000):
-                self._ui_log("线程未在2秒内停止，将由Qt事件循环自动清理", "WARNING")
-        
-        # 清理引用
-        self.thread = None
-        self.worker = None
+        # ✅ 清理worker引用
+        self.current_worker = None
 
     def on_task_progress(self, current, total, message):
         self._ui_log(f"[进度] {current}/{total}: {message}")
@@ -1703,47 +1650,28 @@ class MainAppLogic(QObject):
             self.main_view.update_progress(current, total, message)
 
     def stop_task(self) -> bool:
-        """停止翻译任务（优雅停止，不使用 terminate）"""
-        if self.thread and self.thread.isRunning():
-            self._ui_log("正在请求停止翻译线程...")
-
-            # 立即更新按钮为"停止中..."状态并禁用，防止重复点击
-            # 但不更新 is_translating 状态，等线程真正结束后再更新
+        """停止翻译任务"""
+        if self.current_worker and hasattr(self.current_worker, 'stop'):
+            self._ui_log("正在请求停止任务...")
             self.state_manager.set_status_message("正在停止...")
             if hasattr(self, 'main_view') and self.main_view:
                 self.main_view.set_stopping_state()
-
-            # 1. 通知 worker 停止（设置标志）
-            if self.worker:
-                try:
-                    self.worker.stop()
-                except:
-                    pass
-
-            # 2. 请求线程退出事件循环
-            self.thread.quit()
             
-            # 3. 连接 finished 信号以清理资源，并在线程真正结束后更新状态
-            def on_thread_finished():
-                self._ui_log("翻译线程已正常停止")
-                # 线程结束后才更新翻译状态，与进度条重置时机一致
-                self.state_manager.set_translating(False)
-                self.state_manager.set_status_message("任务已停止")
-                # 重置进度条
-                if hasattr(self, 'main_view') and self.main_view:
-                    self.main_view.reset_progress()
-                self.thread = None
-                self.worker = None
+            # 通知worker停止
+            self.current_worker.stop()
             
-            try:
-                self.thread.finished.disconnect()
-            except:
-                pass
-            self.thread.finished.connect(on_thread_finished)
-
+            # ✅ 线程池会自动管理线程生命周期，无需手动等待
+            # 直接更新状态
+            self._ui_log("已发送停止信号")
+            self.state_manager.set_translating(False)
+            self.state_manager.set_status_message("任务已停止")
+            if hasattr(self, 'main_view') and self.main_view:
+                self.main_view.reset_progress()
+            
+            self.current_worker = None
             return True
         
-        self._ui_log("请求停止任务，但没有正在运行的线程。", "WARNING")
+        self._ui_log("请求停止任务，但没有正在运行的任务", "WARNING")
         self.state_manager.set_translating(False)
         return False
     # endregion
@@ -1780,28 +1708,23 @@ class MainAppLogic(QObject):
     def shutdown(self):
         """应用关闭时的清理"""
         try:
-            if self.state_manager.is_translating() or (self.thread and self.thread.isRunning()):
-                self._ui_log("应用关闭中，停止翻译任务...")
+            if self.state_manager.is_translating() and self.current_worker:
+                self._ui_log("应用关闭中，停止任务...")
                 
-                # 通知 worker 停止
-                if self.worker:
+                # 通知worker停止
+                if hasattr(self.current_worker, 'stop'):
                     try:
-                        self.worker.stop()
+                        self.current_worker.stop()
                     except Exception as e:
                         self._ui_log(f"停止worker时出错: {e}", "WARNING")
                 
-                # 请求线程退出并等待（最多3秒）
-                if self.thread and self.thread.isRunning():
-                    self.thread.quit()
-                    if not self.thread.wait(3000):
-                        self._ui_log("线程3秒内未停止，强制终止", "WARNING")
-                        self.thread.terminate()
-                        self.thread.wait()
-                    else:
-                        self._ui_log("翻译线程已正常停止")
+                # ✅ 等待线程池中的任务完成（最多5秒）
+                if not self.thread_pool.waitForDone(5000):
+                    self._ui_log("线程池5秒内未完成所有任务", "WARNING")
+                else:
+                    self._ui_log("所有任务已正常停止")
                 
-                self.thread = None
-                self.worker = None
+                self.current_worker = None
                 self.state_manager.set_translating(False)
             
             # 关闭缩略图加载线程池
@@ -2940,3 +2863,288 @@ class TranslationWorker(QObject):
                     loop.close()
                     asyncio.set_event_loop(None)
                     # 清理完成，不输出日志
+
+
+
+# ============================================================================
+# 线程池版本的Worker类（使用QRunnable替代QThread，避免线程管理问题）
+# ============================================================================
+
+class WorkerSignals(QObject):
+    """信号包装器，因为QRunnable不能直接发送信号"""
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
+    progress = pyqtSignal(str)
+    translation_progress = pyqtSignal(int, int, str)
+    log = pyqtSignal(str)
+    file_processed = pyqtSignal(dict)
+
+
+class FileScannerRunnable(QRunnable):
+    """文件扫描任务（线程池版本）"""
+    
+    def __init__(self, source_files, excluded_subfolders, file_service, 
+                 finished_callback, error_callback, progress_callback):
+        super().__init__()
+        self.source_files = source_files
+        self.excluded_subfolders = excluded_subfolders.copy()
+        self.file_service = file_service
+        self.finished_callback = finished_callback
+        self.error_callback = error_callback
+        self.progress_callback = progress_callback
+        self.file_to_folder_map = {}
+        self.archive_to_temp_map = {}
+        self.setAutoDelete(True)
+        
+        # ✅ 创建信号对象用于线程安全通信
+        self.signals = WorkerSignals()
+        if finished_callback:
+            self.signals.finished.connect(lambda args: finished_callback(*args))
+        if error_callback:
+            self.signals.error.connect(error_callback)
+        if progress_callback:
+            self.signals.progress.connect(progress_callback)
+    
+    def run(self):
+        """在线程池中执行"""
+        try:
+            self._emit_progress("正在扫描文件...")
+            resolved_files = []
+            
+            # 分离文件和文件夹
+            folders = []
+            individual_files = []
+            archive_files = []
+            
+            for path in self.source_files:
+                if os.path.isdir(path):
+                    folders.append(path)
+                elif os.path.isfile(path):
+                    if self.file_service.is_archive_file(path):
+                        archive_files.append(path)
+                    elif self.file_service.validate_image_file(path):
+                        individual_files.append(path)
+            
+            # 处理压缩包文件
+            if archive_files:
+                from desktop_qt_ui.utils.archive_extractor import extract_images_from_archive
+                for archive_path in archive_files:
+                    try:
+                        self._emit_progress(f"正在解压: {os.path.basename(archive_path)}")
+                        images, temp_dir = extract_images_from_archive(archive_path)
+                        if images:
+                            self.archive_to_temp_map[archive_path] = temp_dir
+                            for img_path in images:
+                                resolved_files.append(img_path)
+                                self.file_to_folder_map[img_path] = archive_path
+                            self._emit_progress(f"从 {os.path.basename(archive_path)} 提取了 {len(images)} 张图片")
+                        else:
+                            self._emit_progress(f"警告: {os.path.basename(archive_path)} 中没有找到图片")
+                    except Exception as e:
+                        self._emit_progress(f"解压 {os.path.basename(archive_path)} 失败: {e}")
+            
+            # 清理排除列表
+            if self.excluded_subfolders:
+                excluded_to_remove = set()
+                for excluded_folder in self.excluded_subfolders:
+                    is_valid = False
+                    for folder in folders:
+                        try:
+                            common = os.path.commonpath([folder, excluded_folder])
+                            if common == os.path.normpath(folder):
+                                is_valid = True
+                                break
+                        except ValueError:
+                            continue
+                    if not is_valid:
+                        excluded_to_remove.add(excluded_folder)
+                self.excluded_subfolders -= excluded_to_remove
+            
+            # 对文件夹进行自然排序
+            folders.sort(key=self.file_service._natural_sort_key)
+            
+            # 按文件夹分组处理
+            for folder in folders:
+                self._emit_progress(f"正在扫描文件夹: {os.path.basename(folder)}")
+                folder_files = self.file_service.get_image_files_from_folder(folder, recursive=True)
+                
+                # 过滤掉被排除的子文件夹中的文件
+                if self.excluded_subfolders:
+                    filtered_files = []
+                    for file_path in folder_files:
+                        is_excluded = False
+                        for excluded_folder in self.excluded_subfolders:
+                            try:
+                                common = os.path.commonpath([excluded_folder, file_path])
+                                if common == excluded_folder:
+                                    is_excluded = True
+                                    break
+                            except ValueError:
+                                continue
+                        if not is_excluded:
+                            filtered_files.append(file_path)
+                    folder_files = filtered_files
+                
+                resolved_files.extend(folder_files)
+                for file_path in folder_files:
+                    self.file_to_folder_map[file_path] = folder
+            
+            # 处理单独添加的文件
+            individual_files.sort(key=self.file_service._natural_sort_key)
+            for file_path in individual_files:
+                resolved_files.append(file_path)
+                self.file_to_folder_map[file_path] = None
+
+            unique_files = list(dict.fromkeys(resolved_files))
+            self._emit_finished(unique_files, self.file_to_folder_map, self.archive_to_temp_map, self.excluded_subfolders)
+            
+        except Exception as e:
+            self._emit_error(str(e))
+    
+    def _emit_finished(self, *args):
+        """线程安全地发送完成信号"""
+        self.signals.finished.emit(args)
+    
+    def _emit_error(self, msg):
+        """线程安全地发送错误信号"""
+        self.signals.error.emit(msg)
+    
+    def _emit_progress(self, msg):
+        """线程安全地发送进度信号"""
+        self.signals.progress.emit(msg)
+
+
+class TranslationRunnable(QRunnable):
+    """翻译任务（线程池版本）"""
+    
+    def __init__(self, files, config_dict, output_folder, root_dir, file_to_folder_map,
+                 finished_callback, error_callback, progress_callback, log_callback, file_processed_callback):
+        super().__init__()
+        self.files = files
+        self.config_dict = config_dict
+        self.output_folder = output_folder
+        self.root_dir = root_dir
+        self.file_to_folder_map = file_to_folder_map or {}
+        self.finished_callback = finished_callback
+        self.error_callback = error_callback
+        
+        self.progress_callback = progress_callback # Keep reference just in case
+        self._is_running = True
+        self._current_task = None
+        self.logger = get_logger(__name__)
+        self.file_service = get_file_service()
+        self.setAutoDelete(True)
+        
+        # ✅ 创建信号对象用于线程安全通信
+        self.signals = WorkerSignals()
+        if finished_callback:
+            self.signals.finished.connect(lambda args: finished_callback(*args))
+        if error_callback:
+            self.signals.error.connect(error_callback)
+            
+        if progress_callback:
+            self.signals.translation_progress.connect(progress_callback)
+        if log_callback:
+            self.signals.log.connect(log_callback)
+        if file_processed_callback:
+            self.signals.file_processed.connect(file_processed_callback)
+    
+    def stop(self):
+        """停止任务"""
+        self._emit_log("--- 收到停止请求")
+        self._is_running = False
+        if self._current_task and not self._current_task.done():
+            self._current_task.cancel()
+        
+        try:
+            from desktop_qt_ui.utils.memory_cleanup import full_memory_cleanup
+            full_memory_cleanup(log_callback=lambda msg: self._emit_log(msg))
+        except Exception as e:
+            self._emit_log(f"--- [CLEANUP] 清理失败: {e}")
+    
+    def run(self):
+        """在线程池中执行"""
+        loop = None
+        try:
+            import asyncio
+            import sys
+            self._emit_log("--- 开始处理任务...")
+
+            # Windows平台初始化
+            if sys.platform == 'win32':
+                import ctypes
+                try:
+                    WSADATA_SIZE = 400
+                    wsa_data = ctypes.create_string_buffer(WSADATA_SIZE)
+                    ws2_32 = ctypes.WinDLL('ws2_32')
+                    result = ws2_32.WSAStartup(0x0202, wsa_data)
+                    if result != 0:
+                        self._emit_log(f"--- [ERROR] WSAStartup failed with code {result}")
+                except Exception as e:
+                    self._emit_log(f"--- [ERROR] Failed to initialize WSA: {e}")
+                
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+            # 创建事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # 创建并运行任务（复用TranslationWorker的_do_processing逻辑）
+            worker = TranslationWorker(
+                self.files, self.config_dict, self.output_folder, 
+                self.root_dir, self.file_to_folder_map
+            )
+            worker._is_running = self._is_running
+            
+            # 连接信号到回调
+            worker.log_received.connect(lambda msg: self._emit_log(msg))
+            worker.progress.connect(lambda c, t, m: self._emit_progress(c, t, m))
+            worker.file_processed.connect(lambda d: self._emit_file_processed(d))
+            
+            self._current_task = loop.create_task(worker._do_processing())
+            loop.run_until_complete(self._current_task)
+            
+            # 任务完成，发送结果
+            self._emit_finished([])
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            import traceback
+            error_msg = f"翻译任务错误: {str(e)}\n{traceback.format_exc()}"
+            self.logger.error(error_msg)
+            self._emit_error(error_msg)
+        finally:
+            if loop:
+                try:
+                    tasks = asyncio.all_tasks(loop=loop)
+                    for task in tasks:
+                        task.cancel()
+                    if tasks:
+                        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception as e:
+                    self._emit_log(f"--- ERROR during asyncio cleanup: {e}")
+                finally:
+                    loop.close()
+                    asyncio.set_event_loop(None)
+    
+    def _emit_finished(self, results):
+        """线程安全地发送完成信号"""
+        self.signals.finished.emit((results,))
+    
+    def _emit_error(self, msg):
+        """线程安全地发送错误信号"""
+        self.signals.error.emit(msg)
+    
+    def _emit_progress(self, current, total, message):
+        """线程安全地发送进度信号"""
+        self.signals.translation_progress.emit(current, total, message)
+    
+    def _emit_log(self, msg):
+        """线程安全地发送日志信号"""
+        self.signals.log.emit(msg)
+    
+    def _emit_file_processed(self, data):
+        """线程安全地发送文件处理完成信号"""
+        self.signals.file_processed.emit(data)

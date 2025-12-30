@@ -220,10 +220,18 @@ try {{
     $.writeln('Document closed');
     
 }} catch (e) {{
-    $.writeln('ERROR: ' + e.message);
-    $.writeln('Line: ' + e.line);
-    $.writeln('File: ' + (e.fileName || 'unknown'));
-    // 不使用alert，避免卡住
+    var errorMsg = 'ERROR: ' + e.message + '\\nLine: ' + e.line + '\\nFile: ' + (e.fileName || 'unknown');
+    $.writeln(errorMsg);
+    
+    // 写入错误文件
+    try {{
+        var errFile = new File(ERROR_FILE_PATH);
+        errFile.open('w');
+        errFile.write(errorMsg);
+        errFile.close();
+    }} catch (writeErr) {{
+        $.writeln('Failed to write error file: ' + writeErr.message);
+    }}
 }}
 """
 
@@ -307,8 +315,18 @@ def escape_jsx_string(text: str) -> str:
     text = text.replace("\n", "\\r")   # 换行符（PS 使用 \r）
     text = text.replace("\r", "\\r")   # 回车符
     text = text.replace("\t", "    ")  # 制表符转为空格
-    # 最后处理[BR]标记（转换为已转义的换行符）
-    text = text.replace("[BR]", "\\r")
+    text = text.replace("\t", "    ")  # 制表符转为空格
+    
+    # 使用正则替换 [BR] 及其周围的空白，并不区分大小写
+    # 支持半角 [BR] 和全角 【BR】
+    import re
+    text = re.sub(r'\s*(?:\[|【)BR(?:\]|】)\s*', '\\r', text, flags=re.IGNORECASE)
+
+    # 终极处理：处理所有可能的垂直空白符
+    # 包括 \n, \r, \u2028 (Line Separator), \u2029 (Paragraph Separator), \v (Vertical Tab), \f (Form Feed)
+    # 这一步将所有的物理换行都转换为转义的 \r 字符
+    text = re.sub(r'[\r\n\u2028\u2029\v\f]+', '\\r', text)
+    
     return text
 
 
@@ -373,12 +391,16 @@ def generate_text_layer_jsx(index: int, text_region, default_font: str, line_spa
     raw_text = text_region.translation
     processed_text = preprocess_vertical_text(raw_text, is_vertical)
     text = escape_jsx_string(processed_text)
+    
+    # 双重保险：强制移除所有可能的物理换行符，防止脚本语法错误
+    if '\n' in text or '\r' in text:
+        # 如果 escape_jsx_string 没有处理干净（理论上不应发生），这里强制处理
+        logger.warning(f"检测到文本层 {index} 内容中仍有物理换行符，正在强制清理")
+        text = text.replace('\n', '\\r').replace('\r', '\\r')
+    
     if not text:
         logger.warning(f"文本层 {index} 的translation为空，跳过")
         return ""
-    
-    # 文本层名称（使用译文）
-    name = escape_jsx_string(text_region.translation[:50])  # 限制长度
     
     logger.debug(f"文本层 {index}: 原文='{' '.join(text_region.text)[:30]}', 译文='{text_region.translation[:30]}'")
     
@@ -395,8 +417,10 @@ def generate_text_layer_jsx(index: int, text_region, default_font: str, line_spa
     # 文字方向（PS枚举值）
     direction_ps = DIRECTION_TO_PS_DIRECTION.get(direction, "Direction.HORIZONTAL")
     
-    # 计算行数
-    num_lines = text_region.translation.count('[BR]') + 1
+    # 计算行数 (使用与 escape_jsx_string 相同的正则逻辑)
+    import re
+    # 支持半角 [BR] 和全角 【BR】
+    num_lines = len(re.split(r'\s*(?:\[|【)BR(?:\]|】)\s*', text_region.translation, flags=re.IGNORECASE))
     
     # 字体大小
     font_size = text_region.font_size
@@ -463,7 +487,7 @@ def generate_text_layer_jsx(index: int, text_region, default_font: str, line_spa
     rotation_code = ""
     if abs(text_region.angle) > 1:  # 只有角度大于1度才旋转
         # PS 的旋转是逆时针，需要取负值
-        rotation_code = f"textLayer{index}.rotate(-{text_region.angle}, AnchorPosition.MIDDLECENTER);"
+        rotation_code = f"textLayer{index}.rotate({-text_region.angle}, AnchorPosition.MIDDLECENTER);"
     
     # 縦中横处理（仅竖排文字）
     tcy_code = ""
@@ -516,6 +540,14 @@ def generate_text_layer_jsx(index: int, text_region, default_font: str, line_spa
     $.writeln('Using Photoshop default font for layer {index}');
 """
     
+    # 文本层名称：使用译文，但必须移除所有换行符以免破坏 JSX 语法
+    # 1. 删除 [BR] 及全角 【BR】 (替换为空字符串)
+    safe_name = re.sub(r'\s*(?:\[|【)BR(?:\]|】)\s*', '', text_region.translation, flags=re.IGNORECASE)
+    # 2. 删除所有物理换行符 (替换为空字符串)
+    safe_name = re.sub(r'[\r\n\u2028\u2029\v\f]+', '', safe_name)
+    # 3. 转义特殊字符并截断
+    name = escape_jsx_string(safe_name[:50])
+
     return TEXT_LAYER_TEMPLATE.format(
         index=index,
         name=name,
@@ -657,6 +689,7 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = None, i
         text_layers_code = ""
         if hasattr(ctx, 'text_regions') and ctx.text_regions:
             filtered_regions = [r for r in ctx.text_regions if r.translation]
+            logger.info(f"准备添加 {len(filtered_regions)} 个文本层到 PSD")
             for i, region in enumerate(filtered_regions):
                 text_layers_code += generate_text_layer_jsx(i, region, default_font, line_spacing)
         
@@ -756,9 +789,11 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = None, i
         try:
             stdout, stderr = process.communicate(timeout=1)
             if stdout:
-                logger.debug(f"Photoshop stdout: {stdout.decode('utf-8', errors='replace')}")
+                stdout_text = stdout.decode('utf-8', errors='replace')
+                logger.info(f"Photoshop 输出:\n{stdout_text}")
             if stderr:
-                logger.debug(f"Photoshop stderr: {stderr.decode('utf-8', errors='replace')}")
+                stderr_text = stderr.decode('utf-8', errors='replace')
+                logger.warning(f"Photoshop 错误输出:\n{stderr_text}")
         except subprocess.TimeoutExpired:
             # Photoshop 还在运行，这是正常的
             pass
