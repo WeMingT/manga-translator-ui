@@ -642,6 +642,37 @@ class ModelPaddleOCR(OfflineOCR):
             # Prevent invalid dimensions
             if img_crop_width <= 0 or img_crop_height <= 0:
                 return None
+            
+            # OpenCV cv::remap 限制: 尺寸必须小于 SHRT_MAX (32767)
+            # 如果目标尺寸过大,先从原图裁剪局部区域再进行透视变换
+            OPENCV_MAX_SIZE = 32767
+            if img_crop_width >= OPENCV_MAX_SIZE or img_crop_height >= OPENCV_MAX_SIZE:
+                # 计算包围框
+                x_min = int(np.min(points[:, 0]))
+                y_min = int(np.min(points[:, 1]))
+                x_max = int(np.max(points[:, 0]))
+                y_max = int(np.max(points[:, 1]))
+                
+                # 确保在图像范围内
+                img_h, img_w = img.shape[:2]
+                x_min = max(0, x_min)
+                y_min = max(0, y_min)
+                x_max = min(img_w, x_max)
+                y_max = min(img_h, y_max)
+                
+                # 裁剪局部区域
+                local_img = img[y_min:y_max, x_min:x_max]
+                
+                # 调整点坐标到局部坐标系
+                local_points = points.copy()
+                local_points[:, 0] -= x_min
+                local_points[:, 1] -= y_min
+                
+                # 使用局部图像进行透视变换
+                img = local_img
+                points = local_points
+                
+                self.logger.debug(f"Using local crop ({x_max-x_min}x{y_max-y_min}) for large text region")
 
             # Define target rectangle
             pts_std = np.float32([
