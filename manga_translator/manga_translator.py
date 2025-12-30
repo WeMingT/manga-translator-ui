@@ -2923,9 +2923,8 @@ class MangaTranslator:
                                         try:
                                             from .utils.photoshop_export import photoshop_export, get_psd_output_path
                                             psd_path = get_psd_output_path(ctx.image_name)
-                                            render_cfg = getattr(config, 'render', None)
                                             cli_cfg = getattr(config, 'cli', None)
-                                            default_font = getattr(cli_cfg, 'psd_font', None) or getattr(render_cfg, 'font_path', 'Arial') or 'Arial'
+                                            default_font = getattr(cli_cfg, 'psd_font', None)
                                             line_spacing = getattr(config.render, 'line_spacing', None) if hasattr(config, 'render') else None
                                             script_only = getattr(cli_cfg, 'psd_script_only', False)
                                             photoshop_export(psd_path, ctx, default_font, ctx.image_name, self.verbose, self._result_path, line_spacing, script_only)
@@ -3063,9 +3062,8 @@ class MangaTranslator:
                                     try:
                                         from .utils.photoshop_export import photoshop_export, get_psd_output_path
                                         psd_path = get_psd_output_path(ctx.image_name)
-                                        render_cfg = getattr(config, 'render', None)
                                         cli_cfg = getattr(config, 'cli', None)
-                                        default_font = getattr(cli_cfg, 'psd_font', None) or getattr(render_cfg, 'font_path', 'Arial') or 'Arial'
+                                        default_font = getattr(cli_cfg, 'psd_font', None)
                                         line_spacing = getattr(config.render, 'line_spacing', None) if hasattr(config, 'render') else None
                                         script_only = getattr(cli_cfg, 'psd_script_only', False)
                                         photoshop_export(psd_path, ctx, default_font, ctx.image_name, self.verbose, self._result_path, line_spacing, script_only)
@@ -4853,9 +4851,8 @@ class MangaTranslator:
                                 try:
                                     from .utils.photoshop_export import photoshop_export, get_psd_output_path
                                     psd_path = get_psd_output_path(ctx.image_name)
-                                    render_cfg = getattr(config, 'render', None)
                                     cli_cfg = getattr(config, 'cli', None)
-                                    default_font = getattr(cli_cfg, 'psd_font', None) or getattr(render_cfg, 'font_path', 'Arial') or 'Arial'
+                                    default_font = getattr(cli_cfg, 'psd_font', None)
                                     line_spacing = getattr(config.render, 'line_spacing', None) if hasattr(config, 'render') else None
                                     script_only = getattr(cli_cfg, 'psd_script_only', False)
                                     photoshop_export(psd_path, ctx, default_font, ctx.image_name, self.verbose, self._result_path, line_spacing, script_only)
