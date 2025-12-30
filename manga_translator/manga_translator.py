@@ -133,9 +133,6 @@ def parse_upscale_ratio(upscale_ratio) -> float:
     except (ValueError, TypeError):
         logger.warning(f"无法解析超分倍率: {upscale_ratio}, 将忽略")
         return 0
-        if text != original_text:  
-            logger.info(f'Line {line_number}: Replaced "{original_text}" with "{text}" using pattern "{pattern.pattern}" and value "{value}"')
-    return text
 
 class MangaTranslator:
     verbose: bool

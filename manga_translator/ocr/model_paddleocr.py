@@ -629,6 +629,27 @@ class ModelPaddleOCR(OfflineOCR):
         try:
             assert len(points) == 4, "points must have 4 corners"
 
+            # 先裁剪包围框区域，避免在整个大图上做透视变换（与 48px 模型相同的策略）
+            src_pts = points.astype(np.int64).copy()
+            im_h, im_w = img.shape[:2]
+
+            x1, y1, x2, y2 = src_pts[:, 0].min(), src_pts[:, 1].min(), src_pts[:, 0].max(), src_pts[:, 1].max()
+            x1 = np.clip(x1, 0, im_w)
+            y1 = np.clip(y1, 0, im_h)
+            x2 = np.clip(x2, 0, im_w)
+            y2 = np.clip(y2, 0, im_h)
+            
+            # 检查裁剪区域是否有效
+            if x1 >= x2 or y1 >= y2:
+                return None
+            
+            # 裁剪局部区域
+            img_cropped = img[y1:y2, x1:x2]
+            
+            # 调整点坐标到局部坐标系
+            src_pts[:, 0] -= x1
+            src_pts[:, 1] -= y1
+
             # Calculate crop dimensions based on edge lengths
             img_crop_width = int(max(
                 np.linalg.norm(points[0] - points[1]),
@@ -642,37 +663,6 @@ class ModelPaddleOCR(OfflineOCR):
             # Prevent invalid dimensions
             if img_crop_width <= 0 or img_crop_height <= 0:
                 return None
-            
-            # OpenCV cv::remap 限制: 尺寸必须小于 SHRT_MAX (32767)
-            # 如果目标尺寸过大,先从原图裁剪局部区域再进行透视变换
-            OPENCV_MAX_SIZE = 32767
-            if img_crop_width >= OPENCV_MAX_SIZE or img_crop_height >= OPENCV_MAX_SIZE:
-                # 计算包围框
-                x_min = int(np.min(points[:, 0]))
-                y_min = int(np.min(points[:, 1]))
-                x_max = int(np.max(points[:, 0]))
-                y_max = int(np.max(points[:, 1]))
-                
-                # 确保在图像范围内
-                img_h, img_w = img.shape[:2]
-                x_min = max(0, x_min)
-                y_min = max(0, y_min)
-                x_max = min(img_w, x_max)
-                y_max = min(img_h, y_max)
-                
-                # 裁剪局部区域
-                local_img = img[y_min:y_max, x_min:x_max]
-                
-                # 调整点坐标到局部坐标系
-                local_points = points.copy()
-                local_points[:, 0] -= x_min
-                local_points[:, 1] -= y_min
-                
-                # 使用局部图像进行透视变换
-                img = local_img
-                points = local_points
-                
-                self.logger.debug(f"Using local crop ({x_max-x_min}x{y_max-y_min}) for large text region")
 
             # Define target rectangle
             pts_std = np.float32([
@@ -682,10 +672,10 @@ class ModelPaddleOCR(OfflineOCR):
                 [0, img_crop_height],
             ])
 
-            # Perspective transform
-            M = cv2.getPerspectiveTransform(points.astype(np.float32), pts_std)
+            # Perspective transform on cropped image
+            M = cv2.getPerspectiveTransform(src_pts.astype(np.float32), pts_std)
             dst_img = cv2.warpPerspective(
-                img,
+                img_cropped,
                 M,
                 (img_crop_width, img_crop_height),
                 borderMode=cv2.BORDER_REPLICATE,

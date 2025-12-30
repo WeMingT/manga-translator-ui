@@ -2,12 +2,22 @@ import torch
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from contextlib import contextmanager
+import numpy as np
+from packaging import version
 
 from ldm.modules.diffusionmodules.model import Encoder, Decoder
 from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 
 from ldm.util import instantiate_from_config
 from ldm.modules.ema import LitEma
+
+try:
+    from ldm.modules.vqvae.quantize import VectorQuantizer
+except ImportError:
+    # 如果VectorQuantizer不存在，创建一个占位类
+    class VectorQuantizer:
+        def __init__(self, *args, **kwargs):
+            raise NotImplementedError("VectorQuantizer not available")
 
 class VQModel(pl.LightningModule):
     def __init__(self,
@@ -193,6 +203,8 @@ class VQModel(pl.LightningModule):
         return self.log_dict
 
     def configure_optimizers(self):
+        from torch.optim.lr_scheduler import LambdaLR
+        
         lr_d = self.learning_rate
         lr_g = self.lr_g_factor*self.learning_rate
         print("lr_d", lr_d)

@@ -1,6 +1,6 @@
 # v2.0.0 更新日志
 
-发布日期：2024-12-24
+发布日期：2025-12-30
 
 ## ✨ 新功能
 
@@ -62,14 +62,16 @@
 - 修复超大图片（如条漫）渲染崩溃问题：使用局部区域渲染绕过 OpenCV warpPerspective 的 32767 像素限制
 - 改进字符缺失处理：字体中找不到的字符用 `?` 替代而非空格，便于发现问题
 - 增加空渲染结果保护，防止零尺寸图层导致崩溃
-
 - **行间距逻辑优化**：回退至基于间隙的计算方式，提升排版精确度，避免行间距过大
 
-### PaddleOCR 旋转裁剪尺寸限制修复
-- 修复 PaddleOCR 韩语模型在处理超大文本区域时的崩溃问题
-- 当文本区域透视变换目标尺寸超过 32767 像素时,采用局部裁剪策略
-- 先从原图裁剪包围框区域,再进行透视变换,避免触发 OpenCV `cv::remap` 的 `SHRT_MAX` 限制
-- 解决了大量 "Failed to extract rotated crop" 错误
+### 导入错误修复
+- 修复 `text_render_eng.py` 中的 logger 导入错误，使用正确的 `get_logger` 函数
+
+### PaddleOCR 超大文本区域处理修复
+- 修复 PaddleOCR 在处理超大文本区域时的 OpenCV 尺寸限制错误
+- 采用与 48px 模型相同的策略：先裁剪包围框区域，再在局部图像上进行透视变换
+- 避免直接在整图上做透视变换导致输出尺寸超过 OpenCV 的 32767 像素限制
+- 彻底解决了 "Failed to extract rotated crop: dst.cols < SHRT_MAX" 错误
 
 ### 显存优化
 - 在程序入口添加 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` 环境变量，优化显存分配

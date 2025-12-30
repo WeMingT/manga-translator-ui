@@ -679,8 +679,10 @@ class LamaLargeInpainter(LamaMPEInpainter):
             return ans
             
         except Exception as e:
-            # 清理所有临时变量
-            del img_original, mask_original, img, mask_input, img_inpainted
+            # 清理所有临时变量（安全删除）
+            for var_name in ['img_original', 'mask_original', 'img', 'mask_input', 'img_inpainted']:
+                if var_name in locals():
+                    del locals()[var_name]
             gc.collect()
             
             # 记录详细的错误信息
