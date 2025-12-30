@@ -239,34 +239,7 @@ TEXT_LAYER_TEMPLATE = """
     var textItem{index} = textLayer{index}.textItem;
     // 点文本：不设置 kind，默认就是 POINTTEXT
     
-    // 查找字体的 PostScript 名称
-    var requestedFont{index} = '{font_name}';
-    var fontPS{index} = findFontPostScriptName(requestedFont{index});
-    
-    if (!fontPS{index}) {{
-        var msg = 'Font not found: "' + requestedFont{index} + '". Please install this font or use a different font.';
-        $.writeln('ERROR: ' + msg);
-        var errFile = new File(ERROR_FILE_PATH);
-        errFile.open('w');
-        errFile.write(msg);
-        errFile.close();
-        throw new Error(msg);
-    }}
-    
-    $.writeln('Font mapping: "' + requestedFont{index} + '" -> "' + fontPS{index} + '"');
-    
-    // 设置字体（使用 PostScript 名称）
-    try {{
-        textItem{index}.font = fontPS{index};
-    }} catch (e) {{
-        var msg = 'Failed to set font "' + fontPS{index} + '": ' + e.message;
-        $.writeln('ERROR: ' + msg);
-        var errFile = new File(ERROR_FILE_PATH);
-        errFile.open('w');
-        errFile.write(msg);
-        errFile.close();
-        throw new Error(msg);
-    }}
+    {font_setup_code}
 
     // 根据文档分辨率调整尺寸值（Photoshop 内部使用 72 DPI 作为基准）
     // 设置属性顺序：方向 -> 对齐 -> 位置 -> 内容 -> 大小
@@ -507,6 +480,42 @@ def generate_text_layer_jsx(index: int, text_region, default_font: str, line_spa
     }}
 """
     
+    # 字体设置代码
+    if default_font:
+        font_setup_code = f"""// 查找字体的 PostScript 名称
+    var requestedFont{index} = '{default_font}';
+    var fontPS{index} = findFontPostScriptName(requestedFont{index});
+    
+    if (!fontPS{index}) {{
+        var msg = 'Font not found: "' + requestedFont{index} + '". Please install this font or use a different font.';
+        $.writeln('ERROR: ' + msg);
+        var errFile = new File(ERROR_FILE_PATH);
+        errFile.open('w');
+        errFile.write(msg);
+        errFile.close();
+        throw new Error(msg);
+    }}
+    
+    $.writeln('Font mapping: "' + requestedFont{index} + '" -> "' + fontPS{index} + '"');
+    
+    // 设置字体（使用 PostScript 名称）
+    try {{
+        textItem{index}.font = fontPS{index};
+    }} catch (e) {{
+        var msg = 'Failed to set font "' + fontPS{index} + '": ' + e.message;
+        $.writeln('ERROR: ' + msg);
+        var errFile = new File(ERROR_FILE_PATH);
+        errFile.open('w');
+        errFile.write(msg);
+        errFile.close();
+        throw new Error(msg);
+    }}
+"""
+    else:
+        font_setup_code = f"""// 使用 Photoshop 默认字体
+    $.writeln('Using Photoshop default font for layer {index}');
+"""
+    
     return TEXT_LAYER_TEMPLATE.format(
         index=index,
         name=name,
@@ -526,7 +535,7 @@ def generate_text_layer_jsx(index: int, text_region, default_font: str, line_spa
         leading_code=leading_code,
         rotation_code=rotation_code,
         tcy_code=tcy_code,
-        font_name=default_font,
+        font_setup_code=font_setup_code,
     )
 
 
@@ -557,7 +566,7 @@ def get_psd_output_path(image_path: str) -> str:
     return psd_path
 
 
-def photoshop_export(output_file: str, ctx: Context, default_font: str = "Arial", image_path: str = None, verbose: bool = False, result_path_fn=None, line_spacing: float = None, script_only: bool = False):
+def photoshop_export(output_file: str, ctx: Context, default_font: str = None, image_path: str = None, verbose: bool = False, result_path_fn=None, line_spacing: float = None, script_only: bool = False):
     """
     使用 Photoshop 导出 PSD 文件
     
@@ -570,13 +579,22 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = "Arial"
     Args:
         output_file: 输出 PSD 文件路径
         ctx: 翻译上下文，包含图片和文本区域信息
-        default_font: 默认字体名称
+        default_font: 默认字体名称，如果为 None 则使用 Photoshop 默认字体
         image_path: 原图路径（用于查找工作目录中的修复图）
         verbose: 是否启用调试模式（保存JSX脚本到result文件夹）
         result_path_fn: 结果路径生成函数（用于保存调试脚本）
         line_spacing: 行间距系数
         script_only: 如果为True，只生成JSX脚本而不执行Photoshop
     """
+    
+    # 如果 default_font 是文件路径，提取字体名称
+    if default_font and (os.path.sep in default_font or '/' in default_font or default_font.endswith('.ttf') or default_font.endswith('.otf')):
+        # 从路径中提取文件名（不含扩展名）作为字体名称
+        font_basename = os.path.splitext(os.path.basename(default_font))[0]
+        logger.warning(f"检测到 default_font 是文件路径: {default_font}")
+        logger.warning(f"已提取字体名称: {font_basename}")
+        logger.warning(f"提示: 请在配置中使用 'psd_font' 参数指定字体名称，而不是文件路径")
+        default_font = font_basename
     
     # 创建临时文件（只用于修复图和遮罩）
     temp_dir = tempfile.gettempdir()
@@ -632,7 +650,10 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = "Arial"
         mask_layer_code = ""
         
         # 生成文本层代码
-        logger.info(f"PSD导出使用字体: {default_font}")
+        if default_font:
+            logger.info(f"PSD导出使用字体: {default_font}")
+        else:
+            logger.info(f"PSD导出使用 Photoshop 默认字体")
         text_layers_code = ""
         if hasattr(ctx, 'text_regions') and ctx.text_regions:
             filtered_regions = [r for r in ctx.text_regions if r.translation]
