@@ -25,37 +25,26 @@ def check_color(image):
     # Proportion should be used
     return n > 10
 
-def is_ignore(region_img, ignore_bubble = 0):
+
+# 基于边缘检测的简单方法（原有实现）
+def is_ignore_simple(region_img, ignore_bubble = 0):
     """
-    Principle: Normally, white bubbles and their text boxes are mostly white, while black bubbles and their text boxes are mostly black. We calculate the ratio of white or black pixels around the text block to the total pixels, and judge whether the area is a normal bubble area or not. Based on the value of the --ignore-bubble parameter, if the ratio is greater than the base value and less than (100-base value), then it is considered a non-bubble area.
-    The normal range for ignore-bubble is 1-50, and other values are considered not input. The recommended value for ignore-bubble is 10. The smaller it is, the more likely it is to recognize normal bubbles as image text and skip them. The larger it is, the more likely it is to recognize image text as normal bubbles.
-
-    Assuming ignore-bubble = 10
-    The text block is surrounded by white if it is <10, and the text block is very likely to be a normal white bubble.
-    The text block is surrounded by black if it is >90, and the text block is very likely to be a normal black bubble.
-    Between 10 and 90, if there are black and white spots around it, the text block is very likely not a normal bubble, but an image.
-
-    The input parameter is the image data of the text block processed by OCR.
-    Calculate the ratio of black or white pixels in the four rectangular areas formed by taking 2 pixels from the edges of the four sides of the image.
-    Return the overall ratio. If it is between ignore_bubble and (100-ignore_bubble), skip it.
-
-    last determine if there is color, consider the colored text as invalid information and skip it without translation
+    Simple edge-based bubble detection.
+    Checks black/white pixel ratio at the edges of the text region.
+    
+    Args:
+        region_img: Text region image
+        ignore_bubble: Threshold 0-1 (0=disabled, higher=more strict)
+    
+    Returns:
+        True if should be ignored (non-bubble area), False otherwise
     """
-    # Current issues with bubble detection:
-    # 1. Misjudgment of solid color backgrounds (core issue):
-    # Reason: The code calculates the black/white pixel ratio in a 2-pixel edge area around the text box. If the text box is on a large solid white background (e.g., black text on white paper), the edges will mostly be white, resulting in a very low ratio (close to 0), which falls below the ignore_bubble threshold. The code then mistakenly considers this as a "normal white bubble background" and fails to ignore it (i.e., it treats it as regular bubble text that needs translation). While this text does require translation, it is not actually bubble text.
-    # Fundamental flaw: This method does not detect bubble boundaries or contours; it only checks local background color.
-    # 2. Inability to recognize bubble boundaries:
-    # Reason: The code does not involve any shape or contour detection. It cannot determine whether there is a closed, relatively uniform-colored line surrounding the text box.
-    # Consequence: Unable to distinguish between actual bubbles (with boundaries) and cases where the background color coincidentally meets the ratio criteria.
-    # 3. Insensitivity to bubble size and relative position:
-    # Reason: Only examines the immediate 2-pixel area, without considering the overall size, shape of the bubble, or the text box's relative position within the bubble.
-    # Consequence: Cannot utilize common-sense features like "bubbles typically surround the text box and are moderately sized."
-    # 4. Connected bubble issue:
-    # Reason: The current logic is entirely based on the local environment of a single text box and cannot detect whether there is a shared bubble structure spanning multiple text boxes.
-    # Consequence: Unable to handle cases where a large or complex-shaped bubble contains multiple independent text blocks, nor can it determine which part of the bubble corresponds to which text block.
-    if ignore_bubble<1 or ignore_bubble>50:
-        return  False
+    if ignore_bubble <= 0 or ignore_bubble > 1:
+        return False
+    
+    # Convert threshold from 0-1 to 1-50 range for compatibility
+    threshold = int(ignore_bubble * 50)
+    
     _, binary_raw_mask = cv2.threshold(region_img, 127, 255, cv2.THRESH_BINARY)
     height, width = binary_raw_mask.shape[:2]
 
@@ -76,10 +65,257 @@ def is_ignore(region_img, ignore_bubble = 0):
 
     ratio = round( val0 / total, 6)*100
     # ignore
-    if ratio>=ignore_bubble and ratio<=(100-ignore_bubble):
+    if ratio>=threshold and ratio<=(100-threshold):
         return True
     # To determine if there is color, consider the colored text as invalid information and skip it without translation
     if check_color(region_img):
         return True
     return False
+
+
+# 基于气泡边界检测的高级方法（旧版本逻辑）
+def offset_margin(x, y, text_w, text_h, img_gray, sd=10, white_threshold=0.9):
+    """
+    Check white pixel ratio around text block edges.
+    
+    Args:
+        white_threshold: Threshold for considering edge as white (0.85-0.95)
+    
+    Returns:
+        gt9: Number of edges with high white ratio (0-4)
+        pall: Sum of all edge white ratios (0.0-4.0)
+    """
+    img_h, img_w = img_gray.shape[:2]
+    # left top->bottom
+    roi1 = img_gray[max(y - sd, 0):min(y + text_h + sd, img_h), max(x - sd, 0):x]
+    # right top->bottom
+    roi2 = img_gray[max(y - sd, 0):min(y + text_h + sd, img_h), x + text_w:min(x + text_w + sd, img_w)]
+    # top x->text_w
+    roi3 = img_gray[max(y - sd, 0):y, x:x + text_w]
+    # bottom x->text_w
+    roi4 = img_gray[y + text_h:min(y + text_h + sd, img_h), x:x + text_w]
+    roi1_flat, roi2_flat, roi3_flat, roi4_flat = roi1.ravel(), roi2.ravel(), roi3.ravel(), roi4.ravel()
+    len_roi1, len_roi2, len_roi3, len_roi4 = len(roi1_flat), len(roi2_flat), len(roi3_flat), len(roi4_flat)
+    if len_roi1 < 1 or len_roi2 < 1 or len_roi3 < 1 or len_roi4 < 1:
+        return None, None
+    
+    r1gt200 = np.count_nonzero(roi1_flat > 200)
+    r2gt200 = np.count_nonzero(roi2_flat > 200)
+    r3gt200 = np.count_nonzero(roi3_flat > 200)
+    r4gt200 = np.count_nonzero(roi4_flat > 200)
+    pc1, pc2, pc3, pc4 = r1gt200 / len_roi1, r2gt200 / len_roi2, r3gt200 / len_roi3, r4gt200 / len_roi4
+    pall = pc1 + pc2 + pc3 + pc4
+    gt9 = 0
+    if pc1 >= white_threshold:
+        gt9 += 1
+    if pc2 >= white_threshold:
+        gt9 += 1
+    if pc3 >= white_threshold:
+        gt9 += 1
+    if pc4 >= white_threshold:
+        gt9 += 1
+    return gt9, pall
+
+
+def clear_outerwhite(x, y, text_w, text_h, new_mask_thresh):
+    """Scale text_block, delete outer black area"""
+    # ===================left
+    n, dis, start = 0, 0, max(x - 1, 0)
+    while n < text_w // 3:
+        n += 1
+        start += 1
+        pxpoint = new_mask_thresh[y:y + text_h, start:start + 1]
+        pe = np.count_nonzero(pxpoint == 0)
+        top, bot = pxpoint.size * 0.98, pxpoint.size * 0.02
+        if pe >= top or pe <= bot:
+            dis += 1
+            new_mask_thresh[y:y + text_h, start:start + 1] = 0
+        else:
+            break
+    x += dis
+    text_w -= dis
+    ## ==================right
+    n, dis, start = 0, 0, x + text_w + 1
+    while n < text_w // 3:
+        n += 1
+        start -= 1
+        pxpoint = new_mask_thresh[y:y + text_h, start - 1:start]
+        pe = np.count_nonzero(pxpoint == 0)
+        top, bot = pxpoint.size * 0.98, pxpoint.size * 0.02
+        if pe >= top or pe <= bot:
+            dis += 1
+            new_mask_thresh[y:y + text_h, start - 1:start] = 0
+        else:
+            break
+    text_w -= dis
+    # ======================top
+    n, dis, start = 0, 0, max(y - 1, 0)
+    while n < text_h // 3:
+        n += 1
+        start += 1
+        pxpoint = new_mask_thresh[start:start + 1, x:x + text_w]
+        pe = np.count_nonzero(pxpoint == 0)
+        top, bot = pxpoint.size * 0.98, pxpoint.size * 0.02
+        if pe >= top or pe <= bot:
+            dis += 1
+            new_mask_thresh[start:start + 1, x:x + text_w] = 0
+        else:
+            break
+    y += dis
+    text_h -= dis
+    # ======================bottom
+    n, dis, start = 0, 0, y + text_h + 1
+    while n < text_h // 3:
+        n += 1
+        start -= 1
+        pxpoint = new_mask_thresh[start - 1:start, x:x + text_w]
+        pe = np.count_nonzero(pxpoint == 0)
+        top, bot = pxpoint.size * 0.98, pxpoint.size * 0.02
+        if pe >= top or pe <= bot:
+            dis += 1
+            new_mask_thresh[start - 1:start, x:x + text_w] = 0
+        else:
+            break
+    text_h -= dis
+    return x, y, text_w, text_h
+
+
+def rect_offset(rawx, rawy, text_w, text_h, img_gray, white_threshold=0.9):
+    """Check if corners have white borders (bubble characteristic)"""
+    img_h, img_w = img_gray.shape[:2]
+    numbers, exceptpos, total_ok, offset = 0, '', 0, 15
+    
+    while numbers < 2:
+        # lt
+        if exceptpos != 'lt' and rawy - offset >= 0 and rawx - offset >= 0:
+            x, y = rawx, rawy
+            roi1 = img_gray[y - 15:y + 15, x - 15:x].ravel()
+            roi1_1 = img_gray[y - 15:y, x:x + 15].ravel()
+            percent = 0 if len(roi1) < 1 else np.count_nonzero(roi1 > 200) / len(roi1)
+            percent_1 = 0 if len(roi1_1) < 1 else np.count_nonzero(roi1_1 > 200) / len(roi1_1)
+            if percent > white_threshold and percent_1 > white_threshold:
+                total_ok += 1
+                exceptpos = 'lt'
+        # rt
+        if exceptpos != 'rt' and rawy - offset >= 0 and rawx + text_w + offset <= img_w:
+            x, y = rawx + text_w, rawy
+            roi1 = img_gray[y - 15:y + 15, x:x + 15].ravel()
+            roi1_1 = img_gray[y - 15:y, x - 15:x].ravel()
+            percent = 0 if len(roi1) < 1 else np.count_nonzero(roi1 > 200) / len(roi1)
+            percent_1 = 0 if len(roi1_1) < 1 else np.count_nonzero(roi1_1 > 200) / len(roi1_1)
+            if percent > white_threshold and percent_1 > white_threshold:
+                total_ok += 1
+                exceptpos = 'rt'
+        if total_ok > 1:
+            return True
+        # rb
+        if exceptpos != 'rb' and rawy + text_h + offset <= img_h and rawx + text_w + offset <= img_w:
+            x, y = rawx + text_w, rawy + text_h
+            roi1 = img_gray[y - 15:y + 15, x:x + 15].ravel()
+            roi1_1 = img_gray[y:y + 15, x - 15:x].ravel()
+            percent = 0 if len(roi1) < 1 else np.count_nonzero(roi1 > 200) / len(roi1)
+            percent_1 = 0 if len(roi1_1) < 1 else np.count_nonzero(roi1_1 > 200) / len(roi1_1)
+            if percent > white_threshold and percent_1 > white_threshold:
+                total_ok += 1
+                exceptpos = 'rb'
+        if total_ok > 1:
+            return True
+        # lb
+        if exceptpos != 'lb' and rawy + text_h + offset <= img_h and rawx - offset >= 0:
+            x, y = rawx, rawy + text_h
+            roi1 = img_gray[y - 15:y + 15, x - 15:x].ravel()
+            roi1_1 = img_gray[y:y + 15, x:x + 15].ravel()
+            percent = 0 if len(roi1) < 1 else np.count_nonzero(roi1 > 200) / len(roi1)
+            percent_1 = 0 if len(roi1_1) < 1 else np.count_nonzero(roi1_1 > 200) / len(roi1_1)
+            if percent > white_threshold and percent_1 > white_threshold:
+                total_ok += 1
+                exceptpos = 'lb'
+        if total_ok > 1:
+            return True
+        offset = 8
+        numbers += 1
+    return False
+
+
+def is_bubble_advanced(img: np.ndarray, x: int, y: int, text_w: int, text_h: int, threshold: float = 0.5):
+    """
+    Advanced bubble detection based on boundary analysis.
+    
+    Args:
+        img: RGB image
+        x, y, text_w, text_h: Text region coordinates
+        threshold: 0-1, higher = more strict (0.3=loose, 0.5=medium, 0.7=strict)
+    
+    Returns:
+        True if it's a bubble (should keep), False if non-bubble (should ignore)
+    """
+    img_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    mask = np.zeros_like(img_gray)
+    mask[y:y + text_h, x:x + text_w] = 255
+    _, new_mask_thresh = cv2.threshold(cv2.bitwise_and(img_gray, mask), 127, 255, cv2.THRESH_BINARY_INV)
+    new_mask_thresh[0:y, :] = 0
+    new_mask_thresh[y + text_h:, :] = 0
+    new_mask_thresh[y:y + text_h, 0:x] = 0
+    new_mask_thresh[y:y + text_h, x + text_w:] = 0
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    new_mask_thresh = cv2.morphologyEx(new_mask_thresh, cv2.MORPH_CLOSE, kernel)
+    new_mask_thresh = cv2.dilate(new_mask_thresh, kernel)
+    new_mask_thresh = cv2.erode(new_mask_thresh, kernel)
+    
+    # text_block new position
+    x, y, text_w, text_h = clear_outerwhite(x, y, text_w, text_h, new_mask_thresh)
+    
+    # Adjust white threshold based on input threshold
+    # threshold 0.3 -> white_threshold 0.85 (loose)
+    # threshold 0.5 -> white_threshold 0.90 (medium)
+    # threshold 0.7 -> white_threshold 0.95 (strict)
+    white_threshold = 0.85 + (threshold * 0.15)
+    
+    # Adjust checkset based on threshold
+    # threshold 0.3 -> [2.8, 2.5] (loose)
+    # threshold 0.5 -> [3.2, 2.9] (medium)
+    # threshold 0.7 -> [3.6, 3.3] (strict)
+    base_check = 3.2 + (threshold - 0.5) * 0.8
+    checkset = [base_check, base_check - 0.3]
+    
+    # sd add to 10
+    gt9, pall = offset_margin(x, y, text_w, text_h, img_gray, 10, white_threshold)
+    if gt9 is None and pall is None:
+        return False
+    
+    # gt9: 0-4 (number of edges with high white ratio)
+    # pall: 0.0-4.0 (sum of all edge white ratios)
+    if gt9 >= 3 or (gt9 >= 1 and pall >= checkset[0]) or (gt9 <= 1 and pall < 1.2):
+        # sd add to 20
+        gt9, pall = offset_margin(x, y, text_w, text_h, img_gray, 20, white_threshold)
+        if gt9 >= 3 or pall >= checkset[1] or pall <= 1.5:
+            return True
+    
+    # Check four corners
+    if rect_offset(x, y, text_w, text_h, img_gray, white_threshold):
+        return True
+    
+    return False
+
+
+def is_ignore(region_img, ignore_bubble = 0):
+    """
+    Main function to determine if a text region should be ignored.
+    
+    Args:
+        region_img: Text region image (RGB, 48px height for OCR)
+        ignore_bubble: Threshold 0-1
+            - 0: Disabled (keep all regions)
+            - 0.01-0.3: Loose (keep most regions, only filter obvious non-bubbles)
+            - 0.3-0.7: Medium (balanced filtering)
+            - 0.7-1.0: Strict (aggressive filtering, may miss some bubbles)
+    
+    Returns:
+        True if should be ignored (non-bubble), False if should keep (bubble)
+    """
+    if ignore_bubble <= 0 or ignore_bubble > 1:
+        return False
+    
+    # Use simple method for now (can switch to advanced if needed)
+    return is_ignore_simple(region_img, ignore_bubble)
 
