@@ -20,7 +20,7 @@ class OcrSettings(BaseModel):
     use_hybrid_ocr: bool = True
     secondary_ocr: str = "mocr"
     min_text_length: int = 0
-    ignore_bubble: int = 0
+    ignore_bubble: float = 0.0
     prob: float = 0.1
     merge_gamma: float = 0.8
     merge_sigma: float = 2.5

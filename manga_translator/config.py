@@ -385,8 +385,8 @@ class OcrConfig(BaseModel):
     """Secondary OCR to use in hybrid mode."""
     min_text_length: int = 0
     """Minimum text length of a text region"""
-    ignore_bubble: int = 0
-    """The threshold for ignoring text in non bubble areas, with valid values ranging from 1 to 50, does not ignore others. Recommendation 5 to 10. If it is too low, normal bubble areas may be ignored, and if it is too large, non bubble areas may be considered normal bubbles"""
+    ignore_bubble: float = 0.0
+    """Threshold for ignoring non-bubble text areas (0-1). 0=disabled, 0.01-0.3=loose, 0.3-0.7=medium, 0.7-1.0=strict. Higher values filter more aggressively."""
     prob: float | None = None
     """Minimum probability of a text region to be considered valid. If None, uses the model default."""
     merge_gamma: float = 0.8
