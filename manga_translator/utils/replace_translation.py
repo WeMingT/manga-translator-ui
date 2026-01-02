@@ -86,9 +86,9 @@ def get_text_to_img_solid_ink(mask_final, cn_text_img, origin_img, mengban=8, pa
     else:
         text_gray = cn_text_img
 
-    # 参数设置
-    in_black = 90   # 黑场阈值：调大字会变粗变黑，调小字会变细
-    in_white = max(in_black + 50, pan + 30) # 白场阈值：清洗背景
+    # 参数设置 - 降低对比度，保留更多灰度过渡
+    in_black = 50   # 黑场阈值：降低以保留边缘灰度
+    in_white = max(in_black + 80, pan + 50) # 白场阈值：增大范围让过渡更柔和
     if in_white > 255: 
         in_white = 255
     
@@ -104,8 +104,11 @@ def get_text_to_img_solid_ink(mask_final, cn_text_img, origin_img, mengban=8, pa
             val = int((i - in_black) / (in_white - in_black) * 255)
         lut[i] = val
         
-    # 应用色阶调整 -> 得到锐利且带有抗锯齿的文字图
+    # 应用色阶调整
     text_enhanced_gray = cv2.LUT(text_gray, lut)
+    
+    # 轻微高斯模糊，进一步柔化边缘
+    text_enhanced_gray = cv2.GaussianBlur(text_enhanced_gray, (3, 3), 0.5)
     
     # 转回 BGR 方便合并
     text_enhanced_bgr = cv2.cvtColor(text_enhanced_gray, cv2.COLOR_GRAY2BGR)
