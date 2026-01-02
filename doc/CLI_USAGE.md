@@ -4,6 +4,17 @@
 
 ---
 
+## ⚠️ 重要提示
+
+使用命令行前，请先在项目目录激活虚拟环境：
+
+```bash
+# Windows / Linux / macOS
+conda activate manga-env
+```
+
+---
+
 ## 📋 目录
 
 - [快速开始](#快速开始)
