@@ -218,6 +218,15 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 
 **命令行指南** → [doc/CLI_USAGE.md](doc/CLI_USAGE.md)
 
+> ⚠️ **重要提示**：使用命令行前，请先在项目目录激活虚拟环境：
+> ```bash
+> # Windows
+> conda activate manga-env
+> 
+> # Linux/macOS
+> conda activate manga-env
+> ```
+
 快速开始：
 ```bash
 # Local 模式（推荐，命令行翻译）
