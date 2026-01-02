@@ -191,12 +191,33 @@ try {{
         $.writeln('WARNING: Could not convert to RGB mode: ' + modeError.message);
     }}
     
-    // 重命名背景层为"原图"
-    var bgLayer = doc.backgroundLayer;
-    if (bgLayer) {{
-        bgLayer.name = '原图 (original)';
-        bgLayer.allLocked = true;
-        $.writeln('Background layer renamed and locked');
+    // 重命名背景层或第一个图层为"原图"
+    // Photoshop 2020+ 打开纯色PNG时可能不创建背景层，而是普通图层
+    var originalLayer = null;
+    
+    try {{
+        // 尝试获取背景层
+        if (doc.backgroundLayer) {{
+            originalLayer = doc.backgroundLayer;
+            $.writeln('Found background layer');
+        }}
+    }} catch (e) {{
+        $.writeln('No background layer found: ' + e.message);
+    }}
+    
+    // 如果没有背景层，使用第一个图层（最底层）
+    if (!originalLayer && doc.layers.length > 0) {{
+        originalLayer = doc.layers[doc.layers.length - 1];
+        $.writeln('Using bottom layer as original: ' + originalLayer.name);
+    }}
+    
+    // 重命名并锁定原图层
+    if (originalLayer) {{
+        originalLayer.name = '原图 (original)';
+        originalLayer.allLocked = true;
+        $.writeln('Original layer renamed and locked');
+    }} else {{
+        $.writeln('WARNING: No original layer found');
     }}
     
     {inpainted_layer_code}
