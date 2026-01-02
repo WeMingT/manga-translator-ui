@@ -78,74 +78,27 @@ class YOLOOBBDetector(OfflineDetector):
         providers.append('CPUExecutionProvider')
         
         # 先尝试使用 CUDA，如果失败则回退到 CPU
-        session_loaded = False
-        
         if use_cuda:
             try:
                 self.session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers)
-                
-                # 测试推理以确保 CUDA 真的可用（避免 Fallback 模式）
-                try:
-                    test_input = np.random.rand(1, 3, 640, 640).astype(np.float32)
-                    test_input = np.ascontiguousarray(test_input)
-                    input_name = self.session.get_inputs()[0].name
-                    output_names = [output.name for output in self.session.get_outputs()]
-                    
-                    import time
-                    start_time = time.time()
-                    _ = self.session.run(output_names, {input_name: test_input})
-                    elapsed_time = time.time() - start_time
-                    
-                    # 如果测试推理时间过长（>1秒），很可能是 Fallback mode
-                    if elapsed_time > 1.0:
-                        self.logger.warning(f"CUDA 测试推理耗时 {elapsed_time:.2f}秒，疑似 Fallback 模式，切换到 CPU")
-                        # 清理 CUDA session
-                        try:
-                            del self.session
-                        except:
-                            pass
-                        session_loaded = False
-                    else:
-                        session_loaded = True
-                        
-                except Exception as test_e:
-                    self.logger.warning(f"YOLO OBB CUDA 测试推理失败: {test_e}")
-                    self.logger.warning("将回退到 CPU 模式")
-                    self.logger.warning("提示：可以设置环境变量 YOLO_OBB_FORCE_CPU=1 来直接使用 CPU 模式")
-                    # 清理失败的 session
-                    try:
-                        del self.session
-                    except:
-                        pass
-                    
+                self.logger.info("YOLO OBB: CUDA 模式加载成功")
             except Exception as cuda_e:
                 self.logger.warning(f"CUDA 模式加载失败: {cuda_e}")
                 self.logger.warning("将回退到 CPU 模式")
-                self.logger.warning("提示：可以设置环境变量 YOLO_OBB_FORCE_CPU=1 来直接使用 CPU 模式")
+                use_cuda = False
         
         # 如果 CUDA 失败或未启用，使用 CPU
-        if not session_loaded:
+        if not use_cuda:
             try:
                 self.session = ort.InferenceSession(
                     model_path, 
                     sess_options=sess_options, 
                     providers=['CPUExecutionProvider']
                 )
-                
-                # CPU 模式测试
-                test_input = np.random.rand(1, 3, 640, 640).astype(np.float32)
-                test_input = np.ascontiguousarray(test_input)
-                input_name = self.session.get_inputs()[0].name
-                output_names = [output.name for output in self.session.get_outputs()]
-                _ = self.session.run(output_names, {input_name: test_input})
-                session_loaded = True
-                
+                self.logger.info("YOLO OBB: CPU 模式加载成功")
             except Exception as cpu_e:
                 self.logger.error(f"CPU 模式加载也失败: {cpu_e}")
                 raise
-        
-        if not session_loaded:
-            raise Exception("无法加载 YOLO OBB 模型")
         
         self.device = device
         self.using_cuda = 'CUDAExecutionProvider' in self.session.get_providers()
@@ -193,6 +146,10 @@ class YOLOOBBDetector(OfflineDetector):
         
         # Resize图像
         if (new_unpad_w, new_unpad_h) != (shape[1], shape[0]):
+            # 再次验证图像有效性
+            if img is None or img.size == 0:
+                self.logger.error(f"YOLO OBB letterbox: resize前图像变为空")
+                raise ValueError("resize前图像变为空")
             img = cv2.resize(img, (new_unpad_w, new_unpad_h), interpolation=cv2.INTER_LINEAR)
         
         # 计算需要的总padding
@@ -567,6 +524,7 @@ class YOLOOBBDetector(OfflineDetector):
         # padding
         p_num = int(np.ceil(ph_num / pw_num))
         pad_num = p_num * pw_num - ph_num
+        valid_patch_count = ph_num  # 记录有效patch数量
         for ii in range(pad_num):
             patch_list.append(np.zeros_like(patch_list[0]))
         
@@ -586,6 +544,11 @@ class YOLOOBBDetector(OfflineDetector):
         
         # 对每个重排后的patch进行检测
         for ii, patch in enumerate(patch_array):
+            # 跳过padding的patch（全零patch）
+            if np.all(patch == 0):
+                self.logger.debug(f"YOLO OBB patch {ii}: 跳过padding patch")
+                continue
+            
             # 验证patch
             if patch.size == 0 or patch.shape[0] == 0 or patch.shape[1] == 0:
                 self.logger.warning(f"YOLO OBB patch {ii}: 跳过无效patch, shape={patch.shape}")
