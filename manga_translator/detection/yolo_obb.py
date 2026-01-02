@@ -40,25 +40,36 @@ class YOLOOBBDetector(OfflineDetector):
         """加载ONNX模型"""
         model_path = self._get_file_path('ysgyolo_1.2_OS1.0.onnx')
         
+        # 设置会话选项
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        # 设置日志级别为 ERROR，隐藏 Memcpy 警告（这些警告是正常的，不影响性能）
+        sess_options.log_severity_level = 3  # 0=Verbose, 1=Info, 2=Warning, 3=Error, 4=Fatal
+        
         # 配置ONNX Runtime providers
         providers = []
         use_cuda = False
         
         if device == 'cuda':
+            # 使用 onnxruntime.preload_dlls() 加载 PyTorch 的 CUDA 库
+            try:
+                ort.preload_dlls()
+            except AttributeError:
+                self.logger.warning("onnxruntime.preload_dlls() 不可用（需要 1.21+）")
+            except Exception as e:
+                self.logger.warning(f"preload_dlls() 失败: {e}")
+            
             # 检查 CUDA 是否真的可用
             try:
                 available_providers = ort.get_available_providers()
                 if 'CUDAExecutionProvider' in available_providers:
-                    # 添加 CUDA provider 配置，限制内存使用
+                    # 只设置 device_id，不设置其他选项以避免 Fallback
+                    # 测试发现：额外的 CUDA 选项（如 cudnn_conv_algo_search）会导致 Fallback 模式
                     cuda_options = {
                         'device_id': 0,
-                        'arena_extend_strategy': 'kSameAsRequested',
-                        'gpu_mem_limit': 2 * 1024 * 1024 * 1024,  # 2GB
-                        'cudnn_conv_algo_search': 'EXHAUSTIVE',
                     }
                     providers.append(('CUDAExecutionProvider', cuda_options))
                     use_cuda = True
-                    self.logger.info("CUDA 可用，将尝试使用 GPU")
                 else:
                     self.logger.warning(f"CUDA 不在可用 providers 中: {available_providers}")
             except Exception as e:
@@ -66,48 +77,75 @@ class YOLOOBBDetector(OfflineDetector):
         
         providers.append('CPUExecutionProvider')
         
-        try:
-            # 设置会话选项
-            sess_options = ort.SessionOptions()
-            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            
-            self.session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers)
-            actual_providers = self.session.get_providers()
-            self.logger.info(f"YOLO OBB模型加载成功: {model_path}")
-            self.logger.info(f"实际使用的 Providers: {actual_providers}")
-            
-            # 检查是否成功使用 CUDA
-            if use_cuda and 'CUDAExecutionProvider' not in actual_providers:
-                self.logger.warning("CUDA 初始化失败，已自动回退到 CPU")
-            
-            # 测试推理以确保模型真的可用
+        # 先尝试使用 CUDA，如果失败则回退到 CPU
+        session_loaded = False
+        
+        if use_cuda:
             try:
+                self.session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers)
+                
+                # 测试推理以确保 CUDA 真的可用（避免 Fallback 模式）
+                try:
+                    test_input = np.random.rand(1, 3, 640, 640).astype(np.float32)
+                    test_input = np.ascontiguousarray(test_input)
+                    input_name = self.session.get_inputs()[0].name
+                    output_names = [output.name for output in self.session.get_outputs()]
+                    
+                    import time
+                    start_time = time.time()
+                    _ = self.session.run(output_names, {input_name: test_input})
+                    elapsed_time = time.time() - start_time
+                    
+                    # 如果测试推理时间过长（>1秒），很可能是 Fallback mode
+                    if elapsed_time > 1.0:
+                        self.logger.warning(f"CUDA 测试推理耗时 {elapsed_time:.2f}秒，疑似 Fallback 模式，切换到 CPU")
+                        # 清理 CUDA session
+                        try:
+                            del self.session
+                        except:
+                            pass
+                        session_loaded = False
+                    else:
+                        session_loaded = True
+                        
+                except Exception as test_e:
+                    self.logger.warning(f"YOLO OBB CUDA 测试推理失败: {test_e}")
+                    self.logger.warning("将回退到 CPU 模式")
+                    self.logger.warning("提示：可以设置环境变量 YOLO_OBB_FORCE_CPU=1 来直接使用 CPU 模式")
+                    # 清理失败的 session
+                    try:
+                        del self.session
+                    except:
+                        pass
+                    
+            except Exception as cuda_e:
+                self.logger.warning(f"CUDA 模式加载失败: {cuda_e}")
+                self.logger.warning("将回退到 CPU 模式")
+                self.logger.warning("提示：可以设置环境变量 YOLO_OBB_FORCE_CPU=1 来直接使用 CPU 模式")
+        
+        # 如果 CUDA 失败或未启用，使用 CPU
+        if not session_loaded:
+            try:
+                self.session = ort.InferenceSession(
+                    model_path, 
+                    sess_options=sess_options, 
+                    providers=['CPUExecutionProvider']
+                )
+                
+                # CPU 模式测试
                 test_input = np.random.rand(1, 3, 640, 640).astype(np.float32)
                 test_input = np.ascontiguousarray(test_input)
                 input_name = self.session.get_inputs()[0].name
                 output_names = [output.name for output in self.session.get_outputs()]
                 _ = self.session.run(output_names, {input_name: test_input})
-                self.logger.info("YOLO OBB 模型测试推理成功")
-            except Exception as e:
-                self.logger.error(f"YOLO OBB 模型测试推理失败: {e}")
-                # 如果是 CUDA 错误，尝试只用 CPU 重新加载
-                if use_cuda and ('CUDA' in str(e) or 'access violation' in str(e).lower()):
-                    self.logger.warning("CUDA 测试失败，强制使用 CPU 模式重新加载")
-                    self.session = ort.InferenceSession(
-                        model_path, 
-                        sess_options=sess_options, 
-                        providers=['CPUExecutionProvider']
-                    )
-                    self.logger.info(f"已切换到 CPU 模式: {self.session.get_providers()}")
-                    # 再次测试
-                    _ = self.session.run(output_names, {input_name: test_input})
-                    self.logger.info("CPU 模式测试推理成功")
-                else:
-                    raise
-                    
-        except Exception as e:
-            self.logger.error(f"YOLO OBB模型加载失败: {e}")
-            raise
+                session_loaded = True
+                
+            except Exception as cpu_e:
+                self.logger.error(f"CPU 模式加载也失败: {cpu_e}")
+                raise
+        
+        if not session_loaded:
+            raise Exception("无法加载 YOLO OBB 模型")
         
         self.device = device
         self.using_cuda = 'CUDAExecutionProvider' in self.session.get_providers()
@@ -565,10 +603,25 @@ class YOLOOBBDetector(OfflineDetector):
             output_names = [output.name for output in self.session.get_outputs()]
             
             try:
+                # 确保输入是连续的内存布局
+                if not blob.flags['C_CONTIGUOUS']:
+                    blob = np.ascontiguousarray(blob)
+                
                 outputs = self.session.run(output_names, {input_name: blob})
             except Exception as e:
                 self.logger.error(f"YOLO OBB patch {ii} 推理失败: {e}")
                 self.logger.error(f"Patch shape: {patch.shape}, blob shape: {blob.shape}")
+                self.logger.error(f"Blob contiguous: {blob.flags['C_CONTIGUOUS']}, dtype: {blob.dtype}")
+                
+                # 如果是访问违例，尝试清理并跳过
+                if 'access violation' in str(e).lower() or 'cuda' in str(e).lower():
+                    self.logger.warning("检测到 CUDA 相关错误，跳过此 patch")
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except:
+                        pass
                 continue
             
             # 后处理
@@ -742,11 +795,23 @@ class YOLOOBBDetector(OfflineDetector):
             output_names = [output.name for output in self.session.get_outputs()]
             
             try:
+                # 确保输入是连续的内存布局
+                if not blob.flags['C_CONTIGUOUS']:
+                    blob = np.ascontiguousarray(blob)
+                
                 outputs = self.session.run(output_names, {input_name: blob})
             except Exception as e:
                 self.logger.error(f"YOLO OBB推理失败: {e}")
                 self.logger.error(f"输入 blob shape: {blob.shape}, dtype: {blob.dtype}, contiguous: {blob.flags['C_CONTIGUOUS']}")
                 self.logger.error(f"当前 providers: {self.session.get_providers()}")
+                
+                # 如果是访问违例或 CUDA 错误，提供更详细的错误信息
+                if 'access violation' in str(e).lower() or 'cuda' in str(e).lower():
+                    self.logger.error("检测到 CUDA 访问违例，可能的原因：")
+                    self.logger.error("1. ONNX Runtime 版本与 CUDA 版本不兼容")
+                    self.logger.error("2. GPU 内存不足")
+                    self.logger.error("3. CUDA 驱动问题")
+                    self.logger.error("建议：在配置中将检测器设置为使用 CPU 模式")
                 raise
             
             boxes_corners, scores, class_ids = self.postprocess(

@@ -3,6 +3,13 @@ import os
 import logging
 import warnings
 
+# 抑制第三方库的警告（必须在导入其他库之前设置）
+warnings.filterwarnings('ignore', message='.*Triton.*')
+warnings.filterwarnings('ignore', message='.*triton.*')
+warnings.filterwarnings('ignore', message='.*pkg_resources.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='ctranslate2')
+warnings.filterwarnings('ignore', module='xformers')
+
 # 在 PyTorch 初始化前设置显存优化，允许使用共享显存
 # expandable_segments 可以减少显存碎片，避免 OOM 错误
 os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
@@ -35,13 +42,6 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         onnx_capi_dir = os.path.join(sys._MEIPASS, 'onnxruntime', 'capi')
         if os.path.exists(onnx_capi_dir):
             os.add_dll_directory(onnx_capi_dir)
-
-# 抑制第三方库的警告
-warnings.filterwarnings('ignore', message='.*Triton.*')
-warnings.filterwarnings('ignore', message='.*triton.*')
-warnings.filterwarnings('ignore', message='.*pkg_resources.*')
-warnings.filterwarnings('ignore', category=DeprecationWarning, module='ctranslate2')
-warnings.filterwarnings('ignore', module='xformers')
 
 from PyQt6.QtWidgets import QApplication
 from main_window import MainWindow

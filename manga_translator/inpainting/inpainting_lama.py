@@ -48,6 +48,8 @@ class LamaInpainter(LamaMPEInpainter):
                 
                 # 🔧 内存优化配置
                 sess_options = ort.SessionOptions()
+                sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                sess_options.log_severity_level = 3  # 只显示 Error 级别
                 sess_options.enable_mem_pattern = False  # 禁用内存模式优化
                 sess_options.enable_cpu_mem_arena = False  # 禁用CPU内存池，按需分配
                 

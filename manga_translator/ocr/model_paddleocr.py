@@ -153,11 +153,17 @@ class ModelPaddleOCR(OfflineOCR):
             self.char_dict = ['<blank>'] + [line.strip() for line in f]
 
         # Create ONNX session
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_options.log_severity_level = 3  # 只显示 Error 级别，隐藏 Memcpy 警告
+        
         providers = ['CPUExecutionProvider']
         if device == 'cuda':
-            providers.insert(0, 'CUDAExecutionProvider')
+            # 只设置 device_id，避免 Fallback 模式
+            cuda_options = {'device_id': 0}
+            providers.insert(0, ('CUDAExecutionProvider', cuda_options))
 
-        self.session = ort.InferenceSession(model_path, providers=providers)
+        self.session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers)
 
         # 加载 48px 模型用于颜色预测
         try:
@@ -288,59 +294,68 @@ class ModelPaddleOCR(OfflineOCR):
                 self.logger.warning(f"Failed to extract region {i}: {e}")
                 continue
 
-        # Batch inference
+        # Batch inference with chunking (max 16 regions per batch)
         if regions:
+            max_chunk_size = 16  # 每批最多处理 16 个文本区域，与其他 OCR 保持一致
+            
             try:
-                preprocessed = [self._preprocess(r) for r in regions]
-                batch = np.concatenate(preprocessed, axis=0)
-
-                # Run inference
-                input_name = self.session.get_inputs()[0].name
-                outputs = self.session.run(None, {input_name: batch})
-                predictions = outputs[0]  # [batch, seq_len, num_classes]
-
-                # Batch color prediction if 48px model is available
-                color_results = None
-                if self.color_model is not None:
-                    color_results = self._estimate_colors_batch(regions)
-
-                # Decode predictions
-                for i, (idx, pred) in enumerate(zip(valid_indices, predictions)):
-                    text, confidence = self._decode_ctc(pred)
-
-                    textline = textlines[idx]
+                # 分批处理所有区域
+                for chunk_start in range(0, len(regions), max_chunk_size):
+                    chunk_end = min(chunk_start + max_chunk_size, len(regions))
+                    chunk_regions = regions[chunk_start:chunk_end]
+                    chunk_indices = valid_indices[chunk_start:chunk_end]
                     
-                    if confidence < threshold:
-                        self.logger.info(f"[FILTERED] prob: {confidence:.3f} < threshold: {threshold} - Text: \"{text}\"")
-                        # Keep the textline with empty text for hybrid OCR to retry
-                        textline.text = ''  # Empty text for hybrid OCR
+                    # Preprocess and batch
+                    preprocessed = [self._preprocess(r) for r in chunk_regions]
+                    batch = np.concatenate(preprocessed, axis=0)
+
+                    # Run inference
+                    input_name = self.session.get_inputs()[0].name
+                    outputs = self.session.run(None, {input_name: batch})
+                    predictions = outputs[0]  # [batch, seq_len, num_classes]
+
+                    # Batch color prediction if 48px model is available
+                    color_results = None
+                    if self.color_model is not None:
+                        color_results = self._estimate_colors_batch(chunk_regions)
+
+                    # Decode predictions for this chunk
+                    for i, (idx, pred) in enumerate(zip(chunk_indices, predictions)):
+                        text, confidence = self._decode_ctc(pred)
+
+                        textline = textlines[idx]
+                        
+                        if confidence < threshold:
+                            self.logger.info(f"[FILTERED] prob: {confidence:.3f} < threshold: {threshold} - Text: \"{text}\"")
+                            # Keep the textline with empty text for hybrid OCR to retry
+                            textline.text = ''  # Empty text for hybrid OCR
+                            textline.prob = confidence
+                            textline.fg_r = 0
+                            textline.fg_g = 0
+                            textline.fg_b = 0
+                            textline.bg_r = 255
+                            textline.bg_g = 255
+                            textline.bg_b = 255
+                            continue
+
+                        textline.text = text
                         textline.prob = confidence
-                        textline.fg_r = 0
-                        textline.fg_g = 0
-                        textline.fg_b = 0
-                        textline.bg_r = 255
-                        textline.bg_g = 255
-                        textline.bg_b = 255
-                        continue
 
-                    textline.text = text
-                    textline.prob = confidence
+                        # Apply batch color prediction results
+                        if color_results is not None and i < len(color_results):
+                            fr, fg, fb, br, bg, bb = color_results[i]
+                            textline.fg_r = fr
+                            textline.fg_g = fg
+                            textline.fg_b = fb
+                            textline.bg_r = br
+                            textline.bg_g = bg
+                            textline.bg_b = bb
+                        else:
+                            # Default colors if no color prediction
+                            textline.fg_r = textline.fg_g = textline.fg_b = 0
+                            textline.bg_r = textline.bg_g = textline.bg_b = 255
 
-                    # Apply batch color prediction results
-                    if color_results is not None and i < len(color_results):
-                        fr, fg, fb, br, bg, bb = color_results[i]
-                        textline.fg_r = fr
-                        textline.fg_g = fg
-                        textline.fg_b = fb
-                        textline.bg_r = br
-                        textline.bg_g = bg
-                        textline.bg_b = bb
-                    else:
-                        # Default colors if no color prediction
-                        textline.fg_r = textline.fg_g = textline.fg_b = 0
-                        textline.bg_r = textline.bg_g = textline.bg_b = 255
-
-                    self.logger.info(f'prob: {confidence:.3f} {text} fg: ({textline.fg_r}, {textline.fg_g}, {textline.fg_b}) bg: ({textline.bg_r}, {textline.bg_g}, {textline.bg_b})')
+                        self.logger.info(f'prob: {confidence:.3f} {text} fg: ({textline.fg_r}, {textline.fg_g}, {textline.fg_b}) bg: ({textline.bg_r}, {textline.bg_g}, {textline.bg_b})')
 
             except Exception as e:
                 self.logger.error(f"Inference failed: {e}")

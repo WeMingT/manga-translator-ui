@@ -537,6 +537,7 @@ class MainView(QWidget):
             elif full_key == "upscale.upscale_ratio":
                 widget = QComboBox()
                 widget.setObjectName("upscale_ratio_dynamic")
+                widget.setMinimumWidth(100)  # 设置最小宽度，让选项显示更完整
                 
                 # 获取当前的 upscaler 值来决定显示什么选项
                 config = self.config_service.get_config()
