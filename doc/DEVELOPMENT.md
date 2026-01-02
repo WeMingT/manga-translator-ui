@@ -4,6 +4,17 @@
 
 ---
 
+## ⚠️ 重要提示
+
+运行开发命令前，请先在项目目录激活虚拟环境：
+
+```bash
+# Windows / Linux / macOS
+conda activate manga-env
+```
+
+---
+
 ## 👨‍💻 项目结构
 
 ```
