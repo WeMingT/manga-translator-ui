@@ -165,7 +165,8 @@ class LamaMPEInpainter(OfflineInpainter):
                 
                 # 🔧 内存优化配置
                 sess_options = ort.SessionOptions()
-                # 启用内存模式优化
+                sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                sess_options.log_severity_level = 3  # 只显示 Error 级别
                 sess_options.enable_mem_pattern = False  # 禁用内存模式优化可以减少内存占用
                 sess_options.enable_cpu_mem_arena = False  # 禁用CPU内存池，按需分配
                 
@@ -521,13 +522,12 @@ class LamaLargeInpainter(LamaMPEInpainter):
                 
                 # 🔧 ONNX Runtime 配置
                 sess_options = ort.SessionOptions()
+                sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                sess_options.log_severity_level = 3  # 只显示 Error 级别
                 
                 # ✅ 限制线程数，减少并发内存压力
                 sess_options.intra_op_num_threads = 4  # 单个操作内的并行度
                 sess_options.inter_op_num_threads = 1  # 操作间的并行度
-                
-                # ✅ 图优化级别
-                sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
                 
                 self.session = ort.InferenceSession(
                     onnx_path,
