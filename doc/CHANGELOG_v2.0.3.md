@@ -6,5 +6,6 @@
 
 ### OCR 模块初始化修复
 - **修复 `use_gpu` 属性未初始化错误**：修复 `manga_translator/ocr/model_32px.py` 中的 `OCR` 神经网络类（`nn.Module`）在 `__init__` 方法中未初始化 `use_gpu` 属性，导致在 `infer_beam_batch` 方法中访问该属性时出现 `AttributeError: 'OCR' object has no attribute 'use_gpu'` 错误
-- 在 `OCR` 类的 `__init__` 方法中添加 `self.use_gpu = False` 初始化，确保属性在使用前已定义
+- 在 `OCR` 类的 `__init__` 方法中添加 `self.use_gpu = False` 初始化作为默认值
+- 在 `Model32pxOCR._load` 方法中添加 `self.model.use_gpu = self.use_gpu`，将 GPU 使用标志正确传递给 OCR 神经网络对象
 

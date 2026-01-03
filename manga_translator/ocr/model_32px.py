@@ -54,6 +54,9 @@ class Model32pxOCR(OfflineOCR):
             self.use_gpu = False
         if self.use_gpu:
             self.model = self.model.to(device)
+        
+        # 将 use_gpu 标志传递给 OCR 模型对象
+        self.model.use_gpu = self.use_gpu
 
     async def _unload(self):
         del self.model
