@@ -200,7 +200,7 @@ async def reset_quota(
                 logger.info(f"Admin {session.username} reset quota for all users ({users_count} users)")
                 return QuotaResetResponse(
                     success=True,
-                    message=f"成功重置所有用户的配额",
+                    message="成功重置所有用户的配额",
                     users_reset=users_count
                 )
             else:

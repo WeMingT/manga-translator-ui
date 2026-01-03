@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 import base64
-import json
+# import json
 import logging
 from io import BytesIO
 from typing import List, Dict, Any
@@ -584,10 +584,10 @@ This is an incorrect response because it includes extra text and explanations.
                 
                 if is_multimodal_unsupported:
                     self.logger.error(f"❌ 模型 {self.model} 不支持多模态输入（图片+文本）")
-                    self.logger.error(f"💡 解决方案：")
-                    self.logger.error(f"   1. 使用支持多模态的模型（如 gpt-4o, gpt-4-vision-preview）")
-                    self.logger.error(f"   2. 或者切换到普通翻译模式（不使用 _hq 高质量翻译器）")
-                    self.logger.error(f"   3. DeepSeek模型不支持多模态，请勿使用 openai_hq 翻译器")
+                    self.logger.error("💡 解决方案：")
+                    self.logger.error("   1. 使用支持多模态的模型（如 gpt-4o, gpt-4-vision-preview）")
+                    self.logger.error("   2. 或者切换到普通翻译模式（不使用 _hq 高质量翻译器）")
+                    self.logger.error("   3. DeepSeek模型不支持多模态，请勿使用 openai_hq 翻译器")
                     raise Exception(f"模型不支持多模态输入: {self.model}") from e
                 else:
                     # 其他400错误，正常重试

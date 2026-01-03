@@ -1,7 +1,7 @@
 import os
-import re
+# import re
 import asyncio
-import json
+# import json
 from typing import List, Dict, Any
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
@@ -184,7 +184,7 @@ class GeminiTranslator(CommonTranslator):
             else:
                 self.logger.info(f"Gemini客户端初始化完成。Base URL: {self.base_url or '默认'}")
             
-            self.logger.info(f"安全设置策略：默认发送 BLOCK_NONE，如遇错误自动回退")
+            self.logger.info("安全设置策略：默认发送 BLOCK_NONE，如遇错误自动回退")
 
             self.client = genai.GenerativeModel(**model_args)
     

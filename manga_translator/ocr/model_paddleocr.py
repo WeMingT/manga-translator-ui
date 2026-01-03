@@ -198,7 +198,7 @@ class ModelPaddleOCR(OfflineOCR):
                 else:
                     self.use_gpu = False
                 
-                self.logger.info(f"48px color prediction model loaded for PaddleOCR")
+                self.logger.info("48px color prediction model loaded for PaddleOCR")
             else:
                 self.logger.warning(f"48px model not found at {dict_48px_path} or {ckpt_48px_path}")
                 self.color_model = None

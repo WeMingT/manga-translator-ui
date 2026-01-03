@@ -239,7 +239,7 @@ class ConcurrentPipeline:
                             break
                         # 检查是否发生错误
                         if self.has_critical_error:
-                            logger.warning(f"[翻译] 检测到严重错误，停止等待")
+                            logger.warning("[翻译] 检测到严重错误，停止等待")
                             break
                         continue
                 
@@ -401,7 +401,7 @@ class ConcurrentPipeline:
                 except asyncio.TimeoutError:
                     # 检查是否发生错误
                     if self.has_critical_error:
-                        logger.warning(f"[修复] 检测到严重错误，停止等待")
+                        logger.warning("[修复] 检测到严重错误，停止等待")
                         break
                     continue
                 
@@ -496,7 +496,7 @@ class ConcurrentPipeline:
                         break
                     # 检查是否发生错误
                     if self.has_critical_error:
-                        logger.warning(f"[渲染] 检测到严重错误，停止等待")
+                        logger.warning("[渲染] 检测到严重错误，停止等待")
                         break
                     continue
                 
@@ -532,7 +532,7 @@ class ConcurrentPipeline:
                 if (self.translator.save_text or self.translator.text_output_file) and hasattr(ctx, 'img_inpainted') and ctx.img_inpainted is not None:
                     import numpy as np
                     img_inpainted_copy = np.copy(ctx.img_inpainted)
-                    logger.debug(f"[渲染] 已备份修复后图片用于保存")
+                    logger.debug("[渲染] 已备份修复后图片用于保存")
                 
                 if not ctx.text_regions:
                     # 无文本，直接使用upscaled

@@ -112,7 +112,7 @@ def load_json(file_path: str, default: Optional[Dict[str, Any]] = None) -> Dict[
                 try:
                     with open(backup_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                        logger.info(f"Successfully restored from backup")
+                        logger.info("Successfully restored from backup")
                         # 恢复主文件
                         atomic_write_json(str(file_path), data, create_backup=False)
                         return data

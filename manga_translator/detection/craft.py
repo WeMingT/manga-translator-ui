@@ -13,7 +13,7 @@ import shutil
 import numpy as np
 import torch
 import cv2
-import einops
+# import einops
 from typing import List, Tuple
 
 from .default_utils.DBNet_resnet34 import TextDetection as TextDetectionDefault

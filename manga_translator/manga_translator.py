@@ -96,7 +96,7 @@ def load_dictionary(file_path):
 
 def apply_dictionary(text, dictionary):
     for pattern, value, line_number in dictionary:
-        original_text = text  
+        _original_text = text  
         text = pattern.sub(value, text)
     return text
 
@@ -821,7 +821,7 @@ class MangaTranslator:
             await self._report_progress('colorizing')
             try:
                 ctx.img_colorized = await self._run_colorizer(config, ctx)
-            except Exception as e:  
+            except Exception as _e:  
                 logger.error(f"Error during colorizing:\n{traceback.format_exc()}")  
                 if not self.ignore_errors:  
                     raise  
@@ -837,7 +837,7 @@ class MangaTranslator:
             await self._report_progress('upscaling')
             try:
                 ctx.upscaled = await self._run_upscaling(config, ctx)
-            except Exception as e:  
+            except Exception as _e:  
                 logger.error(f"Error during upscaling:\n{traceback.format_exc()}")  
                 if not self.ignore_errors:  
                     raise  
@@ -849,7 +849,7 @@ class MangaTranslator:
         
         # 验证加载的图片
         if ctx.img_rgb is None or ctx.img_rgb.size == 0:
-            logger.error(f"加载图片失败: img_rgb为空或无效")
+            logger.error("加载图片失败: img_rgb为空或无效")
             if not self.ignore_errors:
                 raise Exception("加载图片失败: img_rgb为空或无效")
             # 尝试从原始输入重新加载
@@ -864,7 +864,7 @@ class MangaTranslator:
         await self._report_progress('detection')
         try:
             ctx.textlines, ctx.mask_raw, ctx.mask = await self._run_detection(config, ctx)
-        except Exception as e:  
+        except Exception as _e:  
             logger.error(f"Error during detection:\n{traceback.format_exc()}")  
             if not self.ignore_errors:  
                 raise 
@@ -940,7 +940,7 @@ class MangaTranslator:
         await self._report_progress('ocr')
         try:
             ctx.textlines = await self._run_ocr(config, ctx)
-        except Exception as e:  
+        except Exception as _e:  
             logger.error(f"Error during ocr:\n{traceback.format_exc()}")  
             if not self.ignore_errors:  
                 raise 
@@ -957,7 +957,7 @@ class MangaTranslator:
         await self._report_progress('textline_merge')
         try:
             ctx.text_regions = await self._run_textline_merge(config, ctx)
-        except Exception as e:  
+        except Exception as _e:  
             logger.error(f"Error during textline_merge:\n{traceback.format_exc()}")  
             if not self.ignore_errors:  
                 raise 
@@ -1058,7 +1058,7 @@ class MangaTranslator:
             await self._report_progress('translating')
             try:
                 ctx.text_regions = await self._run_text_translation(config, ctx)
-            except Exception as e:  
+            except Exception as _e:  
                 logger.error(f"Error during translating:\n{traceback.format_exc()}")  
                 if not self.ignore_errors:  
                     raise 
@@ -1085,7 +1085,7 @@ class MangaTranslator:
             await self._report_progress('mask-generation')
             try:
                 ctx.mask = await self._run_mask_refinement(config, ctx)
-            except Exception as e:  
+            except Exception as _e:  
                 logger.error(f"Error during mask-generation:\n{traceback.format_exc()}")  
                 if not self.ignore_errors:  
                     raise 
@@ -1102,7 +1102,7 @@ class MangaTranslator:
         try:
             ctx.img_inpainted = await self._run_inpainting(config, ctx)
 
-        except Exception as e:
+        except Exception as _e:
             logger.error(f"Error during inpainting:\n{traceback.format_exc()}")
             if not self.ignore_errors:
                 raise
@@ -1132,7 +1132,7 @@ class MangaTranslator:
 
         try:
             ctx.img_rendered = await self._run_text_rendering(config, ctx)
-        except Exception as e:
+        except Exception as _e:
             logger.error(f"Error during rendering:\n{traceback.format_exc()}")
             if not self.ignore_errors:
                 raise
@@ -1460,7 +1460,7 @@ class MangaTranslator:
             translated_contexts: List[(ctx, config)] - 翻译后的上下文
             keep_results: bool - 是否保留 ctx.result（用于返回结果）
         """
-        import gc
+#         import gc
         
         # 1. 清理原始图片
         if current_batch_images:
@@ -1614,7 +1614,7 @@ class MangaTranslator:
                     logger.info("Secondary OCR processing finished.")
                     
                     # ✅ 混合OCR完成后清理,防止两次OCR调用累积
-                    import gc
+#                     import gc
                     if 'secondary_results' in locals():
                         del secondary_results
                     if 'failed_textlines' in locals():
@@ -1685,7 +1685,7 @@ class MangaTranslator:
             h, w = img_h, img_w
             transpose = False
             if h < w:
-                transpose = True
+                _transpose = True
                 h, w = w, h
             
             asp_ratio = h / w
@@ -1696,12 +1696,12 @@ class MangaTranslator:
             # 如果需要切割，计算切割块的大小
             if require_rearrange:
                 pw_num = max(int(np.floor(2 * tgt_size / w)), 2)
-                patch_size = ph = pw_num * w
+                patch_size = _ph = pw_num * w
                 
                 # 限制切割后块的最大长宽比（不超过 3:1）
                 # 注意：ph = pw_num * w，所以 ph/w = pw_num
                 max_patch_aspect_ratio = 3.0
-                original_pw_num = pw_num
+                _original_pw_num = pw_num
                 if pw_num > max_patch_aspect_ratio:
                     # pw_num 太大，说明切割块太高，需要减小
                     # 但是不能直接减小 pw_num，因为这是检测器的逻辑
@@ -1762,7 +1762,7 @@ class MangaTranslator:
         for region in text_regions:
             # 跳过text为None的区域
             if region.text is None:
-                logger.warning(f'跳过text为None的区域')
+                logger.warning('跳过text为None的区域')
                 continue
                 
             # Remove leading spaces after pre-translation dictionary replacement                
@@ -1953,7 +1953,7 @@ class MangaTranslator:
                     lines.append(sent.strip())
 
         numbered = [f"<|{i+1}|>{s}" for i, s in enumerate(lines)]
-        return f"Here are the previous translation results for reference:\n" + "\n".join(numbered)
+        return "Here are the previous translation results for reference:\n" + "\n".join(numbered)
 
     async def _dispatch_with_context(self, config: Config, texts: list[str], ctx: Context):
         # Attach config to context for translators that need it
@@ -2025,7 +2025,7 @@ class MangaTranslator:
                     logger.info(f"Successfully loaded custom HQ prompt from: {prompt_path}")
                     # Log the parsed content for user verification
                     from .translators.gemini_hq import _flatten_prompt_data
-                    parsed_content = _flatten_prompt_data(ctx.custom_prompt_json)
+                    _parsed_content = _flatten_prompt_data(ctx.custom_prompt_json)
                     # logger.info(f"--- Parsed Custom Prompt Content ---\n{parsed_content}\n------------------------------------")
                 else:
                     logger.warning(f"Custom HQ prompt file not found at: {prompt_path}")
@@ -2919,7 +2919,7 @@ class MangaTranslator:
                             
                             # 验证加载的图片
                             if ctx.img_rgb is None or ctx.img_rgb.size == 0:
-                                logger.error(f"[批量] 加载图片失败: img_rgb为空或无效")
+                                logger.error("[批量] 加载图片失败: img_rgb为空或无效")
                                 continue
                             
                             if len(ctx.img_rgb.shape) < 2 or ctx.img_rgb.shape[0] == 0 or ctx.img_rgb.shape[1] == 0:
@@ -3303,7 +3303,7 @@ class MangaTranslator:
             await self._report_progress('colorizing')
             try:
                 ctx.img_colorized = await self._run_colorizer(config, ctx)
-            except Exception as e:  
+            except Exception as _e:  
                 logger.error(f"Error during colorizing:\n{traceback.format_exc()}")  
                 if not self.ignore_errors:  
                     raise  
@@ -3328,7 +3328,7 @@ class MangaTranslator:
             await self._report_progress('upscaling')
             try:
                 ctx.upscaled = await self._run_upscaling(config, ctx)
-            except Exception as e:  
+            except Exception as _e:  
                 logger.error(f"Error during upscaling:\n{traceback.format_exc()}")  
                 if not self.ignore_errors:  
                     raise  
@@ -3357,7 +3357,7 @@ class MangaTranslator:
             
             # 验证加载的图片
             if ctx.img_rgb is None or ctx.img_rgb.size == 0:
-                logger.error(f"[批量流程] 加载图片失败: img_rgb为空或无效")
+                logger.error("[批量流程] 加载图片失败: img_rgb为空或无效")
                 raise Exception("加载图片失败: img_rgb为空或无效")
             
             if len(ctx.img_rgb.shape) < 2 or ctx.img_rgb.shape[0] == 0 or ctx.img_rgb.shape[1] == 0:
@@ -3372,7 +3372,7 @@ class MangaTranslator:
                 logger.info(f"  - mask_raw: {ctx.mask_raw.shape if ctx.mask_raw is not None else 'None'}")
                 if ctx.mask_raw is not None:
                     logger.info(f"  - mask_raw non-zero pixels: {np.count_nonzero(ctx.mask_raw)}")
-            except Exception as e:
+            except Exception as _e:
                 logger.error(f"Error during detection:\n{traceback.format_exc()}")
                 if not self.ignore_errors:
                     raise
@@ -3407,7 +3407,7 @@ class MangaTranslator:
                     verbose=self.verbose
                 )
                 logger.info(f"✓ Step 3 - Textline Merge: Merged {len(ctx.textlines)} textlines into {len(ctx.text_regions)} text_regions")
-            except Exception as e:
+            except Exception as _e:
                 logger.error(f"Error during textline merge:\n{traceback.format_exc()}")
                 # 降级：为每个textline创建一个简单的TextBlock
                 logger.warning("Falling back to simple text_regions (1 textline = 1 region)")
@@ -3442,7 +3442,7 @@ class MangaTranslator:
                 ctx.mask = await self._run_mask_refinement(config, ctx)
                 mask_pixels = np.count_nonzero(ctx.mask) if ctx.mask is not None else 0
                 logger.info(f"✓ Step 4 - Mask Refinement: Generated mask with {mask_pixels} non-zero pixels")
-            except Exception as e:
+            except Exception as _e:
                 logger.error(f"Error during mask refinement:\n{traceback.format_exc()}")
                 # 降级到简单膨胀
                 logger.warning("Falling back to simple mask dilation")
@@ -3460,7 +3460,7 @@ class MangaTranslator:
                 try:
                     ctx.img_inpainted = await self._run_inpainting(config, ctx)
                     logger.info("✓ Step 5 - Inpainting: Completed successfully")
-                except Exception as e:
+                except Exception as _e:
                     logger.error(f"Error during inpainting:\n{traceback.format_exc()}")
                     if not self.ignore_errors:
                         raise
@@ -3490,7 +3490,7 @@ class MangaTranslator:
         
         # 验证加载的图片
         if ctx.img_rgb is None or ctx.img_rgb.size == 0:
-            logger.error(f"加载图片失败: img_rgb为空或无效")
+            logger.error("加载图片失败: img_rgb为空或无效")
             if not self.ignore_errors:
                 raise Exception("加载图片失败: img_rgb为空或无效")
             # 尝试从原始输入重新加载
@@ -3505,7 +3505,7 @@ class MangaTranslator:
         await self._report_progress('detection')
         try:
             ctx.textlines, ctx.mask_raw, ctx.mask = await self._run_detection(config, ctx)
-        except Exception as e:  
+        except Exception as _e:  
             logger.error(f"Error during detection:\n{traceback.format_exc()}")  
             if not self.ignore_errors:  
                 raise 
@@ -3536,7 +3536,7 @@ class MangaTranslator:
         await self._report_progress('ocr')
         try:
             ctx.textlines = await self._run_ocr(config, ctx)
-        except Exception as e:  
+        except Exception as _e:  
             logger.error(f"Error during ocr:\n{traceback.format_exc()}")  
             if not self.ignore_errors:  
                 raise 
@@ -3552,7 +3552,7 @@ class MangaTranslator:
         await self._report_progress('textline_merge')
         try:
             ctx.text_regions = await self._run_textline_merge(config, ctx)
-        except Exception as e:  
+        except Exception as _e:  
             logger.error(f"Error during textline_merge:\n{traceback.format_exc()}")  
             if not self.ignore_errors:  
                 raise 
@@ -4430,7 +4430,7 @@ class MangaTranslator:
             await self._report_progress('mask-generation')
             try:
                 ctx.mask = await self._run_mask_refinement(config, ctx)
-            except Exception as e:  
+            except Exception as _e:  
                 logger.error(f"Error during mask-generation:\n{traceback.format_exc()}")  
                 if not self.ignore_errors:  
                     raise 
@@ -4460,7 +4460,7 @@ class MangaTranslator:
             # ✅ Inpainting完成后强制GC和GPU清理
             self._cleanup_gpu_memory()
 
-        except Exception as e:
+        except Exception as _e:
             logger.error(f"Error during inpainting:\n{traceback.format_exc()}")
             if not self.ignore_errors:
                 raise
@@ -4491,7 +4491,7 @@ class MangaTranslator:
 
         try:
             ctx.img_rendered = await self._run_text_rendering(config, ctx)
-        except Exception as e:
+        except Exception as _e:
             logger.error(f"Error during rendering:\n{traceback.format_exc()}")
             if not self.ignore_errors:
                 raise
@@ -4609,7 +4609,7 @@ class MangaTranslator:
         except Exception as e:
             logger.debug(f'py3langid failed for merged text: {e}')
             detected_language = 'UNKNOWN'
-            confidence = -9999
+            _confidence = -9999
         
         # 检查检测出的语言是否为目标语言
         is_target_lang = (detected_language == target_lang.upper())
@@ -5062,7 +5062,7 @@ class MangaTranslator:
                     raise RuntimeError(f"Rendering failed for {os.path.basename(ctx.image_name) if hasattr(ctx, 'image_name') else 'Unknown'}: {e}") from e
             
             # ✅ 批次完成后立即清理内存（但保留翻译历史供下一批次使用）
-            import gc
+#             import gc
             # 1. 清理batch_data中的图像引用
             for data in batch_data:
                 if 'image' in data:

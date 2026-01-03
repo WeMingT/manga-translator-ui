@@ -323,7 +323,7 @@ def get_global_translator(params: dict = None):
         # 检查是否需要重建翻译器
         if _global_translator is None or _translator_params_hash != params_hash:
             if _global_translator is not None:
-                logger.info(f"翻译器参数变化，重建实例...")
+                logger.info("翻译器参数变化，重建实例...")
             else:
                 logger.info(f"创建全局翻译器实例 (GPU={params.get('use_gpu')}, models_ttl={params.get('models_ttl')}s)...")
             

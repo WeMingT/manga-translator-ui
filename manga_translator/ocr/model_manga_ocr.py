@@ -1,5 +1,5 @@
 import itertools
-import math
+# import math
 import re
 from typing import Callable, List, Set, Optional, Tuple, Union
 from collections import defaultdict, Counter
@@ -20,7 +20,7 @@ os.environ.setdefault('HF_HUB_ENDPOINT', 'https://hf-mirror.com')
 
 # 禁用 SSL 验证（解决 hf-mirror.com 证书问题）
 import ssl
-import urllib.request
+# import urllib.request
 ssl._create_default_https_context = ssl._create_unverified_context
 os.environ['CURL_CA_BUNDLE'] = ''
 os.environ['REQUESTS_CA_BUNDLE'] = ''

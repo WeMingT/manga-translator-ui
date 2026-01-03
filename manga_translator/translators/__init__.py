@@ -48,7 +48,7 @@ async def dispatch(chain: TranslatorChain, queries: List[str], config: Config, u
         return queries
 
     if chain.target_lang is not None:
-        text_lang = ISO_639_1_TO_VALID_LANGUAGES.get(langid.classify('\n'.join(queries))[0])
+        _text_lang = ISO_639_1_TO_VALID_LANGUAGES.get(langid.classify('\n'.join(queries))[0])
         translator = None
         flag=0
         for key, lang in chain.chain:           

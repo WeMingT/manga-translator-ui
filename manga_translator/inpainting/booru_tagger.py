@@ -1,5 +1,5 @@
 import os
-import gc
+# import gc
 import pandas as pd
 import numpy as np
 from onnxruntime import InferenceSession
@@ -69,7 +69,7 @@ class Tagger :
         tags['confidents'] = confidents[0]
 
         # first 4 items are for rating (general, sensitive, questionable, explicit)
-        ratings = dict(tags[:4].values)
+        _ratings = dict(tags[:4].values)
 
         # rest are regular tags
         tags = dict(tags[4:].values)
@@ -93,7 +93,7 @@ class Tagger :
         tags['confidents'] = confidents[0]
 
         # first 4 items are for rating (general, sensitive, questionable, explicit)
-        ratings = dict(tags[:4].values)
+        _ratings = dict(tags[:4].values)
 
         # rest are regular tags
         tags = dict(tags[4:].values)

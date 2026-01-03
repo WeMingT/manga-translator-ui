@@ -8,7 +8,7 @@ import tempfile
 import subprocess
 import platform
 import logging
-import math
+# import math
 from typing import Optional
 from . import Context
 from .generic import imwrite_unicode
@@ -646,7 +646,7 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = None, i
         font_basename = os.path.splitext(os.path.basename(default_font))[0]
         logger.warning(f"检测到 default_font 是文件路径: {default_font}")
         logger.warning(f"已提取字体名称: {font_basename}")
-        logger.warning(f"提示: 请在配置中使用 'psd_font' 参数指定字体名称，而不是文件路径")
+        logger.warning("提示: 请在配置中使用 'psd_font' 参数指定字体名称，而不是文件路径")
         default_font = font_basename
     
     # 创建临时文件（只用于修复图和遮罩）
@@ -706,7 +706,7 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = None, i
         if default_font:
             logger.info(f"PSD导出使用字体: {default_font}")
         else:
-            logger.info(f"PSD导出使用 Photoshop 默认字体")
+            logger.info("PSD导出使用 Photoshop 默认字体")
         text_layers_code = ""
         if hasattr(ctx, 'text_regions') and ctx.text_regions:
             filtered_regions = [r for r in ctx.text_regions if r.translation]
@@ -760,7 +760,7 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = None, i
         
         # 如果只生成脚本，直接返回
         if script_only:
-            logger.info(f"✅ 仅生成脚本模式：JSX脚本已保存，跳过Photoshop执行")
+            logger.info("✅ 仅生成脚本模式：JSX脚本已保存，跳过Photoshop执行")
             if saved_script_path:
                 logger.info(f"   脚本路径: {saved_script_path}")
             return

@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as M
-import math
+# import torchvision.models as M
+# import math
 from torch import Tensor
 from torch.nn import Parameter
 
@@ -39,9 +39,9 @@ class SpectralNorm(nn.Module):
 
     def _made_params(self):
         try:
-            u = getattr(self.module, self.name + "_u")
-            v = getattr(self.module, self.name + "_v")
-            w = getattr(self.module, self.name + "_bar")
+            _u = getattr(self.module, self.name + "_u")
+            _v = getattr(self.module, self.name + "_v")
+            _w = getattr(self.module, self.name + "_bar")
             return True
         except AttributeError:
             return False

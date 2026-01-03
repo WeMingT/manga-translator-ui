@@ -308,9 +308,9 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
             config_dict['render']['font_path'] = font_full_path
     
     # 创建翻译器
-    print(f"🔧 初始化翻译器...")
+    print("🔧 初始化翻译器...")
     translator = MangaTranslator(params=translator_params)
-    print(f"✅ 翻译器初始化完成")
+    print("✅ 翻译器初始化完成")
     
     # 创建 Config 对象
     explicit_keys = {'render', 'upscale', 'translator', 'detector', 'colorizer', 'inpainter', 'ocr'}
@@ -338,7 +338,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         if os.path.isdir(input_path):
             input_folders.add(os.path.normpath(os.path.abspath(input_path)))
     
-    print(f"\n📁 准备图片列表...")
+    print("\n📁 准备图片列表...")
     # ✅ 只保存文件路径，不加载图片数据
     file_paths_with_configs = []
     for file_path in all_files:
@@ -375,7 +375,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     # 过滤掉已存在的文件（如果 overwrite=False）
     skipped_count = 0
     if not overwrite:
-        print(f"\n🔍 检查已存在的文件（覆盖检测已禁用）...")
+        print("\n🔍 检查已存在的文件（覆盖检测已禁用）...")
         filtered_file_paths = []
         for file_path, config in file_paths_with_configs:
             try:
@@ -418,7 +418,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         
         if skipped_count > 0:
             print(f"⏭️  已跳过 {skipped_count} 个已存在的文件（覆盖检测已禁用）")
-            print(f"ℹ️  提示：如需重新翻译这些文件，请使用 --overwrite 参数")
+            print("ℹ️  提示：如需重新翻译这些文件，请使用 --overwrite 参数")
             file_paths_with_configs = filtered_file_paths
         else:
             print("✅ 未发现已存在的文件，将处理所有文件")
@@ -427,7 +427,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         print("✅ 所有文件都已跳过，无需处理")
         print(f"\n{'='*60}")
         print(f"✅ 成功（跳过）: {skipped_count}")
-        print(f"❌ 失败: 0")
+        print("❌ 失败: 0")
         print(f"📊 总计: {len(all_files)}")
         print(f"{'='*60}")
         return
@@ -437,14 +437,14 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     total_batches = (total_images + batch_size - 1) // batch_size if batch_size > 0 else 1
     
     print(f"\n📊 批量处理模式：共 {total_images} 张图片，分 {total_batches} 个批次处理")
-    print(f"📋 保存配置:")
+    print("📋 保存配置:")
     print(f"   输出目录: {final_output_dir}")
     print(f"   输出格式: {output_format or '保持原格式'}")
     print(f"   覆盖模式: {overwrite}")
     print(f"   保存质量: {cli_config.get('save_quality', 95)}")
     print(f"   批量大小: {batch_size} 张/批")
     if verbose and input_folders:
-        print(f"   输入文件夹:")
+        print("   输入文件夹:")
         for folder in input_folders:
             print(f"      - {folder}")
     print()
@@ -453,8 +453,8 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     use_concurrent = cli_config.get('batch_concurrent', False)
     
     try:
-        print(f"🚀 开始翻译...")
-        print(f"📋 传递给翻译器的 save_info:")
+        print("🚀 开始翻译...")
+        print("📋 传递给翻译器的 save_info:")
         print(f"   output_folder: {save_info['output_folder']}")
         print(f"   format: {save_info['format']}")
         print(f"   overwrite: {save_info['overwrite']}")
@@ -512,7 +512,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                 gc.collect()
         else:
             # ✅ 非并发模式：按批次加载和处理图片，避免一次性加载所有图片到内存
-            print(f"⏳ 开始批量翻译（按批次加载图片以节省内存）...")
+            print("⏳ 开始批量翻译（按批次加载图片以节省内存）...")
             logger.info(f"开始批量翻译，save_info={save_info}")
             
             # 前端分批加载的批次大小（用于内存管理）
@@ -575,7 +575,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         success_count = 0
         failed_count = 0
         
-        print(f"\n📊 翻译完成，检查结果...\n")
+        print("\n📊 翻译完成，检查结果...\n")
         logger.info(f"收到 {len(contexts)} 个翻译结果")
         
         for i, ctx in enumerate(contexts, 1):
@@ -605,7 +605,7 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                     print(f"❌ 翻译失败: {os.path.basename(ctx.image_name)} - 翻译结果为空")
             else:
                 failed_count += 1
-                print(f"❌ 翻译失败: 未知图片")
+                print("❌ 翻译失败: 未知图片")
         
         if failed_count > 0:
             print(f"\n⚠️ 批量翻译完成：成功 {success_count}/{total_images} 张，失败 {failed_count}/{total_images} 张")
@@ -755,7 +755,7 @@ async def run_local_mode(args):
                 
                 if skipped_count > 0:
                     print(f"⏭️  已跳过 {skipped_count} 个已存在的文件（覆盖检测已禁用）")
-                    print(f"ℹ️  提示：如需重新翻译这些文件，请使用 --overwrite 参数")
+                    print("ℹ️  提示：如需重新翻译这些文件，请使用 --overwrite 参数")
                     all_files = filtered_files
                 else:
                     print("✅ 未发现已存在的文件，将处理所有文件")
@@ -766,7 +766,7 @@ async def run_local_mode(args):
             print("✅ 所有文件都已跳过，无需处理")
             print(f"\n{'='*60}")
             print(f"✅ 成功（跳过）: {skipped_count}")
-            print(f"❌ 失败: 0")
+            print("❌ 失败: 0")
             print(f"📊 总计: {skipped_count}")
             print(f"{'='*60}")
             sys.exit(0)

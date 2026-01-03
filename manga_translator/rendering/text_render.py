@@ -626,7 +626,7 @@ def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_
         return font_size
 
     pen = pen_l.copy()
-    is_pun = is_punctuation(cdpt)
+    _is_pun = is_punctuation(cdpt)
 
     # 如果 force_rotate_90=True，强制旋转90度（用于英文数字）
     if force_rotate_90:
@@ -659,7 +659,7 @@ def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_
     bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((char_bitmap_rows, char_bitmap_width))
 
     # 保存原始尺寸用于位置补偿计算
-    original_bitmap_rows = char_bitmap_rows
+    _original_bitmap_rows = char_bitmap_rows
     original_bitmap_width = char_bitmap_width
     
     # 如果需要旋转90度
@@ -743,7 +743,7 @@ def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_
                         canvas_border[paste_border_y_start:paste_border_y_end,
                                       paste_border_x_start:paste_border_x_end] = cv2.add(target_slice, bitmap_border_slice)
                     else:
-                        logger.warning(f"Shape mismatch: target={{target_slice.shape}}, source={{bitmap_border_slice.shape}}")
+                        logger.warning("Shape mismatch: target={{target_slice.shape}}, source={{bitmap_border_slice.shape}}")
     return char_offset_y  
 
 def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tuple[int, int, int], bg: Optional[Tuple[int, int, int]], line_spacing: int, config=None, region_count: int = 1, stroke_width: float = None):
@@ -998,10 +998,10 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
                     canvas_h, canvas_w = canvas_text.shape
                     adjusted = False
                     if paste_y + rh > canvas_h or paste_x + rw > canvas_w or paste_x < 0 or paste_y < 0:
-                        adjusted = True
+                        _adjusted = True
                         # 向中心调整位置
-                        center_x = canvas_w // 2
-                        center_y = canvas_h // 2
+                        _center_x = canvas_w // 2
+                        _center_y = canvas_h // 2
 
                         # X 方向调整
                         if paste_x < 0:
@@ -1201,7 +1201,7 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
         if hyphenator and len(word) <= 100:
             try:
                 new_syls = hyphenator.syllables(word)
-            except Exception as e:
+            except Exception as _e:
                 new_syls = []
 
         if len(new_syls) == 0:
@@ -1516,7 +1516,7 @@ def put_char_horizontal(font_size: int, cdpt: str, pen_l: Tuple[int, int], canva
                                 paste_border_x_start:paste_border_x_end] = cv2.add(
                         target_slice, bitmap_border_slice)
                 else:
-                    print(f"[Error] Shape mismatch during border paste: "
+                    print("[Error] Shape mismatch during border paste: "
                          f"target={{target_slice.shape}}, source={{bitmap_border_slice.shape}}")
     return char_offset_x
 
@@ -1535,7 +1535,7 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
 
     text = compact_special_symbols(text)
     if not text :
-        logger.warning(f"[RENDER SKIPPED] Horizontal text is empty after processing")
+        logger.warning("[RENDER SKIPPED] Horizontal text is empty after processing")
         return
 
     layout_mode = 'default'

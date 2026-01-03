@@ -1,10 +1,10 @@
 import os
 import re
 import asyncio
-import json
+# import json
 from typing import List, Dict, Any
 import httpx
-import openai
+# import openai
 from openai import AsyncOpenAI
 
 from .common import CommonTranslator, VALID_LANGUAGES, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_openai_response
