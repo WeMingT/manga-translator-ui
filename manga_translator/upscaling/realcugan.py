@@ -336,6 +336,12 @@ class RealCUGANUpscaler(OfflineUpscaler):
             output_np = output.squeeze(0).permute(1, 2, 0).cpu().numpy()
             output_np = np.clip(output_np, 0, 255).astype(np.uint8)
         
+        # ✅ 清理中间张量以释放显存
+        del tensor
+        del output
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         result_img = Image.fromarray(output_np, mode='RGB')
         
         # If image was padded, crop back to original scaled size

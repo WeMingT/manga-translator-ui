@@ -2,6 +2,25 @@
 
 发布日期：2026-01-03
 
+## ⚡ 性能优化
+
+### 特殊模式内存和显存管理优化
+- **新增统一清理方法**：添加 `_cleanup_context_memory()` 方法，用于清理单个上下文的所有中间数据
+- **所有特殊模式内存清理**：为 9 个特殊模式添加完整的内存和显存清理
+  - 仅上色模式（colorize_only）
+  - 仅超分模式（upscale_only）
+  - 仅修复模式（inpaint_only）
+  - 导入翻译并渲染（load_text）
+  - 导出原文（template + save_text）
+  - 导出翻译（generate_and_export）
+  - 替换翻译（replace_translation）
+- **循环内清理优化**：循环处理模式（load_text、导出原文、导出翻译、替换翻译）在每张图片处理完后立即清理，避免内存累积
+- **超分推理显存优化**：
+  - RealCUGAN 推理后立即删除中间张量并清理显存
+  - MangaJaNai 推理后立即删除中间张量并清理显存
+- **清理内容**：自动清理 input、img_rgb、img_colorized、upscaled、img_inpainted、img_rendered、img_alpha、mask、mask_raw 等中间数据
+- **效果**：修复内存泄漏，批量处理时内存占用更稳定，显存释放更及时
+
 ## 🐛 修复
 
 ### OCR 模块 GPU 清理重构

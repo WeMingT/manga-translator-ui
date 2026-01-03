@@ -450,6 +450,13 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             
             results.append(raw_ctx)
             
+            # ✅ 每处理完一张图片后立即清理内存
+            translator._cleanup_context_memory(raw_ctx, keep_result=True)
+            
+            # 如果有翻译图的上下文，也清理
+            if 'translated_ctx' in locals() and translated_ctx:
+                translator._cleanup_context_memory(translated_ctx, keep_result=False)
+            
         except Exception as e:
             logger.error(f"  处理失败: {e}")
             traceback.print_exc()
