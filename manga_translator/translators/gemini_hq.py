@@ -1,7 +1,7 @@
 import os
-import re
+# import re
 import asyncio
-import base64
+# import base64
 import json
 from io import BytesIO
 from typing import List, Dict, Any
@@ -224,7 +224,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
             else:
                 self.logger.info(f"Gemini HQ客户端初始化完成。Base URL: {self.base_url or '默认'}")
             
-            self.logger.info(f"安全设置策略：默认发送 BLOCK_NONE，如遇错误自动回退")
+            self.logger.info("安全设置策略：默认发送 BLOCK_NONE，如遇错误自动回退")
 
             self.client = genai.GenerativeModel(**model_args)
     
@@ -637,10 +637,10 @@ class GeminiHighQualityTranslator(CommonTranslator):
 
                 if is_bad_request and is_multimodal_unsupported:
                     self.logger.error(f"❌ 模型 {self.model_name} 不支持多模态输入（图片+文本）")
-                    self.logger.error(f"💡 解决方案：")
-                    self.logger.error(f"   1. 使用支持多模态的Gemini模型（如 gemini-1.5-flash, gemini-1.5-pro）")
-                    self.logger.error(f"   2. 或者切换到普通翻译模式（不使用 _hq 高质量翻译器）")
-                    self.logger.error(f"   3. 检查第三方API是否支持图片输入")
+                    self.logger.error("💡 解决方案：")
+                    self.logger.error("   1. 使用支持多模态的Gemini模型（如 gemini-1.5-flash, gemini-1.5-pro）")
+                    self.logger.error("   2. 或者切换到普通翻译模式（不使用 _hq 高质量翻译器）")
+                    self.logger.error("   3. 检查第三方API是否支持图片输入")
                     raise Exception(f"模型不支持多模态输入: {self.model_name}") from e
                 
                 # 检查是否是安全设置相关的错误

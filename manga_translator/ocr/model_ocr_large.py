@@ -528,12 +528,12 @@ class OCR(nn.Module):
 
 def test():
     with open('../SynthText/alphabet-all-v2.txt', 'r') as fp:
-        dictionary = [s[:-1] for s in fp.readlines()]
+        _dictionary = [s[:-1] for s in fp.readlines()]
     img = torch.randn(4, 3, 32, 1224)
-    idx = torch.zeros(4, 32).long()
-    mask = torch.zeros(4, 32).bool()
+    _idx = torch.zeros(4, 32).long()
+    _mask = torch.zeros(4, 32).bool()
     model = ResNet_FeatureExtractor(3, 256)
-    out = model(img)
+    _out = model(img)
 
 def test_inference():
     with torch.no_grad():

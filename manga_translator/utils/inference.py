@@ -162,7 +162,7 @@ class ModelWrapper(ABC):
             except Exception as e:
                 if i < len(urls) - 1:
                     print(f' -- Download failed: {e}')
-                    print(f' -- Switching to fallback URL...')
+                    print(' -- Switching to fallback URL...')
                 else:
                     # Last URL failed, re-raise exception
                     raise
@@ -249,7 +249,7 @@ class ModelWrapper(ABC):
 
             if is_archive:
                 extracted_path = os.path.join(os.path.dirname(download_path), 'extracted')
-                print(f' -- Extracting files')
+                print(' -- Extracting files')
                 
                 try:
                     # 处理 .7z 格式
@@ -266,7 +266,7 @@ class ModelWrapper(ABC):
                         shutil.unpack_archive(download_path, extracted_path)
                 except Exception as e:
                     print(f' -- 无法解压文件 "{download_path}": {e}')
-                    print(f' -- 跳过此文件并继续')
+                    print(' -- 跳过此文件并继续')
                     # 清理临时文件
                     try:
                         if os.path.exists(download_path):

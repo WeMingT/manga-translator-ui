@@ -412,12 +412,12 @@ async def translate_batch_json(req: Request, data: BatchTranslateRequest):
         
         return [to_translation(ctx) for ctx in results]
     except asyncio.CancelledError:
-        add_log(f"批量翻译(JSON)被强制取消", "WARNING")
+        add_log("批量翻译(JSON)被强制取消", "WARNING")
         raise HTTPException(499, detail="任务已被强制取消")
     except Exception as e:
         error_msg = str(e)
         if "已被取消" in error_msg or "cancelled" in error_msg.lower():
-            add_log(f"批量翻译(JSON)已取消", "WARNING")
+            add_log("批量翻译(JSON)已取消", "WARNING")
             raise HTTPException(499, detail="任务已被取消")
         raise
     finally:
@@ -504,12 +504,12 @@ async def batch_images(req: Request, data: BatchTranslateRequest):
             unregister_active_task(task_id)
             
     except asyncio.CancelledError:
-        add_log(f"批量翻译被强制取消", "WARNING")
+        add_log("批量翻译被强制取消", "WARNING")
         raise HTTPException(499, detail="任务已被强制取消")
     except Exception as e:
         error_msg = str(e)
         if "已被取消" in error_msg or "cancelled" in error_msg.lower():
-            add_log(f"批量翻译已取消", "WARNING")
+            add_log("批量翻译已取消", "WARNING")
             raise HTTPException(499, detail="任务已被取消")
         add_log(f"批量翻译失败: {e}", "ERROR")
         import traceback
@@ -1010,7 +1010,7 @@ async def inpaint_only_stream(req: Request, image: UploadFile = File(...), confi
 async def import_json_and_render(req: Request, image: UploadFile = File(...), json_file: UploadFile = File(...), 
                                 config: str = Form("{}"), user_env_vars: str = Form("{}")):
     """Import JSON + image, return rendered image (load_text workflow)"""
-    import json
+#     import json
     from manga_translator.utils.path_manager import get_work_dir
     from PIL import Image as PILImage
     
@@ -1199,7 +1199,7 @@ async def import_txt_and_render(req: Request, image: UploadFile = File(...), txt
 async def import_json_and_render_stream(req: Request, image: UploadFile = File(...), json_file: UploadFile = File(...), 
                                        config: str = Form("{}"), user_env_vars: str = Form("{}")):
     """Import JSON + image, return rendered image (streaming, with progress)"""
-    import json
+#     import json
     from manga_translator.utils.path_manager import get_work_dir
     from PIL import Image
     
@@ -1245,7 +1245,7 @@ async def import_json_and_render_stream(req: Request, image: UploadFile = File(.
         # 并发控制在 while_streaming 内部处理
         return await while_streaming(req, transform_to_image, conf, temp_image, "load_text", image.filename)
     
-    except Exception as e:
+    except Exception as _e:
         # Only clean up temporary files on error
         try:
             if os.path.exists(json_path):
@@ -1344,7 +1344,7 @@ async def import_txt_and_render_stream(req: Request, image: UploadFile = File(..
         # Temporary files will accumulate in result directory, need periodic cleanup
         return await while_streaming(req, transform_to_image, conf, temp_image, "load_text", image.filename)
     
-    except Exception as e:
+    except Exception as _e:
         # Only clean up temporary files on error
         try:
             if os.path.exists(json_path):
@@ -1364,7 +1364,7 @@ async def import_txt_and_render_stream(req: Request, image: UploadFile = File(..
 async def translate_complete(req: Request, image: UploadFile = File(...), config: str = Form("{}"),
                              user_env_vars: str = Form("{}")):
     """Translate image, return complete result (JSON + image + TXT) in multipart form"""
-    import json
+#     import json
     from fastapi.responses import Response
     
     img = await image.read()

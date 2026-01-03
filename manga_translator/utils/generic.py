@@ -214,7 +214,7 @@ def get_image_md5(image) -> str:
         h = hashlib.md5()
         h.update(img_bytes)
         return h.hexdigest()[:8]  # 只取前8位，避免文件夹名过长
-    except Exception as e:
+    except Exception as _e:
         # 如果计算失败，返回基于时间戳的fallback值
         import time
         return f"fallback_{int(time.time() * 1000)}"
@@ -646,7 +646,7 @@ class Quadrilateral(object):
         e1 = np.array([0, 1])
         e2 = np.array([1, 0])
         unit_vector_1 = v1 / np.linalg.norm(v1)
-        unit_vector_2 = v2 / np.linalg.norm(v2)
+        _unit_vector_2 = v2 / np.linalg.norm(v2)
         if abs(np.dot(unit_vector_1, e1)) < 1e-2 or abs(np.dot(unit_vector_1, e2)) < 1e-2:
             return True
         return False
@@ -899,8 +899,8 @@ def quadrilateral_can_merge_region(a: Quadrilateral, b: Quadrilateral, ratio = 1
         direction = a.assigned_direction or a.direction
         
         # 计算中心点距离
-        cx1, cy1 = x1 + w1/2, y1 + h1/2
-        cx2, cy2 = x2 + w2/2, y2 + h2/2
+        cx1, _cy1 = x1 + w1/2, y1 + h1/2
+        cx2, _cy2 = x2 + w2/2, y2 + h2/2
         
         if direction == 'v': # 竖排文本，检查垂直重叠（Y轴）和水平距离（X轴）
             # 垂直投影重叠率
@@ -1242,7 +1242,7 @@ def det_rearrange_forward(
         if result_path_fn:
             print(f'Input image will be rearranged to square batches before fed into network.\n Rearranged batches will be saved to result/{result_path_fn("rearrange_*.png")}')
         else:
-            print(f'Input image will be rearranged to square batches before fed into network.\n Rearranged batches will be saved to result/rearrange_%d.png')
+            print('Input image will be rearranged to square batches before fed into network.\n Rearranged batches will be saved to result/rearrange_%d.png')
 
     if transpose:
         img = einops.rearrange(img, 'h w c -> w h c')

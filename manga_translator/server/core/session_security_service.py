@@ -159,7 +159,7 @@ class SessionSecurityService:
         # Check if user has exceeded limit
         failed_count = len(self._failed_attempts.get(user_id, []))
         if failed_count >= self.MAX_FAILED_ATTEMPTS:
-            return False, f"Rate limit exceeded. Too many failed attempts. Try again later."
+            return False, "Rate limit exceeded. Too many failed attempts. Try again later."
         
         return True, None
     

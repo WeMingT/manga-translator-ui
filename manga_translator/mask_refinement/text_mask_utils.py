@@ -204,7 +204,7 @@ def _complete_mask_core(img: np.ndarray, mask: np.ndarray, textlines: List[Quadr
     
     import logging
     logger = logging.getLogger(__name__)
-    logger.debug(f"--- MASK_REFINEMENT_DEBUG: Entering _complete_mask_core ---")
+    logger.debug("--- MASK_REFINEMENT_DEBUG: Entering _complete_mask_core ---")
     logger.debug(f"--- MASK_REFINEMENT_DEBUG: Number of textlines (M) = {M} ---")
     logger.debug(f"--- MASK_REFINEMENT_DEBUG: Number of connected components (num_labels) = {num_labels} ---")
 
@@ -230,7 +230,7 @@ def _complete_mask_core(img: np.ndarray, mask: np.ndarray, textlines: List[Quadr
             area2 = polys[tl_idx].area
             try:
                 overlapping_area = polys[tl_idx].intersection(cc_poly).area
-            except Exception as e:
+            except Exception as _e:
                 try:
                     fixed_poly = polys[tl_idx].buffer(0)
                     fixed_cc_poly = cc_poly.buffer(0)

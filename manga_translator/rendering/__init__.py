@@ -1,7 +1,7 @@
 import os
 import re
 import cv2
-import logging
+# import logging
 import numpy as np
 from typing import List
 from shapely import affinity
@@ -402,7 +402,7 @@ def optimize_line_breaks_for_region(region: TextBlock, config: Config, target_fo
     optimized_br_count = len(re.findall(br_pattern, best_text, flags=re.IGNORECASE))
     
     # 标准化原文以便比较（只用于判断是否真的有改变）
-    original_normalized = re.sub(r'\s*(<br>|【BR】)\s*', '[BR]', original_translation, flags=re.IGNORECASE)
+    _original_normalized = re.sub(r'\s*(<br>|【BR】)\s*', '[BR]', original_translation, flags=re.IGNORECASE)
     
     # 只有当BR数量真的改变时才应用优化
     if optimized_br_count != original_br_count:
@@ -507,7 +507,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 # Optimize line breaks if enabled
                 has_br = bool(re.search(r'(\[BR\]|【BR】|<br>)', region.translation, flags=re.IGNORECASE))
                 if config.render.optimize_line_breaks and config.render.disable_auto_wrap and has_br:
-                    logger.debug(f"[OPTIMIZE] Optimizing line breaks for balloon_fill mode")
+                    logger.debug("[OPTIMIZE] Optimizing line breaks for balloon_fill mode")
                     optimized_text, _ = optimize_line_breaks_for_region(
                         region, config, target_font_size, balloon_width, balloon_height
                     )
@@ -583,7 +583,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     # Apply font scaling
                     target_font_size = int(target_font_size * font_scale_factor)
                 else:
-                    logger.warning(f"Invalid required dimensions, keeping original font size")
+                    logger.warning("Invalid required dimensions, keeping original font size")
                 
                 # Step 4: Create dst_points based on balloon rectangle
                 new_dst_points = np.array([
@@ -666,7 +666,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             has_br = bool(re.search(r'(\[BR\]|【BR】|<br>)', region.translation, flags=re.IGNORECASE))
             if config.render.optimize_line_breaks and config.render.disable_auto_wrap and has_br:
                 bubble_width, bubble_height = region.unrotated_size
-                logger.debug(f"[OPTIMIZE] Optimizing line breaks for strict mode")
+                logger.debug("[OPTIMIZE] Optimizing line breaks for strict mode")
                 optimized_text, _ = optimize_line_breaks_for_region(
                     region, config, target_font_size, bubble_width, bubble_height
                 )
@@ -692,11 +692,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 calc_max_width = 99999
                 calc_max_height = 99999
                 if force_single_line_no_wrap:
-                    logger.debug(f"[STRICT MODE] 替换模式单行强制不换行 (OCR lines=1)，使用无限尺寸")
+                    logger.debug("[STRICT MODE] 替换模式单行强制不换行 (OCR lines=1)，使用无限尺寸")
                     # 强制清洗文本：移除所有可能导致换行的字符（\n, [BR]等），确保它真的是单行
                     region.translation = re.sub(r'(\n|\[BR\]|【BR】|<br>)', '', region.translation, flags=re.IGNORECASE)
                 else:
-                    logger.debug(f"[STRICT MODE] AI断句开启，使用无限尺寸")
+                    logger.debug("[STRICT MODE] AI断句开启，使用无限尺寸")
             else:
                 calc_max_width = region.unrotated_size[0]
                 calc_max_height = region.unrotated_size[1]
@@ -765,7 +765,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             has_br = bool(re.search(r'(\[BR\]|【BR】|<br>)', region.translation, flags=re.IGNORECASE))
             if config.render.optimize_line_breaks and config.render.disable_auto_wrap and has_br:
                 bubble_width, bubble_height = region.unrotated_size
-                logger.debug(f"[OPTIMIZE] Optimizing line breaks for default mode")
+                logger.debug("[OPTIMIZE] Optimizing line breaks for default mode")
                 optimized_text, _ = optimize_line_breaks_for_region(
                     region, config, target_font_size, bubble_width, bubble_height
                 )
@@ -816,7 +816,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     scaled_unrotated_points = np.array(poly.exterior.coords[:4])
                     dst_points = rotate_polygons(region.center, scaled_unrotated_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
                     dst_points = dst_points.reshape((-1, 4, 2))
-                except Exception as e:
+                except Exception as _e:
                     dst_points = region.min_rect
             else:
                 dst_points = region.min_rect
@@ -1357,7 +1357,7 @@ def render(
         # Last resort: Use the method2
         else:
             fg, _ = region.get_font_colors()
-    except Exception as e:
+    except Exception as _e:
         # If anything fails, fg remains black
         pass
 
@@ -1385,7 +1385,7 @@ def render(
     # Centralized text preprocessing
     # 检查是否有富文本，并标记给渲染器
     has_rich_text = hasattr(region, 'rich_text') and region.rich_text
-    rich_text_html = region.rich_text if has_rich_text else None
+    _rich_text_html = region.rich_text if has_rich_text else None
     
     if has_rich_text:
         # 有富文本，从 HTML 中提取纯文本（用于非 Qt 渲染器）

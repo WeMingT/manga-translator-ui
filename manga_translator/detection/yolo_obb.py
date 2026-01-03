@@ -148,7 +148,7 @@ class YOLOOBBDetector(OfflineDetector):
         if (new_unpad_w, new_unpad_h) != (shape[1], shape[0]):
             # 再次验证图像有效性
             if img is None or img.size == 0:
-                self.logger.error(f"YOLO OBB letterbox: resize前图像变为空")
+                self.logger.error("YOLO OBB letterbox: resize前图像变为空")
                 raise ValueError("resize前图像变为空")
             img = cv2.resize(img, (new_unpad_w, new_unpad_h), interpolation=cv2.INTER_LINEAR)
         
@@ -300,8 +300,8 @@ class YOLOOBBDetector(OfflineDetector):
                 break
             
             # 简化的 IoU 计算（使用外接矩形）
-            current_box = boxes[current]
-            other_boxes = boxes[indices[1:]]
+            _current_box = boxes[current]
+            _other_boxes = boxes[indices[1:]]
             
             # 计算边界框重叠（简化版）
             indices = indices[1:]
@@ -524,7 +524,7 @@ class YOLOOBBDetector(OfflineDetector):
         # padding
         p_num = int(np.ceil(ph_num / pw_num))
         pad_num = p_num * pw_num - ph_num
-        valid_patch_count = ph_num  # 记录有效patch数量
+        _valid_patch_count = ph_num  # 记录有效patch数量
         for ii in range(pad_num):
             patch_list.append(np.zeros_like(patch_list[0]))
         
@@ -608,7 +608,7 @@ class YOLOOBBDetector(OfflineDetector):
                 self.logger.debug(f"YOLO OBB patch {ii}: 检测到 {len(boxes)} 个框")
                 # 保存调试图
                 try:
-                    import cv2
+#                     import cv2
                     from ..utils import imwrite_unicode
                     import logging
                     logger = logging.getLogger('manga_translator')
@@ -638,7 +638,7 @@ class YOLOOBBDetector(OfflineDetector):
             for box, score, class_id in zip(boxes, scores, class_ids):
                 # 计算框的中心点在patch中的位置
                 center_x = np.mean(box[:, 0])
-                center_y = np.mean(box[:, 1])
+                _center_y = np.mean(box[:, 1])
                 
                 # 确定框属于patch中的哪个子区域 (jj)
                 jj = int(center_x / _pw)
@@ -733,7 +733,7 @@ class YOLOOBBDetector(OfflineDetector):
         # 判断是否需要切割（与主检测器相同的逻辑）
         transpose = False
         if h < w:
-            transpose = True
+            _transpose = True
             h, w = w, h
         
         asp_ratio = h / w
@@ -742,7 +742,7 @@ class YOLOOBBDetector(OfflineDetector):
         
         if require_rearrange:
             # 长图模式：使用统一的切割逻辑
-            self.logger.info(f"YOLO OBB: 检测到长图，使用统一切割逻辑")
+            self.logger.info("YOLO OBB: 检测到长图，使用统一切割逻辑")
             boxes_corners, scores, class_ids = self._rearrange_detect_unified(
                 image, text_threshold, verbose, result_path_fn
             )

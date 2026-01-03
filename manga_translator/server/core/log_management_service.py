@@ -319,7 +319,7 @@ class LogManagementService:
             return content.encode('utf-8')
         elif format == 'txt':
             lines = []
-            lines.append(f"Multiple Session Logs Export")
+            lines.append("Multiple Session Logs Export")
             lines.append(f"Exported at: {datetime.now(timezone.utc).isoformat()}")
             lines.append(f"Total sessions: {len(all_logs)}")
             lines.append("=" * 80)
@@ -408,7 +408,7 @@ class LogManagementService:
         需求: 33.6
         """
         # 先验证权限
-        logs = self.get_session_logs(session_token, user_id, is_admin)
+        _logs = self.get_session_logs(session_token, user_id, is_admin)
         
         # 删除日志
         deleted_count = self.log_repo.delete_session_logs(session_token)

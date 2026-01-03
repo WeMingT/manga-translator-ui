@@ -180,7 +180,7 @@ class Model(nn.Module):
     def _print_biases(self):
         m = self.model[-1]  # Detect() module
         for mi in m.m:  # from
-            b = mi.bias.detach().view(m.na, -1).T  # conv.bias(255) to (3,85)
+            _b = mi.bias.detach().view(m.na, -1).T  # conv.bias(255) to (3,85)
 
     def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
         for m in self.model.modules():
@@ -220,7 +220,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             except NameError:
                 pass
 
-        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
+        n = _n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
         if m in [Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
                  BottleneckCSP, C3, C3TR, C3SPP, C3Ghost]:
             c1, c2 = ch[f], args[0]

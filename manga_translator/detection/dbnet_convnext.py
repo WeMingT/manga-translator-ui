@@ -6,13 +6,13 @@ import cv2
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.init as init
+# import torch.nn.functional as F
+# import torch.nn.init as init
 
 from torchvision.models import resnet34
 
 import einops
-import math
+# import math
 
 from timm.layers import trunc_normal_, AvgPool2dSame, DropPath, Mlp, GlobalResponseNormMlp, \
 	LayerNorm2d, LayerNorm, create_conv2d, get_act_layer, make_divisible, to_ntuple

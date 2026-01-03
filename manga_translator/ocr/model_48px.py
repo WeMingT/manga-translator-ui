@@ -573,7 +573,7 @@ class OCR(nn.Module):
         self.max_len = max_len
         self.dictionary = dictionary
         self.dict_size = len(dictionary)
-        n_decoders = 4
+        _n_decoders = 4
         embd_dim = 320
         nhead = 4
         #self.backbone = LocalViT_FeatureExtractor(48, 3, dim = embd_dim, ff_dim = embd_dim * 4, n_layers = n_encoders)

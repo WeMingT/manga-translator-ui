@@ -167,7 +167,7 @@ async def rename_group(
                 detail={
                     "error": {
                         "code": "RENAME_FAILED",
-                        "message": f"重命名用户组失败，可能是系统组或新ID已存在"
+                        "message": "重命名用户组失败，可能是系统组或新ID已存在"
                     }
                 }
             )
@@ -223,7 +223,7 @@ async def delete_group(
                 detail={
                     "error": {
                         "code": "DELETE_FAILED",
-                        "message": f"删除用户组失败，可能是系统组或不存在"
+                        "message": "删除用户组失败，可能是系统组或不存在"
                     }
                 }
             )
@@ -380,7 +380,7 @@ async def update_group_config(
                 detail={
                     "error": {
                         "code": "UPDATE_FAILED",
-                        "message": f"更新用户组配置失败，用户组可能不存在"
+                        "message": "更新用户组配置失败，用户组可能不存在"
                     }
                 }
             )

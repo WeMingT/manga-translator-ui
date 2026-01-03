@@ -71,7 +71,7 @@ async def _dispatch_with_split(inpainter: CommonInpainter, image: np.ndarray, ma
     Returns:
         修复后的完整图像
     """
-    import cv2
+#     import cv2
     
     h, w = image.shape[:2]
     is_vertical = h > w  # 判断是竖长图还是横长图
@@ -211,6 +211,6 @@ async def _dispatch_with_split(inpainter: CommonInpainter, image: np.ndarray, ma
                         result[:, idx, :] = alpha * tile_img[:, tile_idx, :] + (1 - alpha) * result[:, idx, :]
     
     if verbose:
-        print(f"[Inpainting Split] Tiles merged successfully")
+        print("[Inpainting Split] Tiles merged successfully")
     
     return result

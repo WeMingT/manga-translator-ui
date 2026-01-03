@@ -688,7 +688,7 @@ class LamaLargeInpainter(LamaMPEInpainter):
             # 记录详细的错误信息
             self.logger.error(f'ONNX推理异常: {type(e).__name__}: {str(e)}')
             if 'bad allocation' in str(e) or 'allocation' in str(e).lower():
-                self.logger.error(f'内存分配失败 - 这可能是内存碎片化导致的')
+                self.logger.error('内存分配失败 - 这可能是内存碎片化导致的')
                 self.logger.error(f'图片尺寸: {image.shape}, 推理尺寸: {new_w}x{new_h}')
                 self.logger.error('这不是总内存不足，而是无法分配连续内存块')
                 self.logger.error('将自动降级到 PyTorch 模式（如果可用）')
@@ -777,7 +777,7 @@ class FourierUnit(nn.Module):
             orig_size = x.shape[-2:]
             x = F.interpolate(x, scale_factor=self.spatial_scale_factor, mode=self.spatial_scale_mode, align_corners=False)
 
-        r_size = x.size()
+        _r_size = x.size()
         # (batch, c, h, w/2+1, 2)
         fft_dim = (-3, -2, -1) if self.ffc3d else (-2, -1)
 

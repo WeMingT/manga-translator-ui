@@ -141,7 +141,7 @@ def _run_translate_sync(pil_image, config: Config, task_id: str = None, cancel_c
         cancel_check_callback: 取消检查回调函数
     """
     import threading
-    import gc
+#     import gc
     from manga_translator.server.core.task_manager import update_task_thread_id, get_global_translator
     
     # 更新任务的线程ID
@@ -203,7 +203,7 @@ def _run_translate_batch_sync(images_with_configs: list, batch_size: int, task_i
         cancel_check_callback: 取消检查回调函数
     """
     import threading
-    import gc
+#     import gc
     from manga_translator.server.core.task_manager import update_task_thread_id, get_global_translator
     
     # 更新任务的线程ID
@@ -885,7 +885,7 @@ async def save_translation_to_history(ctx, username: str, task_id: str, workflow
                 background = Image.new('RGB', img_to_save.size, (255, 255, 255))
                 background.paste(img_to_save, mask=img_to_save.split()[3])  # 使用 alpha 通道作为 mask
                 img_to_save = background
-                add_log(f"Converted RGBA to RGB for JPEG format", "DEBUG")
+                add_log("Converted RGBA to RGB for JPEG format", "DEBUG")
             elif is_jpeg and img_to_save.mode not in ('RGB', 'L'):
                 img_to_save = img_to_save.convert('RGB')
                 add_log(f"Converted {ctx.result.mode} to RGB for JPEG format", "DEBUG")
@@ -920,7 +920,7 @@ async def save_translation_to_history(ctx, username: str, task_id: str, workflow
             add_log(f"Added {len(text_data)} text regions to metadata", "DEBUG")
         
         # 保存到历史
-        result = history_service.save_translation_result(
+        _result = history_service.save_translation_result(
             user_id=username,
             session_token=task_id,
             files=temp_files,

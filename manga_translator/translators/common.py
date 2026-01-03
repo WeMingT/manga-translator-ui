@@ -153,7 +153,7 @@ def validate_gemini_response(response, logger=None) -> bool:
         error_msg = f"Gemini API响应缺少text属性: {type(response).__name__}"
         if logger:
             logger.error(error_msg)
-        raise Exception(f"Gemini API响应缺少text属性")
+        raise Exception("Gemini API响应缺少text属性")
     
     return True
 
@@ -483,7 +483,7 @@ class CommonTranslator(InfererModule):
             self.logger.info(f"[历史上下文] 长度: {len(prev_context)} 字符")
             self.logger.info(f"[历史上下文内容]\n{prev_context[:500]}...")
         else:
-            self.logger.info(f"[历史上下文] 无历史上下文（可能是第一张图片或context_size=0）")
+            self.logger.info("[历史上下文] 无历史上下文（可能是第一张图片或context_size=0）")
 
         prompt += "Please translate the following manga text regions. The input is provided as a JSON array:\n\n"
 
@@ -542,7 +542,7 @@ class CommonTranslator(InfererModule):
             prompt += f"{prev_context}\n\n---\n\n"
             self.logger.info(f"[Context] Length: {len(prev_context)} chars")
         else:
-            self.logger.info(f"[Context] None")
+            self.logger.info("[Context] None")
 
         if is_image_mode:
             prompt += "Please translate the following manga text regions. I'm providing multiple images with their text regions in reading order:\n\n"
@@ -1178,7 +1178,7 @@ def parse_hq_response(result_text: str) -> Tuple[List[str], List[Dict[str, str]]
     # 统一的编码清理
     result_text = sanitize_text_encoding(result_text)
     
-    original_text = result_text # Keep for logging
+    _original_text = result_text # Keep for logging
     result_text = result_text.strip()
     if not result_text:
         return [], []

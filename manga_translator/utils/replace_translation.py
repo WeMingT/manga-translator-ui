@@ -167,7 +167,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             if hasattr(config, 'cli'):
                 config.cli.replace_translation = True
             
-            logger.info(f"Replace translation mode: Forced disable_auto_wrap=True, layout_mode='strict', replace_translation=True")
+            logger.info("Replace translation mode: Forced disable_auto_wrap=True, layout_mode='strict', replace_translation=True")
         
         global_idx = global_offset + idx + 1
         image_name = image.name if hasattr(image, 'name') else f"image_{idx}"
@@ -193,12 +193,12 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             logger.info(f"  找到翻译图: {os.path.basename(translated_path)}")
             
             # === 步骤2: 对生肉图执行检测+OCR ===
-            logger.info(f"  [1/4] 生肉图检测+OCR...")
+            logger.info("  [1/4] 生肉图检测+OCR...")
             raw_ctx = await translator._translate_until_translation(image, config)
             raw_ctx.image_name = image_name
             
             if not raw_ctx.text_regions:
-                logger.warning(f"  [跳过] 生肉图未检测到文本区域")
+                logger.warning("  [跳过] 生肉图未检测到文本区域")
                 raw_ctx.success = False
                 results.append(raw_ctx)
                 continue
@@ -209,7 +209,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             logger.info(f"    生肉图区域: {len(raw_ctx.text_regions)} -> 过滤后: {len(raw_regions_filtered)}")
             
             if not raw_regions_filtered:
-                logger.warning(f"  [跳过] 过滤后无有效区域")
+                logger.warning("  [跳过] 过滤后无有效区域")
                 raw_ctx.success = False
                 results.append(raw_ctx)
                 continue
@@ -218,7 +218,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             raw_size = (raw_ctx.img_rgb.shape[1], raw_ctx.img_rgb.shape[0]) if raw_ctx.img_rgb is not None else (image.width, image.height)
             
             # === 步骤3: 对翻译图执行检测+OCR ===
-            logger.info(f"  [2/4] 翻译图检测+OCR...")
+            logger.info("  [2/4] 翻译图检测+OCR...")
             translated_image = Image.open(translated_path)
             translated_image.name = translated_path
             
@@ -226,7 +226,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             translated_ctx.image_name = translated_path
             
             if not translated_ctx.text_regions:
-                logger.warning(f"  [跳过] 翻译图未检测到文本区域")
+                logger.warning("  [跳过] 翻译图未检测到文本区域")
                 raw_ctx.success = False
                 results.append(raw_ctx)
                 continue
@@ -239,7 +239,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             trans_size = (translated_ctx.img_rgb.shape[1], translated_ctx.img_rgb.shape[0]) if translated_ctx.img_rgb is not None else (translated_image.width, translated_image.height)
             
             # === 步骤4: 区域匹配 ===
-            logger.info(f"  [3/4] 区域匹配...")
+            logger.info("  [3/4] 区域匹配...")
             logger.info(f"    生肉图尺寸: {raw_size[0]}x{raw_size[1]}")
             logger.info(f"    翻译图尺寸: {trans_size[0]}x{trans_size[1]}")
             logger.info(f"    缩放比例: x={raw_size[0]/trans_size[0]:.3f}, y={raw_size[1]/trans_size[1]:.3f}")
@@ -324,7 +324,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                         cv2.putText(debug_img, f"{overlap:.2f}", tuple(mid_point), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
                     # 保存调试图
-                    debug_path = translator._result_path(f'replace_debug_match.jpg')
+                    debug_path = translator._result_path('replace_debug_match.jpg')
                     imwrite_unicode(debug_path, debug_img, logger)
                     logger.info(f"    [DEBUG] Saved match debug image to: {debug_path}")
                     
@@ -333,11 +333,11 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                     traceback.print_exc()
             
             # === 步骤5: 修复生肉图 ===
-            logger.info(f"  [4/4] 修复生肉图...")
+            logger.info("  [4/4] 修复生肉图...")
             
             # 检查是否有需要修复的区域
             if not inpaint_regions:
-                logger.warning(f"  [跳过] 没有需要修复的区域")
+                logger.warning("  [跳过] 没有需要修复的区域")
                 raw_ctx.success = False
                 results.append(raw_ctx)
                 continue
@@ -363,7 +363,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             # === 步骤6: 渲染或粘贴 ===
             # 检查是否启用直接粘贴模式
             if config.render.enable_template_alignment:
-                logger.info(f"  [5/5] 直接粘贴模式 - 使用高级图像合成算法")
+                logger.info("  [5/5] 直接粘贴模式 - 使用高级图像合成算法")
                 
                 # 使用高级图像合成算法
                 result_img = get_text_to_img_solid_ink(
@@ -377,7 +377,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                 
             else:
                 # 原有逻辑：OCR + 重新渲染
-                logger.info(f"  [5/5] 渲染模式 - 使用 OCR 结果重新渲染文字")
+                logger.info("  [5/5] 渲染模式 - 使用 OCR 结果重新渲染文字")
                 
                 # 更新 context 的 text_regions 为匹配后的区域
                 raw_ctx.text_regions = matched_regions
@@ -421,7 +421,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                             if translator.save_text:
                                 translator._save_text_to_file(image_name, raw_ctx, config)
                         else:
-                            logger.info(f"  -> [直接粘贴模式] 跳过保存 JSON 和 inpainted 图片")
+                            logger.info("  -> [直接粘贴模式] 跳过保存 JSON 和 inpainted 图片")
                         
                         # 导出可编辑PSD（如果启用）
                         if hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
@@ -439,7 +439,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                                 except Exception as psd_err:
                                     logger.error(f"  导出PSD失败: {psd_err}")
                             else:
-                                logger.info(f"  -> [直接粘贴模式] 跳过导出 PSD")
+                                logger.info("  -> [直接粘贴模式] 跳过导出 PSD")
                         
                 except Exception as save_err:
                     logger.error(f"  保存失败: {save_err}")

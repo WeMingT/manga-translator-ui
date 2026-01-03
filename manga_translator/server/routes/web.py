@@ -86,7 +86,7 @@ async def get_result_by_folder(folder_name: str):
     return StreamingResponse(
         file_iterator(),
         media_type="image/png",
-        headers={"Content-Disposition": f"inline; filename=final.png"}
+        headers={"Content-Disposition": "inline; filename=final.png"}
     )
 
 
@@ -194,7 +194,7 @@ async def cleanup_temp_files(max_age_hours: int = 24):
                         elif os.path.isdir(filepath):
                             shutil.rmtree(filepath)
                             deleted_count += 1
-                except Exception as e:
+                except Exception as _e:
                     # Ignore individual file deletion errors (may be in use)
                     continue
         
