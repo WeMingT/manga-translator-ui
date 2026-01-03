@@ -1389,6 +1389,67 @@ class MangaTranslator:
             except Exception:
                 pass
     
+    def _cleanup_context_memory(self, ctx, keep_result=True):
+        """
+        清理单个上下文的中间数据（用于特殊模式）
+        
+        Args:
+            ctx: Context对象
+            keep_result: bool - 是否保留 ctx.result
+        """
+        # 清理输入图像
+        if hasattr(ctx, 'input') and ctx.input is not None:
+            if hasattr(ctx.input, 'close'):
+                try:
+                    ctx.input.close()
+                except:
+                    pass
+            del ctx.input
+            ctx.input = None
+        
+        # 清理中间处理图像
+        if hasattr(ctx, 'img_rgb') and ctx.img_rgb is not None:
+            del ctx.img_rgb
+            ctx.img_rgb = None
+        
+        if hasattr(ctx, 'img_colorized') and ctx.img_colorized is not None:
+            del ctx.img_colorized
+            ctx.img_colorized = None
+        
+        if hasattr(ctx, 'upscaled') and ctx.upscaled is not None:
+            del ctx.upscaled
+            ctx.upscaled = None
+        
+        if hasattr(ctx, 'img_inpainted') and ctx.img_inpainted is not None:
+            del ctx.img_inpainted
+            ctx.img_inpainted = None
+        
+        if hasattr(ctx, 'img_rendered') and ctx.img_rendered is not None:
+            del ctx.img_rendered
+            ctx.img_rendered = None
+        
+        if hasattr(ctx, 'img_alpha') and ctx.img_alpha is not None:
+            del ctx.img_alpha
+            ctx.img_alpha = None
+        
+        if hasattr(ctx, 'mask') and ctx.mask is not None:
+            del ctx.mask
+            ctx.mask = None
+        
+        if hasattr(ctx, 'mask_raw') and ctx.mask_raw is not None:
+            del ctx.mask_raw
+            ctx.mask_raw = None
+        
+        # 如果不保留结果，也清理 result
+        if not keep_result and hasattr(ctx, 'result') and ctx.result is not None:
+            del ctx.result
+            ctx.result = None
+        
+        # 强制垃圾回收和GPU显存清理
+        self._cleanup_gpu_memory()
+        logger.debug('[MEMORY] Context cleanup completed')
+
+    
     def _cleanup_batch_memory(self, current_batch_images=None, preprocessed_contexts=None, translated_contexts=None, keep_results=True):
         """
         统一的批次内存清理方法
@@ -2917,6 +2978,10 @@ class MangaTranslator:
                                 ctx = await self._revert_upscale(config, ctx)
                             
                             preprocessed_contexts.append((ctx, config))
+                            
+                            # ✅ 每处理完一张图片后立即清理内存（保留result）
+                            self._cleanup_context_memory(ctx, keep_result=True)
+                            
                         except Exception as e:
                             logger.error(f"Error loading text for image {i+1} in batch: {e}")
                             ctx = Context()
@@ -2956,6 +3021,15 @@ class MangaTranslator:
                                 logger.error(f"Error saving load_text result for {os.path.basename(ctx.image_name)}: {save_err}")
                         
                         results.append(ctx)
+                    
+                    # ✅ load_text模式：批次完成后清理批次数据（图片已在循环内清理）
+                    if current_batch_images:
+                        for i, (image, _) in enumerate(current_batch_images):
+                            if hasattr(image, 'close'):
+                                try:
+                                    image.close()
+                                except:
+                                    pass
                     
                     # load_text模式处理完成，继续下一批
                     continue
@@ -3027,6 +3101,18 @@ class MangaTranslator:
                         # ✅ 标记成功（导出原文完成）
                         ctx.success = True
                         results.append(ctx)
+                        
+                        # ✅ 每处理完一张图片后立即清理内存（保留result）
+                        self._cleanup_context_memory(ctx, keep_result=True)
+                    
+                    # ✅ 批次完成后清理批次数据（图片已在循环内清理）
+                    if current_batch_images:
+                        for i, (image, _) in enumerate(current_batch_images):
+                            if hasattr(image, 'close'):
+                                try:
+                                    image.close()
+                                except:
+                                    pass
                     
                     continue  # 跳过渲染，继续下一批次
                 
@@ -3054,6 +3140,18 @@ class MangaTranslator:
                         # ✅ 标记成功（导出翻译完成）
                         ctx.success = True
                         results.append(ctx)
+                        
+                        # ✅ 每处理完一张图片后立即清理内存（保留result）
+                        self._cleanup_context_memory(ctx, keep_result=True)
+                    
+                    # ✅ 批次完成后清理批次数据（图片已在循环内清理）
+                    if current_batch_images:
+                        for i, (image, _) in enumerate(current_batch_images):
+                            if hasattr(image, 'close'):
+                                try:
+                                    image.close()
+                                except:
+                                    pass
                     
                     continue  # 跳过渲染，继续下一批次
 
@@ -3216,6 +3314,10 @@ class MangaTranslator:
             ctx.result = ctx.img_colorized
             ctx.text_regions = []  # Empty text regions
             await self._report_progress('colorize-only-complete', True)
+            
+            # ✅ 使用统一的清理方法
+            self._cleanup_context_memory(ctx, keep_result=True)
+            
             return ctx
 
         # -- Upscaling
@@ -3237,6 +3339,10 @@ class MangaTranslator:
             ctx.result = ctx.upscaled
             ctx.text_regions = []  # Empty text regions
             await self._report_progress('upscale-only-complete', True)
+            
+            # ✅ 使用统一的清理方法
+            self._cleanup_context_memory(ctx, keep_result=True)
+            
             return ctx
 
         # --- Inpaint Only Mode Check (for batch processing) ---
@@ -3277,6 +3383,10 @@ class MangaTranslator:
                 ctx.result = ctx.img_inpainted
                 ctx.text_regions = []
                 await self._report_progress('inpaint-only-complete', True)
+                
+                # ✅ 使用统一的清理方法
+                self._cleanup_context_memory(ctx, keep_result=True)
+                
                 return ctx
             
             # Step 2: 填充文本 - 跳过OCR，为每个textline填充占位文本
@@ -3317,6 +3427,10 @@ class MangaTranslator:
                 ctx.img_inpainted = ctx.img_rgb
                 ctx.result = ctx.img_inpainted
                 await self._report_progress('inpaint-only-complete', True)
+                
+                # ✅ 使用统一的清理方法
+                self._cleanup_context_memory(ctx, keep_result=True)
+                
                 return ctx
             
             # Step 4: Mask Refinement - 使用text_regions和mask_raw优化蒙版
@@ -3363,6 +3477,10 @@ class MangaTranslator:
             
             logger.info("=== Inpaint Only Mode Complete ===")
             await self._report_progress('inpaint-only-complete', True)
+            
+            # ✅ 使用统一的清理方法
+            self._cleanup_context_memory(ctx, keep_result=True)
+            
             return ctx
 
         ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
