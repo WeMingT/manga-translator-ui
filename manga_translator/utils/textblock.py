@@ -3,7 +3,7 @@ import numpy as np
 from typing import List, Tuple
 from shapely.geometry import Polygon, MultiPoint
 from functools import cached_property
-import copy
+# import copy
 import re
 import py3langid as langid
 from .panel import get_panels_from_array
@@ -618,7 +618,7 @@ def _sort_panels_fill(panels: List[Tuple[int, int, int, int]], right_to_left: bo
     # Dynamic thresholds based on average panel size for reasonable robustness.
     avg_w = np.mean([p[2] - p[0] for p in remaining])
     avg_h = np.mean([p[3] - p[1] for p in remaining])
-    X_THR = max(10, avg_w * 0.1)   # panels whose x-range differs <10% width are considered same column
+    _X_THR = max(10, avg_w * 0.1)   # panels whose x-range differs <10% width are considered same column
     Y_THR = max(10, avg_h * 0.3)   # y-difference to decide panels are on the same row
 
     while remaining:

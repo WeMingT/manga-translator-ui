@@ -675,7 +675,7 @@ async def get_translator_config(translator: str):
                     'required_env_vars': config.get('required_env_vars', []),
                     'optional_env_vars': config.get('optional_env_vars', [])
                 }
-        except Exception as e:
+        except Exception as _e:
             return {}
     return {}
 

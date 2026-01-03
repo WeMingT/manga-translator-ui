@@ -5,7 +5,7 @@
 """
 import os
 import sys
-import json
+# import json
 import multiprocessing
 from pathlib import Path
 from datetime import datetime, timezone
@@ -82,7 +82,7 @@ def worker_translate_batch(
         init_logging()
         set_log_level(logging.DEBUG if verbose else logging.INFO)
         
-        logger = get_logger('local_worker')
+        _logger = get_logger('local_worker')
         
         # 应用命令行参数
         cli_config = config_dict.get('cli', {})
@@ -253,7 +253,7 @@ async def translate_with_subprocess(
     total_mem = get_total_memory_mb()
     
     print(f"\n{'='*60}")
-    print(f"🚀 子进程翻译模式")
+    print("🚀 子进程翻译模式")
     print(f"📊 总文件数: {total_files}")
     # 如果设置了绝对内存限制，只显示绝对限制；否则显示百分比限制
     if memory_limit_mb > 0:
@@ -334,7 +334,7 @@ async def translate_with_subprocess(
             # 等待子进程退出
             process.join(timeout=30)
             if process.is_alive():
-                print(f"⚠️ 子进程未正常退出，强制终止")
+                print("⚠️ 子进程未正常退出，强制终止")
                 process.terminate()
                 process.join(timeout=5)
                 if process.is_alive():
@@ -342,7 +342,7 @@ async def translate_with_subprocess(
                     process.join()
         
         except KeyboardInterrupt:
-            print(f"\n\n⚠️ 用户中断")
+            print("\n\n⚠️ 用户中断")
             process.terminate()
             process.join(timeout=5)
             if process.is_alive():
@@ -356,7 +356,7 @@ async def translate_with_subprocess(
         restart_count += 1
     
     if failed_count == 0:
-        print(f"\n✅ 所有文件处理完成")
+        print("\n✅ 所有文件处理完成")
     else:
         print(f"\n⚠️ 有 {failed_count} 个文件失败")
     

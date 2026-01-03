@@ -120,7 +120,7 @@ def to_translation(ctx: Context) -> TranslationResponse:
             _, buffer = cv2.imencode('.png', ctx.mask_raw)
             mask_base64 = base64.b64encode(buffer).decode('utf-8')
             response_data['mask_raw'] = mask_base64
-        except Exception as e:
+        except Exception as _e:
             pass
     
     # 添加 mask_is_refined 标志（如果有）

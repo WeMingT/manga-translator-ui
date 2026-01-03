@@ -141,9 +141,9 @@ def load_admin_settings() -> dict:
                         settings['admin_password'] = env_password
                         # 保存到配置文件
                         save_admin_settings(settings)
-                        print(f"[INFO] Admin password set from environment variable MANGA_TRANSLATOR_ADMIN_PASSWORD")
+                        print("[INFO] Admin password set from environment variable MANGA_TRANSLATOR_ADMIN_PASSWORD")
                     elif env_password:
-                        print(f"[WARNING] MANGA_TRANSLATOR_ADMIN_PASSWORD is too short (minimum 6 characters)")
+                        print("[WARNING] MANGA_TRANSLATOR_ADMIN_PASSWORD is too short (minimum 6 characters)")
                 
                 return settings
         except Exception as e:
@@ -159,9 +159,9 @@ def load_admin_settings() -> dict:
             settings['admin_password'] = env_password
             # 保存到配置文件
             save_admin_settings(settings)
-            print(f"[INFO] Admin password set from environment variable MANGA_TRANSLATOR_ADMIN_PASSWORD")
+            print("[INFO] Admin password set from environment variable MANGA_TRANSLATOR_ADMIN_PASSWORD")
         elif env_password:
-            print(f"[WARNING] MANGA_TRANSLATOR_ADMIN_PASSWORD is too short (minimum 6 characters)")
+            print("[WARNING] MANGA_TRANSLATOR_ADMIN_PASSWORD is too short (minimum 6 characters)")
         
         return settings
 
@@ -209,7 +209,7 @@ def load_default_config() -> Config:
 def parse_config(config_str: str) -> Config:
     """解析配置，如果为空则使用默认配置"""
     import logging
-    logger = logging.getLogger('manga_translator.server')
+    _logger = logging.getLogger('manga_translator.server')
     
     if not config_str or config_str.strip() in ('{}', ''):
         print("[INFO] No config provided, using default config from examples/config.json")
@@ -312,7 +312,7 @@ def init_server_config_file():
             shutil.copy(EXAMPLE_CONFIG_PATH, SERVER_CONFIG_PATH)
             print(f"[INFO] Created server config from template: {SERVER_CONFIG_PATH}")
         else:
-            print(f"[WARNING] Template config not found, will use default Config()")
+            print("[WARNING] Template config not found, will use default Config()")
 
 
 # ============================================================================

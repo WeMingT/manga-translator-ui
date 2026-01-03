@@ -558,8 +558,8 @@ def test2():
     with open('alphabet-all-v5.txt', 'r') as fp:
         dictionary = [s[:-1] for s in fp.readlines()]
     img = torch.randn(4, 3, 48, 1536)
-    idx = torch.zeros(4, 32).long()
-    mask = torch.zeros(4, 32).bool()
+    _idx = torch.zeros(4, 32).long()
+    _mask = torch.zeros(4, 32).bool()
     model = OCR(dictionary, 1024)
     pred_char_logits, pred_color_values = model(img)
     print(pred_char_logits.shape, pred_color_values.shape)

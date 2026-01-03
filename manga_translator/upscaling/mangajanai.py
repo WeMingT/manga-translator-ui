@@ -403,7 +403,7 @@ class MangaJaNaiUpscaler(OfflineUpscaler):
         # 延迟加载：不在这里加载模型，等到 _infer 时根据图片类型再加载
         # 只保存 device 信息
         self.device = device
-        logger.info(f"MangaJaNai upscaler initialized, will load model based on image type")
+        logger.info("MangaJaNai upscaler initialized, will load model based on image type")
 
     async def _load_specific_model(self, filename: str, device: str):
         if self.current_loaded_model_file == filename and self.model is not None:

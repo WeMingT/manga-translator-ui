@@ -83,7 +83,7 @@ class OfflineOCR(CommonOCR, ModelWrapper):
             # 清理并强制 GPU 清理
             self._cleanup_ocr_memory(region, image_tensor, force_gpu_cleanup=True)
         """
-        import gc
+#         import gc
         
         # 删除传入的对象
         for obj in objects:
@@ -119,7 +119,7 @@ class OfflineOCR(CommonOCR, ModelWrapper):
             # 清理字典
             self._cleanup_batch_data(out_regions, texts)
         """
-        import gc
+#         import gc
         
         for data in data_lists:
             if data is None:

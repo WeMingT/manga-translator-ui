@@ -1,12 +1,12 @@
 
 
-import einops
+# import einops
 import torch
-import torch as th
-import torch.nn as nn
+# import torch as th
+# import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
-import cv2
+# import cv2
 
 from .ldm.modules.diffusionmodules.util import (
     conv_nd,
@@ -98,7 +98,7 @@ class GuidedDDIMSample(DDIMSampler) :
         iterator = tqdm(time_range, desc='Decoding image', total=total_steps)
         x_dec = x_latent
         for i, step in enumerate(iterator):
-            p = (i + (total_steps - t_start) + 1) / (total_steps)
+            _p = (i + (total_steps - t_start) + 1) / (total_steps)
             index = total_steps - i - 1
             ts = torch.full((x_latent.shape[0],), step, device=x_latent.device, dtype=torch.long)
             if nmask is not None :

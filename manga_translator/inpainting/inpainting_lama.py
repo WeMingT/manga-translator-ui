@@ -120,7 +120,7 @@ class LamaInpainter(LamaMPEInpainter):
             mask_resized = resize_keep_aspect(mask, inpainting_size)
             mask_original_resized = resize_keep_aspect(mask_original, inpainting_size)
         else:
-            mask_resized = mask
+            _mask_resized = mask
             mask_original_resized = mask_original
         
         pad_size = 8
@@ -291,7 +291,7 @@ class BaseDiscriminator(nn.Module):
         Predict scores and get intermediate activations. Useful for feature matching loss
         :return tuple (scores, list of intermediate activations)
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
 
 def get_conv_block_ctor(kind='default'):
@@ -444,7 +444,7 @@ class FourierUnit(nn.Module):
             orig_size = x.shape[-2:]
             x = F.interpolate(x, scale_factor=self.spatial_scale_factor, mode=self.spatial_scale_mode, align_corners=False)
 
-        r_size = x.size()
+        _r_size = x.size()
         # (batch, c, h, w/2+1, 2)
         fft_dim = (-3, -2, -1) if self.ffc3d else (-2, -1)
         ffted = torch.fft.rfftn(x, dim=fft_dim, norm=self.fft_norm)

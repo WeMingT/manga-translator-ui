@@ -278,7 +278,7 @@ class ResourceManagementService:
         
         # 验证所有权
         if resource_data['user_id'] != user_id:
-            raise ValueError(f"无权删除此资源")
+            raise ValueError("无权删除此资源")
         
         # 删除文件
         file_path = self.base_path / resource_data['file_path']

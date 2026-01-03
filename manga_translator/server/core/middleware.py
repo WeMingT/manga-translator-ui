@@ -128,7 +128,7 @@ async def require_auth(
     session = session_service.verify_token(session_token)
     
     if not session:
-        logger.warning(f"Authentication failed: Invalid or expired token")
+        logger.warning("Authentication failed: Invalid or expired token")
         raise HTTPException(
             status_code=401,
             detail={

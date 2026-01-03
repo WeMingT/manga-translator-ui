@@ -453,7 +453,7 @@ def render_textblock_list_eng(
 
         line_width = sum(word_lengths) + delimiter_len * (len(word_lengths) - 1)
         region_area = line_width * line_height + delimiter_len * (len(words) - 1) * line_height
-        area_ratio = ballon_area / region_area
+        _area_ratio = ballon_area / region_area
         resize_ratio = 1
 
         # In many cases this code makes the font size too small.
