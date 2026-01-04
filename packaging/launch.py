@@ -1257,6 +1257,74 @@ def update_dependencies(args):
         return False
 
 
+def update_dependencies_selective(args, missing_packages):
+    """只更新/安装缺失的依赖包"""
+    print()
+    print("=" * 40)
+    print("安装缺失依赖")
+    print("=" * 40)
+    print()
+    
+    if not missing_packages:
+        print("[信息] 没有缺失的依赖包")
+        return True
+    
+    print(f"共需要安装 {len(missing_packages)} 个包")
+    print()
+    
+    # 逐个安装缺失的包
+    success_count = 0
+    fail_count = 0
+    
+    for i, pkg in enumerate(missing_packages, 1):
+        pkg_name = pkg.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].strip()
+        print(f"[{i}/{len(missing_packages)}] 安装 {pkg_name}...")
+        
+        try:
+            run_pip(f'install "{pkg}"', pkg_name)
+            success_count += 1
+        except Exception as e:
+            print(f"[失败] {pkg_name}: {e}")
+            fail_count += 1
+    
+    print()
+    print("=" * 40)
+    print(f"安装完成: 成功 {success_count} 个, 失败 {fail_count} 个")
+    print("=" * 40)
+    
+    return fail_count == 0
+
+
+def maintenance_menu():
+    print()
+    
+    # 设置参数，让 prepare_environment 处理所有逻辑
+    args.update_deps = True
+    args.frozen = False
+    args.reinstall_torch = False
+    
+    # 检测已安装的 PyTorch 类型来决定 requirements 文件
+    req_file, pytorch_type, detail = get_requirements_file_from_env()
+    if req_file:
+        args.requirements = req_file
+        print(f"检测到 PyTorch 类型: {pytorch_type} ({detail})")
+        print(f"使用: {req_file}")
+    else:
+        args.requirements = 'auto'
+        print("未检测到 PyTorch,将进行首次安装...")
+    
+    print()
+    
+    try:
+        prepare_environment(args)
+        print()
+        print("[OK] 依赖更新完成")
+        return True
+    except Exception as e:
+        print(f"[ERROR] 依赖更新失败: {e}")
+        return False
+
+
 def check_all_updates():
     """检查所有更新（代码+依赖）并返回检查结果"""
     ensure_git_safe_directory()
@@ -1355,6 +1423,7 @@ def check_all_updates():
     
     # 检查依赖是否满足
     deps_needs_update = False
+    missing_packages = []
     if req_file and os.path.exists(req_file):
         # 导入依赖检查工具
         packaging_dir = PATH_ROOT / 'packaging'
@@ -1363,10 +1432,21 @@ def check_all_updates():
         
         print("  正在检查依赖完整性...")
         try:
-            from build_utils.package_checker import check_req_file
-            if not check_req_file(req_file):
+            from build_utils.package_checker import check_req_file, get_missing_packages_from_file
+            missing_packages = get_missing_packages_from_file(req_file)
+            if missing_packages:
                 deps_needs_update = True
-                print("  状态: [有缺失依赖]")
+                print(f"  状态: [有缺失依赖，共 {len(missing_packages)} 个]")
+                # 显示缺失的包（最多显示10个）
+                if len(missing_packages) <= 10:
+                    for pkg in missing_packages:
+                        pkg_name = pkg.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].strip()
+                        print(f"    - {pkg_name}")
+                else:
+                    for pkg in missing_packages[:10]:
+                        pkg_name = pkg.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].strip()
+                        print(f"    - {pkg_name}")
+                    print(f"    ... 还有 {len(missing_packages) - 10} 个包")
             else:
                 print("  状态: [依赖完整]")
         except ImportError:
@@ -1390,7 +1470,7 @@ def check_all_updates():
     print(f"依赖: {'需要更新/安装' if deps_needs_update else '已满足'}")
     print("=" * 40)
     
-    return code_needs_update, deps_needs_update, current_version, remote_version, req_file
+    return code_needs_update, deps_needs_update, current_version, remote_version, req_file, missing_packages
 
 
 def maintenance_menu():
@@ -1420,11 +1500,12 @@ def maintenance_menu():
         print("[1] 更新代码 (强制同步)")
         print("[2] 更新/安装依赖")
         print("[3] 完整更新 (代码+依赖)")
-        print("[4] 重新检查版本")
-        print("[5] 退出")
+        print("[4] 修复模式 (强制同步代码+重装所有依赖)")
+        print("[5] 重新检查版本")
+        print("[6] 退出")
         print()
         
-        choice = input("请选择 (1/2/3/4/5): ").strip()
+        choice = input("请选择 (1/2/3/4/5/6): ").strip()
         
         if choice == '1':
             update_code_force()
@@ -1436,7 +1517,7 @@ def maintenance_menu():
             
         elif choice == '3':
             # 先做总体检查
-            code_needs_update, deps_needs_update, current_ver, remote_ver, req_file = check_all_updates()
+            code_needs_update, deps_needs_update, current_ver, remote_ver, req_file, missing_packages = check_all_updates()
             
             print()
             if not code_needs_update and not deps_needs_update:
@@ -1475,7 +1556,12 @@ def maintenance_menu():
                 print("[2/2] 更新依赖...")
                 if req_file:
                     args.requirements = req_file
-                update_dependencies(args)
+                # 如果有缺失包列表，只安装缺失的包
+                if missing_packages:
+                    print(f"只安装缺失的 {len(missing_packages)} 个包...")
+                    update_dependencies_selective(args, missing_packages)
+                else:
+                    update_dependencies(args)
             elif update_success:
                 print()
                 print("[2/2] 依赖已满足，跳过")
@@ -1489,9 +1575,107 @@ def maintenance_menu():
             input("\n按回车键继续...")
             
         elif choice == '4':
-            check_version_info()
+            # 修复模式：强制同步代码 + 重装所有依赖
+            print()
+            print("=" * 40)
+            print("修复模式")
+            print("=" * 40)
+            print()
+            print("[警告] 此操作将:")
+            print("  1. 强制同步代码到远程版本（本地修改将丢失）")
+            print("  2. 卸载并重新安装所有依赖包")
+            print()
+            
+            confirm = input("是否继续修复? (y/n): ").strip().lower()
+            if confirm not in ['y', 'yes']:
+                print("取消修复")
+                input("\n按回车键继续...")
+                continue
+            
+            print()
+            print("=" * 40)
+            print("开始修复")
+            print("=" * 40)
+            
+            # 1. 强制同步代码
+            print()
+            print("[1/2] 强制同步代码...")
+            if not update_code_force():
+                print("[错误] 代码同步失败")
+                input("\n按回车键继续...")
+                continue
+            
+            # 2. 重装所有依赖
+            print()
+            print("[2/2] 重新安装所有依赖...")
+            
+            # 检测 PyTorch 类型
+            req_file, pytorch_type, detail = get_requirements_file_from_env()
+            if not req_file:
+                # 未检测到 PyTorch，让用户选择
+                args.requirements = 'auto'
+                print("未检测到 PyTorch，将自动检测并安装")
+            else:
+                args.requirements = req_file
+                print(f"检测到 PyTorch 类型: {pytorch_type} ({detail})")
+                print(f"使用: {req_file}")
+            
+            print()
+            print("正在卸载所有依赖...")
+            
+            # 读取 requirements 文件，卸载所有包
+            if req_file and os.path.exists(req_file):
+                try:
+                    packaging_dir = PATH_ROOT / 'packaging'
+                    if str(packaging_dir) not in sys.path:
+                        sys.path.insert(0, str(packaging_dir))
+                    
+                    from build_utils.package_checker import load_req_file
+                    all_packages = load_req_file(req_file)
+                    
+                    # 提取包名
+                    package_names = []
+                    for pkg in all_packages:
+                        pkg_name = pkg.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].strip()
+                        package_names.append(pkg_name)
+                    
+                    if package_names:
+                        print(f"卸载 {len(package_names)} 个包...")
+                        packages_str = ' '.join(package_names)
+                        run(f'"{python}" -m pip uninstall {packages_str} -y', "卸载依赖包", "卸载失败", live=True)
+                        
+                        # 清理 pip 缓存
+                        print('正在清理 pip 缓存...')
+                        run(f'"{python}" -m pip cache purge', "清理缓存", "无法清理缓存")
+                except Exception as e:
+                    print(f"卸载依赖时出错: {e}")
+                    print("将继续安装...")
+            
+            # 强制重装
+            args.reinstall_torch = True
+            args.update_deps = True
+            args.frozen = False
+            
+            print()
+            print("正在重新安装所有依赖...")
+            try:
+                prepare_environment(args)
+                print()
+                print("=" * 40)
+                print("[完成] 修复完成")
+                print("=" * 40)
+            except Exception as e:
+                print()
+                print("=" * 40)
+                print(f"[错误] 修复失败: {e}")
+                print("=" * 40)
+            
+            input("\n按回车键继续...")
             
         elif choice == '5':
+            check_version_info()
+            
+        elif choice == '6':
             print()
             print("退出更新工具")
             break
