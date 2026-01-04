@@ -1361,6 +1361,7 @@ def check_all_updates():
         if str(packaging_dir) not in sys.path:
             sys.path.insert(0, str(packaging_dir))
         
+        print("  正在检查依赖完整性...")
         try:
             from build_utils.package_checker import check_req_file
             if not check_req_file(req_file):
@@ -1375,9 +1376,14 @@ def check_all_updates():
         print("  状态: [需要安装]")
         deps_needs_update = True
     
-    # 3. 汇总结果
+    # 检查完成提示
     print()
     print("=" * 40)
+    print("检查完成")
+    print("=" * 40)
+    
+    # 汇总结果
+    print()
     print("检查结果汇总:")
     print("=" * 40)
     print(f"代码: {'需要更新' if code_needs_update else '已是最新'}")
