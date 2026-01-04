@@ -107,11 +107,17 @@ def _yield_reqs_to_install(req: Requirement, current_extra: str = ''):
         return
 
     try:
-        version = importlib_metadata.distribution(req.name).version
+        version_str = importlib_metadata.distribution(req.name).version
     except importlib_metadata.PackageNotFoundError:
         yield req
     else:
-        if req.specifier.contains(version, prereleases=True):
+        # 对于 PyTorch 等包，移除本地版本标识符（如 +cu128）进行比较
+        # 例如：2.9.1+cu128 -> 2.9.1
+        version_base = version_str.split('+')[0]
+        
+        # 先用基础版本号检查
+        if req.specifier.contains(version_base, prereleases=True):
+            # 版本匹配，检查子依赖
             for child_req in (importlib_metadata.metadata(req.name).get_all('Requires-Dist') or []):
                 child_req_obj = Requirement(child_req)
                 need_check, ext = False, None
@@ -123,6 +129,7 @@ def _yield_reqs_to_install(req: Requirement, current_extra: str = ''):
                 if need_check:
                     yield from _yield_reqs_to_install(child_req_obj, ext)
         else:
+            # 版本不匹配，需要安装
             yield req
 
 
