@@ -180,6 +180,16 @@ def _check_req(req: Requirement):
     return not bool(list(itertools.islice(_yield_reqs_to_install(req), 1)))
 
 
+def get_missing_packages(reqs: List[str]) -> List[str]:
+    """获取缺失或需要更新的包列表"""
+    missing = []
+    for req_str in reqs:
+        req = Requirement(req_str)
+        if not _check_req(req):
+            missing.append(req_str)
+    return missing
+
+
 def check_reqs(reqs: List[str]) -> bool:
     """检查所有依赖是否满足"""
     return all(map(lambda x: _check_req(Requirement(x)), reqs))
@@ -192,4 +202,14 @@ def check_req_file(requirements_file: str) -> bool:
     except Exception as e:
         print(f'检查依赖文件失败: {e}')
         return False
+
+
+def get_missing_packages_from_file(requirements_file: str) -> List[str]:
+    """获取requirements文件中缺失或需要更新的包列表"""
+    try:
+        reqs = load_req_file(requirements_file)
+        return get_missing_packages(reqs)
+    except Exception as e:
+        print(f'检查依赖文件失败: {e}')
+        return []
 
