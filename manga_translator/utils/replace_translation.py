@@ -367,22 +367,86 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             # 检查是否启用直接粘贴模式
             if config.render.enable_template_alignment:
                 logger.info("  [5/5] 直接粘贴模式 - 使用高级图像合成算法")
-                
+
+                # 获取图像尺寸
+                h, w = raw_ctx.img_inpainted.shape[:2]
+
                 # 检查翻译图是否有原始蒙版
                 if not hasattr(translated_ctx, 'mask_raw') or translated_ctx.mask_raw is None:
                     logger.warning("  [警告] 翻译图没有原始蒙版，使用生肉图的蒙版")
                     translated_mask = raw_ctx.mask
                 else:
-                    # 使用翻译图的原始蒙版并扩大20像素
                     logger.info("    Using translated image's mask...")
-                    kernel = np.ones((5, 5), np.uint8)
                     # 确保蒙版不为空
                     if translated_ctx.mask_raw is not None and translated_ctx.mask_raw.size > 0:
-                        translated_mask = cv2.dilate(translated_ctx.mask_raw, kernel, iterations=4)  # 5x5核，4次迭代 ≈ 20像素
+                        translated_mask = translated_ctx.mask_raw.copy()
                     else:
                         logger.warning("  [警告] 翻译图蒙版为空，使用生肉图的蒙版")
                         translated_mask = raw_ctx.mask
-                
+
+                # 先筛选蒙版：只保留与匹配区域有交集的连通区域
+                if matched_regions:
+                    logger.info(f"    筛选蒙版：只保留与 {len(matched_regions)} 个匹配区域相交的蒙版连通区域")
+
+                    # 创建区域蒙版（只有匹配区域的外接矩形内为白色）
+                    region_mask = np.zeros((h, w), dtype=np.uint8)
+
+                    for region in matched_regions:
+                        x, y, rw, rh = get_bounding_rect(region)
+                        x1 = max(0, int(x))
+                        y1 = max(0, int(y))
+                        x2 = min(w, int(x + rw))
+                        y2 = min(h, int(y + rh))
+                        region_mask[y1:y2, x1:x2] = 255
+
+                    # 缩放 translated_mask 到目标尺寸（如果不同）
+                    if translated_mask.shape[:2] != (h, w):
+                        translated_mask = cv2.resize(translated_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+
+                    # 确保 translated_mask 是单通道
+                    if len(translated_mask.shape) == 3:
+                        translated_mask = cv2.cvtColor(translated_mask, cv2.COLOR_BGR2GRAY)
+
+                    # 二值化
+                    _, translated_mask_binary = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
+
+                    # 1. 先膨胀蒙版，使距离小于长边3%的区域连通（仅用于检测连通性）
+                    connect_distance = int(max(h, w) * 0.03)  # 长边的3%
+                    connect_iterations = max(1, connect_distance // 5)  # 5x5核，每次约5像素
+                    connect_kernel = np.ones((5, 5), np.uint8)
+                    dilated_for_connect = cv2.dilate(translated_mask_binary, connect_kernel, iterations=connect_iterations)
+                    logger.info(f"    步骤1: 膨胀{connect_distance}像素（长边3%）检测连通区域")
+
+                    # 2. 在膨胀后的蒙版上找连通区域
+                    num_labels, labels_dilated = cv2.connectedComponents(dilated_for_connect)
+
+                    # 3. 筛选：检查每个连通区域是否与 region_mask 有交集
+                    filtered_mask = np.zeros((h, w), dtype=np.uint8)
+
+                    for label_id in range(1, num_labels):  # 0 是背景
+                        # 获取膨胀后的连通区域
+                        dilated_component = (labels_dilated == label_id).astype(np.uint8) * 255
+
+                        # 检查是否与 region_mask 有交集
+                        intersection = cv2.bitwise_and(dilated_component, region_mask)
+                        if np.any(intersection):
+                            # 有交集，保留原始蒙版中属于这个连通区域的部分
+                            original_part = cv2.bitwise_and(translated_mask_binary, dilated_component)
+                            filtered_mask = cv2.bitwise_or(filtered_mask, original_part)
+
+                    logger.info("    步骤2: 筛选与匹配区域相交的连通区域")
+
+                    # 4. 最后扩张蒙版（膨胀20像素）
+                    kernel = np.ones((5, 5), np.uint8)
+                    translated_mask = cv2.dilate(filtered_mask, kernel, iterations=4)  # 5x5核，4次迭代 ≈ 20像素
+                    logger.info("    步骤3: 扩张蒙版20像素")
+
+                    logger.info(f"    蒙版处理完成")
+                else:
+                    # 没有匹配区域时，直接扩张原始蒙版
+                    kernel = np.ones((5, 5), np.uint8)
+                    translated_mask = cv2.dilate(translated_mask, kernel, iterations=4)
+
                 # 使用高级图像合成算法
                 result_img = get_text_to_img_solid_ink(
                     translated_mask,            # 使用翻译图的扩大蒙版（定义粘贴范围）
