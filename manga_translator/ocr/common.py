@@ -38,6 +38,33 @@ class CommonOCR(InfererModule):
                     for node in nodes:
                         yield bboxes[node], majority_dir
 
+    def _should_ignore_region(self, region_img: np.ndarray, ignore_bubble: float, 
+                              full_image: np.ndarray = None, textline: Quadrilateral = None) -> bool:
+        """
+        通用的气泡过滤方法，判断文本区域是否应该被忽略
+        
+        Args:
+            region_img: 裁剪后的文本区域图像（用于简单方法）
+            ignore_bubble: 忽略气泡阈值 (0-1)
+            full_image: 完整图像（可选，用于高级方法）
+            textline: 文本行对象（可选，用于获取坐标）
+            
+        Returns:
+            True: 应该忽略（非气泡区域）
+            False: 应该保留（气泡区域）
+        """
+        from ..utils.bubble import is_ignore
+        
+        # 如果提供了完整图像和文本行，使用高级方法
+        if full_image is not None and textline is not None:
+            # 获取文本行的边界框
+            bbox = textline.aabb
+            x, y, w, h = int(bbox.x), int(bbox.y), int(bbox.w), int(bbox.h)
+            return is_ignore(region_img, ignore_bubble, full_image, [x, y, w, h])
+        
+        # 否则使用简单方法
+        return is_ignore(region_img, ignore_bubble)
+
     async def recognize(self, image: np.ndarray, textlines: List[Quadrilateral], config: OcrConfig, verbose: bool = False) -> List[Quadrilateral]:
         '''
         Performs the optical character recognition, using the `textlines` as areas of interests.

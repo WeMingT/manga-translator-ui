@@ -28,7 +28,7 @@ async def dispatch(text_regions: List[TextBlock], raw_image: np.ndarray, raw_mas
         final_mask = cv2.resize(final_mask, (raw_image.shape[1], raw_image.shape[0]), interpolation = cv2.INTER_LINEAR)
         final_mask[final_mask > 0] = 255
 
-    if ignore_bubble < 1 or ignore_bubble > 50:
+    if ignore_bubble <= 0 or ignore_bubble > 1:
         return final_mask
 
     # bubble

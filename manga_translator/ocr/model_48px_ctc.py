@@ -88,10 +88,13 @@ class Model48pxCTCOCR(OfflineOCR):
             valid_widths = []
             
             for idx in indices:
-                if ignore_bubble >=1 and ignore_bubble <=50 and is_ignore(region_imgs[idx], ignore_bubble):
-                    self.logger.info(f'[FILTERED] Region {ix} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble})')
-                    ix+=1
-                    continue
+                # 使用基类的通用气泡过滤方法（支持高级检测）
+                if ignore_bubble > 0:
+                    textline = quadrilaterals[idx][0]
+                    if self._should_ignore_region(region_imgs[idx], ignore_bubble, image, textline):
+                        self.logger.info(f'[FILTERED] Region {ix} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble})')
+                        ix += 1
+                        continue
                 valid_indices.append(idx)
                 valid_region_imgs.append(region_imgs[idx])
                 valid_widths.append(region_imgs[idx].shape[1])
