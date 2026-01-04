@@ -269,7 +269,6 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             # === DEBUG: 生成匹配调试图 ===
             if translator.verbose:
                 try:
-                    import cv2
                     from .generic import imwrite_unicode
                     
                     # 复制生肉图作为画布
