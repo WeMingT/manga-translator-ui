@@ -113,31 +113,21 @@ class ConcurrentPipeline:
                 
                 logger.info(f"[检测+OCR] 处理 {idx+1}/{self.total_images}: {ctx.image_name}")
                 
-                # 预处理：加载图片、上色、超分
-                ctx.img_rgb, ctx.img_alpha = load_image(image)
-                
+                # 预处理：上色、超分（与主翻译器保持一致，统一使用 PIL Image）
+                # colorizer/upscaler 都返回 PIL Image，最后统一用 load_image 转换为 numpy
+
                 if config.colorizer.colorizer.value != 'none':
-                    colorized_result = await self.translator._run_colorizer(config, ctx)
-                    # colorizer 返回 PIL Image，需要转换为 numpy
-                    if hasattr(colorized_result, 'mode'):  # PIL Image
-                        ctx.img_colorized, _ = load_image(colorized_result)
-                    else:
-                        ctx.img_colorized = colorized_result
+                    ctx.img_colorized = await self.translator._run_colorizer(config, ctx)
                 else:
-                    ctx.img_colorized = ctx.img_rgb
-                
+                    ctx.img_colorized = ctx.input  # PIL Image
+
                 if config.upscale.upscale_ratio:
-                    upscaled_result = await self.translator._run_upscaling(config, ctx)
-                    # upscaler 返回 PIL Image，需要转换为 numpy
-                    if hasattr(upscaled_result, 'mode'):  # PIL Image
-                        ctx.upscaled, _ = load_image(upscaled_result)
-                    else:
-                        ctx.upscaled = upscaled_result
+                    ctx.upscaled = await self.translator._run_upscaling(config, ctx)
                 else:
-                    ctx.upscaled = ctx.img_colorized
-                
-                # 更新 img_rgb 为 upscaled 结果（现在都是 numpy.ndarray）
-                ctx.img_rgb = ctx.upscaled
+                    ctx.upscaled = ctx.img_colorized  # PIL Image
+
+                # 统一转换为 numpy（与主翻译器一致）
+                ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
                 
                 # 检测（直接在asyncio中执行，不使用线程池）
                 ctx.textlines, ctx.mask_raw, ctx.mask = await self.translator._run_detection(config, ctx)
@@ -178,7 +168,7 @@ class ConcurrentPipeline:
                     self.translation_done[ctx.image_name] = []  # 空列表而不是ctx对象
                     self.inpaint_done[ctx.image_name] = True
                     ctx.text_regions = []  # 确保text_regions是空列表
-                    ctx.result = ctx.upscaled
+                    # 不设置ctx.result，让渲染线程统一处理
                     await self.render_queue.put((ctx, config))
                     logger.debug(f"[检测+OCR] {ctx.image_name} 无文本，直接进入渲染队列")
                 
@@ -535,9 +525,9 @@ class ConcurrentPipeline:
                     logger.debug("[渲染] 已备份修复后图片用于保存")
                 
                 if not ctx.text_regions:
-                    # 无文本，直接使用upscaled
+                    # 无文本，直接使用img_rgb（numpy格式）
                     from .generic import dump_image
-                    ctx.result = dump_image(ctx.input, ctx.upscaled, ctx.img_alpha)
+                    ctx.result = dump_image(ctx.input, ctx.img_rgb, ctx.img_alpha)
                 else:
                     # 渲染（直接在asyncio中执行）
                     ctx.img_rendered = await self.translator._run_text_rendering(config, ctx)
@@ -623,7 +613,7 @@ class ConcurrentPipeline:
                 
                 # 渲染完成后立即清理内存（注意：_run_text_rendering 已经清理了 ctx.img_rgb）
                 logger.debug(f"[渲染] 清理内存: {ctx.image_name}")
-                # 清理 ctx.input
+                # 清理 ctx.input（PIL Image）
                 if hasattr(ctx, 'input') and ctx.input is not None:
                     if hasattr(ctx.input, 'close'):
                         try:
@@ -636,11 +626,21 @@ class ConcurrentPipeline:
                     del ctx.img_rgb
                     ctx.img_rgb = None
                 # 保留 ctx.img_alpha 用于dump_image
+                # 清理 ctx.img_colorized（PIL Image）
                 if hasattr(ctx, 'img_colorized') and ctx.img_colorized is not None:
-                    del ctx.img_colorized
+                    if hasattr(ctx.img_colorized, 'close'):
+                        try:
+                            ctx.img_colorized.close()
+                        except:
+                            pass
                     ctx.img_colorized = None
+                # 清理 ctx.upscaled（PIL Image）
                 if hasattr(ctx, 'upscaled') and ctx.upscaled is not None:
-                    del ctx.upscaled
+                    if hasattr(ctx.upscaled, 'close'):
+                        try:
+                            ctx.upscaled.close()
+                        except:
+                            pass
                     ctx.upscaled = None
                 if hasattr(ctx, 'mask') and ctx.mask is not None:
                     del ctx.mask
