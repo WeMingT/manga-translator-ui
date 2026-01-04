@@ -1257,6 +1257,104 @@ def update_dependencies(args):
         return False
 
 
+def check_all_updates():
+    """检查所有更新（代码+依赖）并返回检查结果"""
+    ensure_git_safe_directory()
+    print()
+    print("=" * 40)
+    print("正在检查所有更新...")
+    print("=" * 40)
+    print()
+    
+    # 1. 检查代码版本
+    print("[1/2] 检查代码版本...")
+    version_file = PATH_ROOT / "packaging" / "VERSION"
+    try:
+        if version_file.exists():
+            current_version = version_file.read_text(encoding='utf-8').strip()
+        else:
+            current_version = "unknown"
+    except Exception:
+        current_version = "unknown"
+    
+    # fetch远程
+    try:
+        subprocess.run([git, 'fetch', 'origin'], capture_output=True, check=False, timeout=10)
+    except Exception:
+        pass
+    
+    # 获取远程版本
+    try:
+        result = subprocess.run(
+            [git, 'show', 'origin/main:packaging/VERSION'],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5
+        )
+        if result.returncode == 0:
+            remote_version = result.stdout.strip()
+        else:
+            remote_version = "unknown"
+    except Exception:
+        remote_version = "unknown"
+    
+    code_needs_update = (current_version != remote_version and remote_version != "unknown")
+    
+    print(f"  当前版本: {current_version}")
+    print(f"  远程版本: {remote_version}")
+    if code_needs_update:
+        print("  状态: [需要更新]")
+    else:
+        print("  状态: [已是最新]")
+    
+    # 2. 检查依赖
+    print()
+    print("[2/2] 检查依赖...")
+    
+    # 检测已安装的 PyTorch 类型
+    req_file, pytorch_type, detail = get_requirements_file_from_env()
+    if req_file:
+        print(f"  检测到 PyTorch: {pytorch_type} ({detail})")
+        print(f"  依赖文件: {req_file}")
+    else:
+        print("  未检测到 PyTorch")
+        req_file = None
+    
+    # 检查依赖是否满足
+    deps_needs_update = False
+    if req_file and os.path.exists(req_file):
+        # 导入依赖检查工具
+        packaging_dir = PATH_ROOT / 'packaging'
+        if str(packaging_dir) not in sys.path:
+            sys.path.insert(0, str(packaging_dir))
+        
+        try:
+            from build_utils.package_checker import check_req_file
+            if not check_req_file(req_file):
+                deps_needs_update = True
+                print("  状态: [有缺失依赖]")
+            else:
+                print("  状态: [依赖完整]")
+        except ImportError:
+            print("  状态: [无法检查，建议更新]")
+            deps_needs_update = True
+    else:
+        print("  状态: [需要安装]")
+        deps_needs_update = True
+    
+    # 3. 汇总结果
+    print()
+    print("=" * 40)
+    print("检查结果汇总:")
+    print("=" * 40)
+    print(f"代码: {'需要更新' if code_needs_update else '已是最新'}")
+    print(f"依赖: {'需要更新/安装' if deps_needs_update else '已满足'}")
+    print("=" * 40)
+    
+    return code_needs_update, deps_needs_update, current_version, remote_version, req_file
+
+
 def maintenance_menu():
     """维护菜单"""
     print()
@@ -1299,17 +1397,56 @@ def maintenance_menu():
             input("\n按回车键继续...")
             
         elif choice == '3':
-            print()
-            print("=" * 40)
-            print("完整更新 (代码+依赖)")
-            print("=" * 40)
-            print()
+            # 先做总体检查
+            code_needs_update, deps_needs_update, current_ver, remote_ver, req_file = check_all_updates()
             
-            print("[1/2] 更新代码 (强制同步)...")
-            if update_code_force():
+            print()
+            if not code_needs_update and not deps_needs_update:
+                print("[信息] 代码和依赖都已是最新，无需更新")
+                input("\n按回车键继续...")
+                continue
+            
+            # 询问是否继续
+            print()
+            confirm = input("是否继续完整更新? (y/n): ").strip().lower()
+            if confirm not in ['y', 'yes']:
+                print("取消更新")
+                input("\n按回车键继续...")
+                continue
+            
+            print()
+            print("=" * 40)
+            print("开始完整更新")
+            print("=" * 40)
+            
+            # 执行更新
+            update_success = True
+            
+            if code_needs_update:
+                print()
+                print("[1/2] 更新代码...")
+                if not update_code_force():
+                    update_success = False
+                    print("[错误] 代码更新失败，跳过依赖更新")
+            else:
+                print()
+                print("[1/2] 代码已是最新，跳过")
+            
+            if update_success and deps_needs_update:
                 print()
                 print("[2/2] 更新依赖...")
+                if req_file:
+                    args.requirements = req_file
                 update_dependencies(args)
+            elif update_success:
+                print()
+                print("[2/2] 依赖已满足，跳过")
+            
+            print()
+            if update_success:
+                print("=" * 40)
+                print("[完成] 完整更新完成")
+                print("=" * 40)
             
             input("\n按回车键继续...")
             
