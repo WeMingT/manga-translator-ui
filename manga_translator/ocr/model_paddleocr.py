@@ -264,10 +264,11 @@ class ModelPaddleOCR(OfflineOCR):
                 else:
                     region_bgr = region
 
-                # Determine whether to skip the text block, and return True to skip.
-                if ignore_bubble >=1 and ignore_bubble <=50 and is_ignore(region, ignore_bubble):
-                    self.logger.info(f'[FILTERED] Region {i} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble})')
-                    continue
+                # 使用基类的通用气泡过滤方法（支持高级检测）
+                if ignore_bubble > 0:
+                    if self._should_ignore_region(region, ignore_bubble, image, q):
+                        self.logger.info(f'[FILTERED] Region {i} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble})')
+                        continue
 
                 # Save debug image if verbose
                 if verbose:

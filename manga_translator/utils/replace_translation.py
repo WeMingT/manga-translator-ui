@@ -377,7 +377,12 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                     # 使用翻译图的原始蒙版并扩大20像素
                     logger.info("    Using translated image's mask...")
                     kernel = np.ones((5, 5), np.uint8)
-                    translated_mask = cv2.dilate(translated_ctx.mask_raw, kernel, iterations=4)  # 5x5核，4次迭代 ≈ 20像素
+                    # 确保蒙版不为空
+                    if translated_ctx.mask_raw is not None and translated_ctx.mask_raw.size > 0:
+                        translated_mask = cv2.dilate(translated_ctx.mask_raw, kernel, iterations=4)  # 5x5核，4次迭代 ≈ 20像素
+                    else:
+                        logger.warning("  [警告] 翻译图蒙版为空，使用生肉图的蒙版")
+                        translated_mask = raw_ctx.mask
                 
                 # 使用高级图像合成算法
                 result_img = get_text_to_img_solid_ink(

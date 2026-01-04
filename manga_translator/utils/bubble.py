@@ -268,19 +268,19 @@ def is_bubble_advanced(img: np.ndarray, x: int, y: int, text_w: int, text_h: int
     # text_block new position
     x, y, text_w, text_h = clear_outerwhite(x, y, text_w, text_h, new_mask_thresh)
     
-    # Adjust white threshold based on input threshold
-    # 0.5 is the default from old version (0.90)
-    # threshold 0.3 -> white_threshold 0.85 (loose)
-    # threshold 0.5 -> white_threshold 0.90 (default)
-    # threshold 0.7 -> white_threshold 0.95 (strict)
-    white_threshold = 0.90 + (threshold - 0.5) * 0.25
+    # 正比例：阈值越大越严格，原先的 0.5 映射到 0.8
+    # threshold 0.1 -> white_threshold 0.55 (非常宽松，保留几乎所有区域)
+    # threshold 0.5 -> white_threshold 0.75 (原默认值)
+    # threshold 0.8 -> white_threshold 0.90 (对应原 0.5，新的推荐默认值)
+    # threshold 1.0 -> white_threshold 0.99 (非常严格)
+    white_threshold = 0.50 + threshold * 0.5  # 线性映射
     
-    # Adjust checkset based on threshold
-    # 0.5 is the default from old version ([3.2, 2.9])
-    # threshold 0.3 -> [2.8, 2.5] (loose)
-    # threshold 0.5 -> [3.2, 2.9] (default)
-    # threshold 0.7 -> [3.6, 3.3] (strict)
-    base_check = 3.2 + (threshold - 0.5) * 2.0
+    # 正比例：阈值越大，checkset 越大（越严格），原先的 0.5 映射到 0.8
+    # threshold 0.1 -> [1.0, 0.7] (非常宽松)
+    # threshold 0.5 -> [2.6, 2.3] (原默认值)
+    # threshold 0.8 -> [3.2, 2.9] (对应原 0.5，新的推荐默认值)
+    # threshold 1.0 -> [4.0, 3.7] (非常严格)
+    base_check = 0.6 + threshold * 4.0  # 线性映射
     checkset = [base_check, base_check - 0.3]
     
     # sd add to 10
@@ -303,7 +303,7 @@ def is_bubble_advanced(img: np.ndarray, x: int, y: int, text_w: int, text_h: int
     return False
 
 
-def is_ignore(region_img, ignore_bubble = 0):
+def is_ignore(region_img, ignore_bubble=0, full_img=None, bbox=None):
     """
     Main function to determine if a text region should be ignored.
     
@@ -314,6 +314,8 @@ def is_ignore(region_img, ignore_bubble = 0):
             - 0.01-0.3: Loose (keep most regions, only filter obvious non-bubbles)
             - 0.3-0.7: Medium (balanced filtering)
             - 0.7-1.0: Strict (aggressive filtering, may miss some bubbles)
+        full_img: Full image (optional, for advanced method)
+        bbox: Bounding box [x, y, w, h] (optional, for advanced method)
     
     Returns:
         True if should be ignored (non-bubble), False if should keep (bubble)
@@ -321,6 +323,14 @@ def is_ignore(region_img, ignore_bubble = 0):
     if ignore_bubble <= 0 or ignore_bubble > 1:
         return False
     
-    # Use simple method for now (can switch to advanced if needed)
+    # Use advanced method if full image and bbox are provided
+    if full_img is not None and bbox is not None:
+        x, y, w, h = bbox
+        # is_bubble_advanced returns True for bubble, False for non-bubble
+        # We need to invert it: return True to ignore (non-bubble)
+        is_bubble = is_bubble_advanced(full_img, x, y, w, h, ignore_bubble)
+        return not is_bubble  # Invert: True to ignore, False to keep
+    
+    # Fall back to simple method
     return is_ignore_simple(region_img, ignore_bubble)
 
