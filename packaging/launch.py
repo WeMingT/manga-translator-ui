@@ -625,18 +625,43 @@ def detect_amd_gfx_version(gpu_name):
 def detect_installed_pytorch_version():
     """检测当前安装的PyTorch版本类型(CPU/GPU)"""
     try:
-        import torch
-        if torch.cuda.is_available():
-            # 检查CUDA版本
-            cuda_version = torch.version.cuda
-            if cuda_version:
-                return "GPU", f"CUDA {cuda_version}"
-        return "CPU", "CPU-only"
-    except (ImportError, AttributeError):
-        return None, "未安装"
-    except OSError as e:
-        # PyTorch 安装损坏（缺少 DLL 等）
-        return None, f"安装损坏: {e}"
+        # 在子进程中检测，避免在主进程中加载 torch DLL
+        # 这样可以在需要时卸载 torch
+        code = """
+import sys
+try:
+    import torch
+    if torch.cuda.is_available():
+        cuda_version = torch.version.cuda
+        if cuda_version:
+            print(f"GPU|CUDA {cuda_version}")
+        else:
+            print("GPU|Unknown CUDA")
+    else:
+        print("CPU|CPU-only")
+except (ImportError, AttributeError):
+    print("None|未安装")
+except OSError as e:
+    print(f"None|安装损坏: {e}")
+"""
+        result = subprocess.run(
+            [python, '-c', code],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding='utf-8',
+            errors='ignore'
+        )
+        
+        if result.returncode == 0:
+            output = result.stdout.strip()
+            if '|' in output:
+                pytorch_type, detail = output.split('|', 1)
+                return pytorch_type, detail
+        
+        return None, "检测失败"
+    except Exception:
+        return None, "检测失败"
 
 
 def get_requirements_file_from_env():
@@ -727,48 +752,68 @@ def prepare_environment(args):
         # 如果手动指定了 requirements_amd.txt，需要检测 gfx 版本并安装 AMD PyTorch
         if requirements_file == 'requirements_amd.txt':
             use_amd_pytorch = True
-            # 尝试从环境中检测已安装的 AMD PyTorch 版本
+            # 尝试从环境中检测已安装的 AMD PyTorch 版本（在子进程中检测）
             try:
-                import torch
-                if hasattr(torch.version, 'hip') and torch.version.hip:
-                    # 已安装 AMD ROCm PyTorch，获取版本信息
-                    print(f'\n检测到已安装 AMD ROCm PyTorch')
-                    print(f'ROCm 版本: {torch.version.hip}')
-                    print('')
-                    
-                    # 询问是否更新
-                    update_choice = input('是否更新 AMD ROCm PyTorch? (y/n, 默认n): ').strip().lower()
-                    if update_choice in ['y', 'yes']:
-                        # 自动检测 gfx 版本
-                        detected_gfx, arch_name = detect_amd_gfx_version(gpu_name) if gpu_name else (None, None)
+                code = """
+import sys
+try:
+    import torch
+    if hasattr(torch.version, 'hip') and torch.version.hip:
+        print(f"installed|{torch.version.hip}")
+    else:
+        print("not_amd|")
+except:
+    print("not_installed|")
+"""
+                result = subprocess.run(
+                    [python, '-c', code],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    encoding='utf-8',
+                    errors='ignore'
+                )
+                
+                if result.returncode == 0:
+                    output = result.stdout.strip()
+                    if output.startswith('installed|'):
+                        rocm_version = output.split('|')[1]
+                        # 已安装 AMD ROCm PyTorch，获取版本信息
+                        print(f'\n检测到已安装 AMD ROCm PyTorch')
+                        print(f'ROCm 版本: {rocm_version}')
+                        print('')
                         
-                        if detected_gfx:
-                            print(f'\n自动识别架构: {arch_name}')
-                            print(f'对应 gfx 版本: {detected_gfx}')
-                            use_detected = input(f'使用检测到的 {detected_gfx}? (y/n, 默认y): ').strip().lower()
-                            if use_detected in ['', 'y', 'yes']:
-                                amd_gfx_version = detected_gfx
+                        # 询问是否更新
+                        update_choice = input('是否更新 AMD ROCm PyTorch? (y/n, 默认n): ').strip().lower()
+                        if update_choice in ['y', 'yes']:
+                            # 自动检测 gfx 版本
+                            detected_gfx, arch_name = detect_amd_gfx_version(gpu_name) if gpu_name else (None, None)
+                            
+                            if detected_gfx:
+                                print(f'\n自动识别架构: {arch_name}')
+                                print(f'对应 gfx 版本: {detected_gfx}')
+                                use_detected = input(f'使用检测到的 {detected_gfx}? (y/n, 默认y): ').strip().lower()
+                                if use_detected in ['', 'y', 'yes']:
+                                    amd_gfx_version = detected_gfx
+                                else:
+                                    amd_gfx_version = input('请输入您的 gfx 版本: ').strip()
                             else:
-                                amd_gfx_version = input('请输入您的 gfx 版本: ').strip()
+                                print('\n无法自动检测 gfx 版本')
+                                amd_gfx_version = input('请输入您的 gfx 版本 (如 gfx103X-dgpu): ').strip()
+                            
+                            if not amd_gfx_version:
+                                print('[INFO] 未输入 gfx 版本，跳过 AMD PyTorch 更新')
+                                use_amd_pytorch = False
                         else:
-                            print('\n无法自动检测 gfx 版本')
-                            amd_gfx_version = input('请输入您的 gfx 版本 (如 gfx103X-dgpu): ').strip()
-                        
-                        if not amd_gfx_version:
-                            print('[INFO] 未输入 gfx 版本，跳过 AMD PyTorch 更新')
                             use_amd_pytorch = False
-                    else:
-                        use_amd_pytorch = False
-                else:
-                    # 未安装或非 AMD PyTorch
-                    print('\n未检测到 AMD ROCm PyTorch')
-                    print('[INFO] 手动指定了 requirements_amd.txt，但未安装 AMD PyTorch')
-                    print('[INFO] 如需安装 AMD PyTorch，请运行 步骤1-首次安装.bat')
-                    use_amd_pytorch = False
-            except ImportError:
-                # PyTorch 未安装
-                print('\n未检测到 PyTorch')
-                print('[INFO] 手动指定了 requirements_amd.txt，但未安装 PyTorch')
+            except Exception:
+                # 检测失败，继续
+                pass
+            
+            if not use_amd_pytorch:
+                # 未安装或非 AMD PyTorch
+                print('\n未检测到 AMD ROCm PyTorch')
+                print('[INFO] 手动指定了 requirements_amd.txt，但未安装 AMD PyTorch')
                 print('[INFO] 如需安装 AMD PyTorch，请运行 步骤1-首次安装.bat')
                 use_amd_pytorch = False
         else:
@@ -1028,10 +1073,29 @@ def prepare_environment(args):
     # 如果需要重装 PyTorch，先卸载
     if need_reinstall or use_amd_pytorch:
         print('正在卸载现有的 PyTorch...')
-        run(f'"{python}" -m pip uninstall torch torchvision torchaudio -y', "卸载 PyTorch", "无法卸载 PyTorch", live=True)
+        print('[提示] 请确保没有其他 Python 进程正在运行')
+        
+        # 尝试多次卸载，处理文件占用问题
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                run(f'"{python}" -m pip uninstall torch torchvision torchaudio -y', "卸载 PyTorch", "无法卸载 PyTorch", live=True)
+                break
+            except Exception as e:
+                if retry < max_retries - 1:
+                    print(f'卸载失败（尝试 {retry + 1}/{max_retries}），可能有文件被占用')
+                    print('请关闭所有使用 PyTorch 的程序，然后按回车继续...')
+                    input()
+                else:
+                    print(f'警告: PyTorch 卸载失败，将尝试强制覆盖安装')
+                    print(f'错误: {e}')
+        
         # 强制清理 pip 缓存，避免使用缓存的错误版本
         print('正在清理 pip 缓存...')
-        run(f'"{python}" -m pip cache purge', "清理缓存", "无法清理缓存")
+        try:
+            run(f'"{python}" -m pip cache purge', "清理缓存", "无法清理缓存")
+        except:
+            pass
     
     # 如果用户选择了 AMD ROCm PyTorch，先安装它
     if use_amd_pytorch and amd_gfx_version:
@@ -1101,10 +1165,12 @@ def prepare_environment(args):
                     with open(requirements_file, 'r', encoding='utf-8') as f:
                         for line in f:
                             line_stripped = line.strip()
-                            # 跳过 torch/torchvision/torchaudio 相关行
+                            # 跳过 torch/torchvision/torchaudio 及其依赖包相关行
                             if line_stripped and not line_stripped.startswith('#'):
                                 pkg_name = line_stripped.split('==')[0].split('>=')[0].split('<=')[0].split('<')[0].split('>')[0].split('[')[0].split('@')[0].strip()
-                                if pkg_name.lower() not in ['torch', 'torchvision', 'torchaudio']:
+                                # 排除 PyTorch 及其生态包（这些包依赖 torch，会触发 torch 安装）
+                                pytorch_related = ['torch', 'torchvision', 'torchaudio', 'xformers', 'torchsummary', 'open_clip_torch']
+                                if pkg_name.lower() not in pytorch_related:
                                     tmp_req.write(line)
                             else:
                                 tmp_req.write(line)
