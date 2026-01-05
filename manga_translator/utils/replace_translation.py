@@ -370,7 +370,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                     connect_iterations = max(1, connect_distance // 3)  # 3x3核，每次约3像素
                     connect_kernel = np.ones((3, 3), np.uint8)
                     dilated_for_connect = cv2.dilate(thres, connect_kernel, iterations=connect_iterations)
-                    logger.info(f"    步骤2a: 膨胀{connect_distance}像素（长边{connect_ratio*100:.1f}%）检测连通区域")
+                    logger.info(f"    步骤2a: 膨胀{connect_distance}像素（长边{connect_ratio*100:.1f}%）检测连通区域（3x3核）")
                     
                     # 找连通区域
                     num_labels, labels_dilated = cv2.connectedComponents(dilated_for_connect)
@@ -533,12 +533,78 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                         translated_mask = cv2.dilate(translated_mask, kernel, iterations=dilation_iterations)
                     # 如果 dilation_pixels <= 0，保持原始蒙版不变
 
-                # 使用高级图像合成算法
-                result_img = get_text_to_img_solid_ink(
-                    translated_mask,            # 使用翻译图的扩大蒙版（定义粘贴范围）
-                    translated_ctx.img_rgb,     # 翻译图
-                    raw_ctx.img_inpainted       # 修复后的生肉图
-                )
+                # 使用直接覆盖方式（在蒙版区域内用翻译图覆盖修复图）
+                result_img = raw_ctx.img_inpainted.copy()
+                
+                # 确保翻译图和修复图尺寸一致
+                h, w = result_img.shape[:2]
+                trans_img = translated_ctx.img_rgb
+                if trans_img.shape[:2] != (h, w):
+                    trans_img = cv2.resize(trans_img, (w, h), interpolation=cv2.INTER_LINEAR)
+                
+                # 确保蒙版是单通道
+                if len(translated_mask.shape) == 3:
+                    translated_mask = cv2.cvtColor(translated_mask, cv2.COLOR_BGR2GRAY)
+                
+                # 二值化蒙版，避免灰色小白点（只保留纯黑和纯白）
+                _, translated_mask = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
+                
+                # 使用 DenseCRF 优化蒙版边缘
+                try:
+                    import pydensecrf.densecrf as dcrf
+                    from pydensecrf.utils import unary_from_labels
+                    
+                    # 准备 CRF
+                    d = dcrf.DenseCRF2D(w, h, 2)  # 2个类别：前景和背景
+                    
+                    # 将蒙版转换为标签（0=背景，1=前景）
+                    labels = (translated_mask > 127).astype(np.int32)
+                    
+                    # 设置一元势（unary potential）
+                    U = unary_from_labels(labels, 2, gt_prob=0.7, zero_unsure=False)
+                    d.setUnaryEnergy(U)
+                    
+                    # 添加成对势（pairwise potential）
+                    # 使用翻译图的颜色信息
+                    trans_img_uint8 = trans_img.astype(np.uint8)
+                    d.addPairwiseGaussian(sxy=3, compat=3)
+                    d.addPairwiseBilateral(sxy=50, srgb=13, rgbim=trans_img_uint8, compat=10)
+                    
+                    # 推理
+                    Q = d.inference(5)  # 5次迭代
+                    MAP = np.argmax(Q, axis=0).reshape((h, w))
+                    
+                    # 转换回蒙版
+                    translated_mask = (MAP * 255).astype(np.uint8)
+                    
+                    logger.info("    使用 DenseCRF 优化蒙版边缘")
+                except ImportError:
+                    logger.warning("    pydensecrf 未安装，跳过 CRF 优化，使用高斯模糊平滑")
+                    # 回退到高斯模糊
+                    translated_mask = cv2.GaussianBlur(translated_mask, (5, 5), 0)
+                    _, translated_mask = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
+                except Exception as e:
+                    logger.warning(f"    DenseCRF 优化失败: {e}，使用高斯模糊平滑")
+                    translated_mask = cv2.GaussianBlur(translated_mask, (5, 5), 0)
+                    _, translated_mask = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
+                
+                # 提取蒙版区域的翻译图（用于调试）
+                mask_3ch = cv2.cvtColor(translated_mask, cv2.COLOR_GRAY2BGR)
+                trans_img_masked = cv2.bitwise_and(trans_img, mask_3ch)
+                
+                # 保存调试图：蒙版区域的翻译图（要覆盖到生肉图的部分）
+                if translator.verbose:
+                    try:
+                        debug_masked_path = translator._result_path('debug_trans_masked.png')
+                        imwrite_unicode(debug_masked_path, cv2.cvtColor(trans_img_masked, cv2.COLOR_RGB2BGR), logger)
+                        logger.info(f"    [DEBUG] 保存蒙版区域的翻译图: {debug_masked_path}")
+                    except Exception as e:
+                        logger.warning(f"    [DEBUG] 保存调试图失败: {e}")
+                
+                # 在蒙版区域内用翻译图覆盖
+                result_img = np.where(mask_3ch > 0, trans_img, result_img)
+                
+                logger.info("    使用直接覆盖方式合成图像（二值化蒙版）")
                 
                 # 使用 dump_image 将结果转换为 PIL Image
                 raw_ctx.result = dump_image(raw_ctx.input, result_img, getattr(raw_ctx, 'img_alpha', None))
