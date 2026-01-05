@@ -350,24 +350,66 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                                 (inpainter_model is not None and str(inpainter_model) == 'none'))
             
             if is_none_inpainter:
-                # 修复模型为 none，使用简化算法：二值化 + 膨胀（与 win.py 的 darken_blend2 一致）
-                logger.info("    [修复模型=none] 使用简化蒙版优化算法（二值化 + 膨胀）...")
+                # 修复模型为 none，使用简化算法：二值化 + 连通区域扩散 + 筛选有效框 + 膨胀
+                logger.info("    [修复模型=none] 使用简化蒙版优化算法（二值化 + 连通扩散 + 筛选 + 膨胀）...")
                 if raw_ctx.mask_raw is not None:
+                    h, w = raw_ctx.mask_raw.shape[:2]
+                    
                     # 确保蒙版是单通道
                     mask = raw_ctx.mask_raw
                     if len(mask.shape) == 3:
                         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
                     
-                    # 二值化
+                    # 步骤1: 二值化
                     _, thres = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                    logger.info(f"    步骤1: 二值化")
                     
-                    # 膨胀（使用椭圆核 5x5，迭代2次）
+                    # 步骤2: 连通区域扩散（使用配置参数控制）
+                    connect_ratio = config.render.paste_connect_distance_ratio if hasattr(config.render, 'paste_connect_distance_ratio') else 0.03
+                    connect_distance = int(max(h, w) * connect_ratio)  # 默认长边的3%
+                    connect_iterations = max(1, connect_distance // 3)  # 3x3核，每次约3像素
+                    connect_kernel = np.ones((3, 3), np.uint8)
+                    dilated_for_connect = cv2.dilate(thres, connect_kernel, iterations=connect_iterations)
+                    logger.info(f"    步骤2a: 膨胀{connect_distance}像素（长边{connect_ratio*100:.1f}%）检测连通区域")
+                    
+                    # 找连通区域
+                    num_labels, labels_dilated = cv2.connectedComponents(dilated_for_connect)
+                    
+                    logger.info(f"    步骤2b: 检测到 {num_labels-1} 个连通区域")
+                    
+                    # 步骤3: 筛选有效框区域（如果有效框里有这个连通区域的任何部分，就保留整个连通区域的原始大小）
+                    valid_region_mask = np.zeros((h, w), dtype=np.uint8)
+                    for region in inpaint_regions:
+                        x, y, rw, rh = get_bounding_rect(region)
+                        x1 = max(0, int(x))
+                        y1 = max(0, int(y))
+                        x2 = min(w, int(x + rw))
+                        y2 = min(h, int(y + rh))
+                        valid_region_mask[y1:y2, x1:x2] = 255
+                    
+                    # 筛选：检查每个连通区域是否与有效框相交
+                    filtered_mask = np.zeros((h, w), dtype=np.uint8)
+                    kept_count = 0
+                    for label_id in range(1, num_labels):
+                        # 获取膨胀后的连通区域（用于判断是否相交）
+                        dilated_component = (labels_dilated == label_id).astype(np.uint8) * 255
+                        
+                        # 检查是否与有效框相交
+                        intersection = cv2.bitwise_and(dilated_component, valid_region_mask)
+                        if np.any(intersection):
+                            # 有交集，保留原始蒙版中属于这个连通区域的部分（保持原始大小）
+                            original_part = cv2.bitwise_and(thres, dilated_component)
+                            filtered_mask = cv2.bitwise_or(filtered_mask, original_part)
+                            kept_count += 1
+                    
+                    logger.info(f"    步骤3: 筛选有效框区域 保留 {kept_count}/{num_labels-1} 个连通区域（原始大小）")
+                    
+                    # 步骤4: 最终膨胀（使用椭圆核 5x5，迭代2次）
                     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-                    thres = cv2.dilate(thres, kernel, iterations=2)
+                    final_mask = cv2.dilate(filtered_mask, kernel, iterations=2)
+                    logger.info(f"    步骤4: 最终膨胀(椭圆核5x5, 迭代2次)")
                     
-                    logger.info(f"    蒙版优化完成: 二值化 + 膨胀(椭圆核5x5, 迭代2次)")
-                    
-                    raw_ctx.mask = thres
+                    raw_ctx.mask = final_mask
                 else:
                     logger.warning("    [警告] mask_raw 为空，无法生成蒙版")
                     raw_ctx.mask = None
