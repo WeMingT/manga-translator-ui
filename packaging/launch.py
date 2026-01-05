@@ -67,33 +67,95 @@ def is_installed(package):
     return spec is not None
 
 
-def run(command, desc=None, errdesc=None, custom_env=None, live=False):
-    """执行系统命令"""
+def run(command, desc=None, errdesc=None, custom_env=None, live=False, timeout=None, capture_output=True):
+    """执行系统命令
+    
+    Args:
+        command: 要执行的命令
+        desc: 描述信息
+        errdesc: 错误描述
+        custom_env: 自定义环境变量
+        live: 是否实时显示输出（不捕获）
+        timeout: 超时时间（秒），None 表示无超时
+        capture_output: 是否捕获输出，False 时丢弃输出避免死锁
+    """
     if desc is not None:
         print(desc)
 
+    env = os.environ if custom_env is None else custom_env
+
     if live:
-        result = subprocess.run(command, shell=True, env=os.environ if custom_env is None else custom_env)
+        # 实时模式：直接显示输出
+        result = subprocess.run(command, shell=True, env=env)
         if result.returncode != 0:
             raise RuntimeError(f"""{errdesc or '命令执行错误'}.
 命令: {command}
 错误代码: {result.returncode}""")
         return ""
 
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True,
-                            env=os.environ if custom_env is None else custom_env,
-                            encoding='gbk', errors='ignore')
-
-    if result.returncode != 0:
-        message = f"""{errdesc or '命令执行错误'}.
+    if not capture_output:
+        # 不捕获输出模式：丢弃输出避免死锁
+        result = subprocess.run(
+            command, 
+            shell=True, 
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"""{errdesc or '命令执行错误'}.
 命令: {command}
-错误代码: {result.returncode}
-stdout: {result.stdout if len(result.stdout) > 0 else '<empty>'}
-stderr: {result.stderr if len(result.stderr) > 0 else '<empty>'}
-"""
-        raise RuntimeError(message)
+错误代码: {result.returncode}""")
+        return ""
 
-    return result.stdout
+    # 捕获输出模式：使用 Popen + communicate 避免死锁
+    try:
+        process = subprocess.Popen(
+            command,
+            shell=True,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        # communicate() 会同时读取 stdout 和 stderr，避免死锁
+        stdout_bytes, stderr_bytes = process.communicate(timeout=timeout)
+        
+        # 解码输出
+        try:
+            stdout = stdout_bytes.decode('utf-8', errors='ignore')
+        except:
+            try:
+                stdout = stdout_bytes.decode('gbk', errors='ignore')
+            except:
+                stdout = str(stdout_bytes)
+        
+        try:
+            stderr = stderr_bytes.decode('utf-8', errors='ignore')
+        except:
+            try:
+                stderr = stderr_bytes.decode('gbk', errors='ignore')
+            except:
+                stderr = str(stderr_bytes)
+        
+        if process.returncode != 0:
+            message = f"""{errdesc or '命令执行错误'}.
+命令: {command}
+错误代码: {process.returncode}
+stdout: {stdout if stdout else '<empty>'}
+stderr: {stderr if stderr else '<empty>'}
+"""
+            raise RuntimeError(message)
+        
+        return stdout
+        
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()  # 清理剩余输出
+        raise RuntimeError(f"""{errdesc or '命令超时'}.
+命令: {command}
+超时: {timeout}秒""")
 
 
 def run_pip(args, desc=None):
@@ -1282,20 +1344,25 @@ def check_version_info():
     return current_version, remote_version
 
 
-def update_code_force():
-    """强制更新代码（同步到远程）"""
+def update_code_force(skip_confirm=False):
+    """强制更新代码（同步到远程）
+
+    Args:
+        skip_confirm: 是否跳过确认提示（用于完整更新流程中）
+    """
     ensure_git_safe_directory()  # 确保 safe.directory 已配置
     print()
     print("=" * 40)
     print("更新代码 (强制同步)")
     print("=" * 40)
     print()
-    
-    print("[警告] 将强制同步到远程分支,本地修改将被覆盖")
-    confirm = input("是否继续更新? (y/n): ").strip().lower()
-    if confirm not in ['y', 'yes']:
-        print("取消更新")
-        return False
+
+    if not skip_confirm:
+        print("[警告] 将强制同步到远程分支,本地修改将被覆盖")
+        confirm = input("是否继续更新? (y/n): ").strip().lower()
+        if confirm not in ['y', 'yes']:
+            print("取消更新")
+            return False
     
     print()
     print("获取远程更新...")
@@ -1352,7 +1419,13 @@ def update_dependencies(args):
 
 
 def update_dependencies_selective(args, missing_packages):
-    """只更新/安装缺失的依赖包"""
+    """只更新/安装缺失的依赖包
+    
+    正确处理 PyTorch 相关包需要从专门源下载的逻辑
+    安装前会检查包是否已安装，避免重复安装
+    """
+    import urllib.parse
+    
     print()
     print("=" * 40)
     print("安装缺失依赖")
@@ -1363,19 +1436,95 @@ def update_dependencies_selective(args, missing_packages):
         print("[信息] 没有缺失的依赖包")
         return True
     
+    # 导入依赖检查工具
+    packaging_dir = PATH_ROOT / 'packaging'
+    if str(packaging_dir) not in sys.path:
+        sys.path.insert(0, str(packaging_dir))
+    
+    try:
+        from build_utils.package_checker import _check_req
+        from packaging.requirements import Requirement
+        has_checker = True
+    except ImportError:
+        has_checker = False
+        print("[警告] 无法导入依赖检查工具，将不进行安装前检查")
+    
+    # 从 requirements 文件读取 PyTorch 源
+    primary_index_url = None
+    req_file = getattr(args, 'requirements', None)
+    if req_file and os.path.exists(req_file):
+        try:
+            with open(req_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('--index-url'):
+                        parts = line.split(None, 1)
+                        if len(parts) == 2:
+                            primary_index_url = parts[1].strip()
+                            print(f"检测到 PyTorch 源: {primary_index_url}")
+                        break
+        except Exception:
+            pass
+    
+    # PyTorch 相关包列表
+    pytorch_packages = [
+        'torch', 'torchvision', 'torchaudio', 'xformers',
+        'pytorch-triton', 'pytorch-triton-rocm', 'pytorch-triton-xpu',
+        'nvidia-cublas', 'nvidia-cuda', 'nvidia-cudnn', 'nvidia-cufft',
+        'nvidia-curand', 'nvidia-cusolver', 'nvidia-cusparse', 'nvidia-nccl',
+        'nvidia-nvjitlink', 'nvidia-nvtx', 'triton',
+    ]
+    excluded_packages = ['torchsummary', 'torchmetrics']
+    
+    def is_pytorch_package(pkg_name):
+        """检查是否是需要从 PyTorch 源下载的包"""
+        pkg_lower = pkg_name.lower()
+        if pkg_lower in excluded_packages:
+            return False
+        for prefix in pytorch_packages:
+            if pkg_lower.startswith(prefix):
+                return True
+        return False
+    
     print(f"共需要安装 {len(missing_packages)} 个包")
     print()
     
     # 逐个安装缺失的包
     success_count = 0
     fail_count = 0
+    skip_count = 0
     
     for i, pkg in enumerate(missing_packages, 1):
-        pkg_name = pkg.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].strip()
+        pkg_name = pkg.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].split('@')[0].strip()
+        
+        # 安装前检查包是否已满足要求
+        if has_checker:
+            try:
+                req = Requirement(pkg)
+                if _check_req(req):
+                    print(f"[{i}/{len(missing_packages)}] {pkg_name} 已安装，跳过")
+                    skip_count += 1
+                    continue
+            except Exception:
+                pass  # 检查失败，继续安装
+        
         print(f"[{i}/{len(missing_packages)}] 安装 {pkg_name}...")
         
         try:
-            run_pip(f'install "{pkg}"', pkg_name)
+            # 检查是否是 PyTorch 相关包
+            if is_pytorch_package(pkg_name) and primary_index_url:
+                # 使用 PyTorch 源安装
+                print(f"    (使用 PyTorch 源)")
+                parsed = urllib.parse.urlparse(primary_index_url)
+                trusted_host = f'--trusted-host {parsed.hostname}' if parsed.hostname else ''
+                cmd = f'"{python}" -m pip install "{pkg}" --index-url {primary_index_url} {trusted_host} --prefer-binary --disable-pip-version-check'
+                result = subprocess.run(cmd, shell=True, env=os.environ)
+                if result.returncode != 0:
+                    raise RuntimeError(f"安装失败，返回码: {result.returncode}")
+            else:
+                # 普通包，使用 run_pip（支持镜像源回退）
+                run_pip(f'install "{pkg}"', pkg_name)
+            
             success_count += 1
         except Exception as e:
             print(f"[失败] {pkg_name}: {e}")
@@ -1383,40 +1532,13 @@ def update_dependencies_selective(args, missing_packages):
     
     print()
     print("=" * 40)
-    print(f"安装完成: 成功 {success_count} 个, 失败 {fail_count} 个")
+    if skip_count > 0:
+        print(f"安装完成: 成功 {success_count} 个, 跳过 {skip_count} 个, 失败 {fail_count} 个")
+    else:
+        print(f"安装完成: 成功 {success_count} 个, 失败 {fail_count} 个")
     print("=" * 40)
     
     return fail_count == 0
-
-
-def maintenance_menu():
-    print()
-    
-    # 设置参数，让 prepare_environment 处理所有逻辑
-    args.update_deps = True
-    args.frozen = False
-    args.reinstall_torch = False
-    
-    # 检测已安装的 PyTorch 类型来决定 requirements 文件
-    req_file, pytorch_type, detail = get_requirements_file_from_env()
-    if req_file:
-        args.requirements = req_file
-        print(f"检测到 PyTorch 类型: {pytorch_type} ({detail})")
-        print(f"使用: {req_file}")
-    else:
-        args.requirements = 'auto'
-        print("未检测到 PyTorch,将进行首次安装...")
-    
-    print()
-    
-    try:
-        prepare_environment(args)
-        print()
-        print("[OK] 依赖更新完成")
-        return True
-    except Exception as e:
-        print(f"[ERROR] 依赖更新失败: {e}")
-        return False
 
 
 def check_all_updates():
@@ -1638,7 +1760,7 @@ def maintenance_menu():
             if code_needs_update:
                 print()
                 print("[1/2] 更新代码...")
-                if not update_code_force():
+                if not update_code_force(skip_confirm=True):
                     update_success = False
                     print("[错误] 代码更新失败，跳过依赖更新")
             else:
@@ -1694,7 +1816,7 @@ def maintenance_menu():
             # 1. 强制同步代码
             print()
             print("[1/2] 强制同步代码...")
-            if not update_code_force():
+            if not update_code_force(skip_confirm=True):
                 print("[错误] 代码同步失败")
                 input("\n按回车键继续...")
                 continue
@@ -1727,6 +1849,15 @@ def maintenance_menu():
                     from build_utils.package_checker import load_req_file
                     all_packages = load_req_file(req_file)
                     
+                    # 这些包是 launch.py 运行时依赖的，不能卸载
+                    # 否则后续的安装操作会失败
+                    protected_packages = {
+                        'packaging',      # 用于解析 requirements
+                        'pip',           # pip 本身
+                        'setuptools',    # 安装依赖
+                        'wheel',         # 构建 wheel
+                    }
+                    
                     # 提取包名 - 使用 Requirement 对象解析
                     package_names = []
                     for pkg_str in all_packages:
@@ -1753,8 +1884,15 @@ def maintenance_menu():
                             if pkg_name:
                                 package_names.append(pkg_name)
                     
+                    # 过滤掉受保护的包
+                    original_count = len(package_names)
+                    package_names = [p for p in package_names if p.lower() not in protected_packages]
+                    if original_count != len(package_names):
+                        print(f"  [跳过] 保留关键包: {', '.join(protected_packages)}")
+                    
                     if package_names:
                         print(f"卸载 {len(package_names)} 个包...")
+
                         
                         # 分批卸载，每次最多20个包，避免命令行过长
                         batch_size = 20
@@ -1766,13 +1904,13 @@ def maintenance_menu():
                             
                             try:
                                 print(f"  卸载批次 {i//batch_size + 1}/{(len(package_names) + batch_size - 1)//batch_size}...")
-                                run(f'"{python}" -m pip uninstall {batch_str} -y', f"卸载 {len(batch)} 个包", "卸载失败", live=False)
+                                run(f'"{python}" -m pip uninstall {batch_str} -y', f"卸载 {len(batch)} 个包", "卸载失败", capture_output=False)
                             except Exception as batch_err:
                                 print(f"  批次卸载失败，尝试逐个卸载...")
                                 # 批次失败，逐个卸载
                                 for pkg in batch:
                                     try:
-                                        run(f'"{python}" -m pip uninstall {pkg} -y', f"卸载 {pkg}", "卸载失败", live=False)
+                                        run(f'"{python}" -m pip uninstall {pkg} -y', f"卸载 {pkg}", "卸载失败", capture_output=False)
                                     except Exception:
                                         failed_packages.append(pkg)
                         
@@ -1785,7 +1923,7 @@ def maintenance_menu():
                         
                         # 清理 pip 缓存
                         print('正在清理 pip 缓存...')
-                        run(f'"{python}" -m pip cache purge', "清理缓存", "无法清理缓存")
+                        run(f'"{python}" -m pip cache purge', "清理缓存", "无法清理缓存", capture_output=False)
                 except Exception as e:
                     print(f"卸载依赖时出错: {e}")
                     print("将继续安装...")
