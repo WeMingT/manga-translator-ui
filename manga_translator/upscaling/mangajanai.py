@@ -455,12 +455,11 @@ class MangaJaNaiUpscaler(OfflineUpscaler):
         self.current_loaded_model_file = filename
 
     async def _unload(self):
+        """卸载模型"""
         if self.model:
             del self.model
             self.model = None
         self.current_loaded_model_file = None
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     async def _infer(self, image_batch: List[Image.Image], upscale_ratio: float) -> List[Image.Image]:
         # Note: We don't check `if not self.model` here because we might load it dynamically
@@ -556,13 +555,6 @@ class MangaJaNaiUpscaler(OfflineUpscaler):
         
         # Convert back to PIL
         output_np = (einops.rearrange(output.squeeze(0).clamp(0, 1), 'c h w -> h w c').cpu().numpy() * 255.0).astype(np.uint8)
-        
-        # ✅ 清理中间张量以释放显存
-        del tensor
-        del output
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
         result_img = Image.fromarray(output_np)
         
         # If image was padded, crop back to original scaled size

@@ -51,6 +51,7 @@ async def dispatch(upscaler_key: Upscaler, image_batch: List[Image.Image], upsca
     return await upscaler.upscale(image_batch, upscale_ratio)
 
 async def unload(upscaler_key: Upscaler, **kwargs):
+    """卸载超分模型并清理显存"""
     cache_key_parts = [str(upscaler_key)]
     if upscaler_key == Upscaler.realcugan and 'model_name' in kwargs:
         cache_key_parts.append(kwargs['model_name'])
@@ -64,3 +65,15 @@ async def unload(upscaler_key: Upscaler, **kwargs):
         upscaler = upscaler_cache.pop(cache_key)
         if isinstance(upscaler, OfflineUpscaler):
             await upscaler.unload()
+        
+        # 统一的显存清理（适用于所有超分模型）
+        import gc
+        gc.collect()
+        
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except Exception:
+            pass
