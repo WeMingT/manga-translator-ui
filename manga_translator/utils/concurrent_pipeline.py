@@ -556,8 +556,8 @@ class ConcurrentPipeline:
                         if hasattr(self.translator, '_current_save_info') and self.translator._current_save_info:
                             save_info = self.translator._current_save_info
                             
-                            # 使用统一的保存和清理方法
-                            self.translator._save_and_cleanup_context(ctx, save_info, "CONCURRENT")
+                            # 使用统一的保存和清理方法（包含PSD导出）
+                            self.translator._save_and_cleanup_context(ctx, save_info, config, "CONCURRENT")
                             
                             # ✅ 保存修复后的图片到inpainted目录（使用渲染前备份的副本）
                             if img_inpainted_copy is not None:
@@ -579,20 +579,6 @@ class ConcurrentPipeline:
                             # 保存JSON（如果需要）
                             if (self.translator.save_text or self.translator.text_output_file) and ctx.text_regions is not None:
                                 self.translator._save_text_to_file(ctx.image_name, ctx, config)
-                            
-                            # 导出可编辑PSD（如果启用）
-                            if hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
-                                try:
-                                    from .photoshop_export import photoshop_export, get_psd_output_path
-                                    psd_path = get_psd_output_path(ctx.image_name)
-                                    cli_cfg = getattr(config, 'cli', None)
-                                    default_font = getattr(cli_cfg, 'psd_font', None)
-                                    line_spacing = getattr(config.render, 'line_spacing', None) if hasattr(config, 'render') else None
-                                    script_only = getattr(cli_cfg, 'psd_script_only', False)
-                                    photoshop_export(psd_path, ctx, default_font, ctx.image_name, self.translator.verbose, self.translator._result_path, line_spacing, script_only)
-                                    logger.info(f"  -> ✅ [PSD] Exported editable PSD: {os.path.basename(psd_path)}")
-                                except Exception as psd_err:
-                                    logger.error(f"Error exporting PSD for {os.path.basename(ctx.image_name)}: {psd_err}")
                         else:
                             logger.warning("[渲染] 无save_info，跳过保存")
                         

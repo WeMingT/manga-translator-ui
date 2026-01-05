@@ -419,13 +419,14 @@ class MangaTranslator:
             logger.error(f"Error saving image to {output_path}: {e}")
             return False
     
-    def _save_and_cleanup_context(self, ctx: Context, save_info: dict, mode_label: str = "BATCH") -> bool:
+    def _save_and_cleanup_context(self, ctx: Context, save_info: dict, config: Config = None, mode_label: str = "BATCH") -> bool:
         """
-        统一的保存和清理方法：保存翻译结果并清理内存
+        统一的保存和清理方法：保存翻译结果、导出PSD并清理内存
         
         Args:
             ctx: Context对象
             save_info: 保存信息字典
+            config: Config对象（用于PSD导出）
             mode_label: 模式标签（用于日志）
             
         Returns:
@@ -442,6 +443,20 @@ class MangaTranslator:
             # 标记成功
             if success or not overwrite:  # 跳过已存在的文件也算成功
                 ctx.success = True
+            
+            # 导出可编辑PSD（如果启用）
+            if config and hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
+                try:
+                    from .utils.photoshop_export import photoshop_export, get_psd_output_path
+                    psd_path = get_psd_output_path(ctx.image_name)
+                    cli_cfg = getattr(config, 'cli', None)
+                    default_font = getattr(cli_cfg, 'psd_font', None)
+                    line_spacing = getattr(config.render, 'line_spacing', None) if hasattr(config, 'render') else None
+                    script_only = getattr(cli_cfg, 'psd_script_only', False)
+                    photoshop_export(psd_path, ctx, default_font, ctx.image_name, self.verbose, self._result_path, line_spacing, script_only)
+                    logger.info(f"  -> ✅ [PSD] Exported editable PSD: {os.path.basename(psd_path)}")
+                except Exception as psd_err:
+                    logger.error(f"Error exporting PSD for {os.path.basename(ctx.image_name)}: {psd_err}")
             
             # ✅ 保存后立即清理result以释放内存
             ctx.result = None
@@ -3029,22 +3044,8 @@ class MangaTranslator:
                     for ctx, config in preprocessed_contexts:
                         if save_info and ctx.result:
                             try:
-                                self._save_and_cleanup_context(ctx, save_info, "LOAD_TEXT")
-                                    
-                                    # 导出可编辑PSD（如果启用）
-                                    if hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
-                                        try:
-                                            from .utils.photoshop_export import photoshop_export, get_psd_output_path
-                                            psd_path = get_psd_output_path(ctx.image_name)
-                                            cli_cfg = getattr(config, 'cli', None)
-                                            default_font = getattr(cli_cfg, 'psd_font', None)
-                                            line_spacing = getattr(config.render, 'line_spacing', None) if hasattr(config, 'render') else None
-                                            script_only = getattr(cli_cfg, 'psd_script_only', False)
-                                            photoshop_export(psd_path, ctx, default_font, ctx.image_name, self.verbose, self._result_path, line_spacing, script_only)
-                                            logger.info(f"  -> ✅ [PSD] Exported editable PSD: {os.path.basename(psd_path)}")
-                                        except Exception as psd_err:
-                                            logger.error(f"Error exporting PSD for {os.path.basename(ctx.image_name)}: {psd_err}")
-                                            
+                                # 使用统一的保存和清理方法（包含PSD导出）
+                                self._save_and_cleanup_context(ctx, save_info, config, "LOAD_TEXT")
                             except Exception as save_err:
                                 logger.error(f"Error saving load_text result for {os.path.basename(ctx.image_name)}: {save_err}")
                         
@@ -3200,22 +3201,8 @@ class MangaTranslator:
                             ctx = await self._complete_translation_pipeline(ctx, config)
                         if save_info and ctx.result:
                             try:
-                                self._save_and_cleanup_context(ctx, save_info, "BATCH")
-                                
-                                # 导出可编辑PSD（如果启用）
-                                if hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
-                                    try:
-                                        from .utils.photoshop_export import photoshop_export, get_psd_output_path
-                                        psd_path = get_psd_output_path(ctx.image_name)
-                                        cli_cfg = getattr(config, 'cli', None)
-                                        default_font = getattr(cli_cfg, 'psd_font', None)
-                                        line_spacing = getattr(config.render, 'line_spacing', None) if hasattr(config, 'render') else None
-                                        script_only = getattr(cli_cfg, 'psd_script_only', False)
-                                        photoshop_export(psd_path, ctx, default_font, ctx.image_name, self.verbose, self._result_path, line_spacing, script_only)
-                                        logger.info(f"  -> ✅ [PSD] Exported editable PSD: {os.path.basename(psd_path)}")
-                                    except Exception as psd_err:
-                                        logger.error(f"Error exporting PSD for {os.path.basename(ctx.image_name)}: {psd_err}")
-                                        
+                                # 使用统一的保存和清理方法（包含PSD导出）
+                                self._save_and_cleanup_context(ctx, save_info, config, "BATCH")
                             except Exception as save_err:
                                 logger.error(f"Error saving standard batch result for {os.path.basename(ctx.image_name)}: {save_err}")
 
@@ -5018,21 +5005,7 @@ class MangaTranslator:
                     # --- BEGIN SAVE LOGIC ---
                     if save_info and ctx.result:
                         try:
-                            self._save_and_cleanup_context(ctx, save_info, "HQ")
-                            
-                            # 导出可编辑PSD（如果启用）
-                            if hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
-                                try:
-                                    from .utils.photoshop_export import photoshop_export, get_psd_output_path
-                                    psd_path = get_psd_output_path(ctx.image_name)
-                                    cli_cfg = getattr(config, 'cli', None)
-                                    default_font = getattr(cli_cfg, 'psd_font', None)
-                                    line_spacing = getattr(config.render, 'line_spacing', None) if hasattr(config, 'render') else None
-                                    script_only = getattr(cli_cfg, 'psd_script_only', False)
-                                    photoshop_export(psd_path, ctx, default_font, ctx.image_name, self.verbose, self._result_path, line_spacing, script_only)
-                                    logger.info(f"  -> ✅ [PSD] Exported editable PSD: {os.path.basename(psd_path)}")
-                                except Exception as psd_err:
-                                    logger.error(f"Error exporting PSD for {os.path.basename(ctx.image_name)}: {psd_err}")
+                            self._save_and_cleanup_context(ctx, save_info, config, "HQ")
                         except Exception as save_err:
                             logger.error(f"Error saving high-quality result for {os.path.basename(ctx.image_name)}: {save_err}")
                             import traceback
