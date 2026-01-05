@@ -63,6 +63,11 @@ DEFAULT_ADMIN_SETTINGS = {
         'cli.colorize_only',
         'cli.upscale_only',
         'cli.inpaint_only',
+        # Qt UI 专属参数（替换翻译模式相关）
+        'cli.replace_translation',
+        'render.enable_template_alignment',
+        'render.paste_connect_distance_ratio',
+        'render.paste_mask_dilation_pixels',
         # 翻译器高级配置
         'translator.enable_post_translation_check',
         'translator.post_check_max_retry_attempts',
