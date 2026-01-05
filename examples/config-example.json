@@ -84,7 +84,7 @@
   },
   "upscale": {
     "upscaler": "mangajanai",
-    "upscale_ratio": null,
+    "upscale_ratio": "x4",
     "realcugan_model": "2x-conservative",
     "tile_size": 600,
     "revert_upscaling": false
@@ -111,7 +111,7 @@
     "batch_concurrent": false,
     "generate_and_export": false,
     "colorize_only": false,
-    "upscale_only": false,
+    "upscale_only": true,
     "inpaint_only": false,
     "save_to_source_dir": false,
     "export_editable_psd": false,

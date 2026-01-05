@@ -340,15 +340,48 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             original_regions = raw_ctx.text_regions
             raw_ctx.text_regions = inpaint_regions
             
-            # 生成修复蒙版
-            logger.info("    Generating mask for inpainting...")
-            raw_ctx.mask = await translator._run_mask_refinement(config, raw_ctx)
+            # 检查修复模型是否为 none
+            inpainter_model = config.inpainter.inpainter if hasattr(config, 'inpainter') and hasattr(config.inpainter, 'inpainter') else None
+            logger.info(f"    [调试] 修复模型配置: {inpainter_model} (类型: {type(inpainter_model)})")
             
-            # 保存优化后的蒙版到 mask_raw（用于后续加载时跳过优化）
-            raw_ctx.mask_raw = raw_ctx.mask
+            # 判断是否为 none（只判断明确设置为 'none' 的情况，不包括 None）
+            is_none_inpainter = (inpainter_model == 'none' or 
+                                (hasattr(inpainter_model, 'value') and inpainter_model.value == 'none') or
+                                (inpainter_model is not None and str(inpainter_model) == 'none'))
             
-            # 标记蒙版已优化，保存JSON时会设置 mask_is_refined=True
-            raw_ctx.mask_is_refined = True
+            if is_none_inpainter:
+                # 修复模型为 none，使用简化算法：二值化 + 膨胀（与 win.py 的 darken_blend2 一致）
+                logger.info("    [修复模型=none] 使用简化蒙版优化算法（二值化 + 膨胀）...")
+                if raw_ctx.mask_raw is not None:
+                    # 确保蒙版是单通道
+                    mask = raw_ctx.mask_raw
+                    if len(mask.shape) == 3:
+                        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                    
+                    # 二值化
+                    _, thres = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                    
+                    # 膨胀（使用椭圆核 5x5，迭代2次）
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                    thres = cv2.dilate(thres, kernel, iterations=2)
+                    
+                    logger.info(f"    蒙版优化完成: 二值化 + 膨胀(椭圆核5x5, 迭代2次)")
+                    
+                    raw_ctx.mask = thres
+                else:
+                    logger.warning("    [警告] mask_raw 为空，无法生成蒙版")
+                    raw_ctx.mask = None
+                raw_ctx.mask_is_refined = False
+            else:
+                # 正常流程：生成优化蒙版
+                logger.info("    Generating mask for inpainting...")
+                raw_ctx.mask = await translator._run_mask_refinement(config, raw_ctx)
+                
+                # 保存优化后的蒙版到 mask_raw（用于后续加载时跳过优化）
+                raw_ctx.mask_raw = raw_ctx.mask
+                
+                # 标记蒙版已优化，保存JSON时会设置 mask_is_refined=True
+                raw_ctx.mask_is_refined = True
             
             # 执行修复
             raw_ctx.img_inpainted = await translator._run_inpainting(config, raw_ctx)
@@ -410,12 +443,13 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                     # 二值化
                     _, translated_mask_binary = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
 
-                    # 1. 先膨胀蒙版，使距离小于长边3%的区域连通（仅用于检测连通性）
-                    connect_distance = int(max(h, w) * 0.03)  # 长边的3%
-                    connect_iterations = max(1, connect_distance // 5)  # 5x5核，每次约5像素
-                    connect_kernel = np.ones((5, 5), np.uint8)
+                    # 1. 先膨胀蒙版，使距离小于指定比例的区域连通（仅用于检测连通性）
+                    connect_ratio = config.render.paste_connect_distance_ratio if hasattr(config.render, 'paste_connect_distance_ratio') else 0.03
+                    connect_distance = int(max(h, w) * connect_ratio)  # 默认长边的3%
+                    connect_iterations = max(1, connect_distance // 3)  # 3x3核，每次约3像素
+                    connect_kernel = np.ones((3, 3), np.uint8)
                     dilated_for_connect = cv2.dilate(translated_mask_binary, connect_kernel, iterations=connect_iterations)
-                    logger.info(f"    步骤1: 膨胀{connect_distance}像素（长边3%）检测连通区域")
+                    logger.info(f"    步骤1: 膨胀{connect_distance}像素（长边{connect_ratio*100:.1f}%）检测连通区域")
 
                     # 2. 在膨胀后的蒙版上找连通区域
                     num_labels, labels_dilated = cv2.connectedComponents(dilated_for_connect)
@@ -436,16 +470,26 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
 
                     logger.info("    步骤2: 筛选与匹配区域相交的连通区域")
 
-                    # 4. 最后扩张蒙版（膨胀20像素）
-                    kernel = np.ones((5, 5), np.uint8)
-                    translated_mask = cv2.dilate(filtered_mask, kernel, iterations=4)  # 5x5核，4次迭代 ≈ 20像素
-                    logger.info("    步骤3: 扩张蒙版20像素")
+                    # 4. 最后扩张蒙版（使用配置的膨胀大小）
+                    dilation_pixels = config.render.paste_mask_dilation_pixels if hasattr(config.render, 'paste_mask_dilation_pixels') else 20
+                    if dilation_pixels > 0:
+                        dilation_iterations = max(1, dilation_pixels // 3)  # 3x3核，每次约3像素
+                        kernel = np.ones((3, 3), np.uint8)
+                        translated_mask = cv2.dilate(filtered_mask, kernel, iterations=dilation_iterations)
+                        logger.info(f"    步骤3: 扩张蒙版{dilation_pixels}像素（{dilation_iterations}次迭代）")
+                    else:
+                        translated_mask = filtered_mask
+                        logger.info(f"    步骤3: 跳过蒙版扩张（膨胀大小=0）")
 
                     logger.info(f"    蒙版处理完成")
                 else:
                     # 没有匹配区域时，直接扩张原始蒙版
-                    kernel = np.ones((5, 5), np.uint8)
-                    translated_mask = cv2.dilate(translated_mask, kernel, iterations=4)
+                    dilation_pixels = config.render.paste_mask_dilation_pixels if hasattr(config.render, 'paste_mask_dilation_pixels') else 20
+                    if dilation_pixels > 0:
+                        dilation_iterations = max(1, dilation_pixels // 3)
+                        kernel = np.ones((3, 3), np.uint8)
+                        translated_mask = cv2.dilate(translated_mask, kernel, iterations=dilation_iterations)
+                    # 如果 dilation_pixels <= 0，保持原始蒙版不变
 
                 # 使用高级图像合成算法
                 result_img = get_text_to_img_solid_ink(
@@ -491,6 +535,9 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                         
                         # 标记成功
                         raw_ctx.success = True
+                        
+                        # ✅ 保存后清理result以释放内存
+                        raw_ctx.result = None
                         
                         # 只有在非直接粘贴模式下才保存 inpainted 和 JSON
                         if not config.render.enable_template_alignment:

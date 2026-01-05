@@ -556,10 +556,8 @@ class ConcurrentPipeline:
                         if hasattr(self.translator, '_current_save_info') and self.translator._current_save_info:
                             save_info = self.translator._current_save_info
                             
-                            # 保存图片（与主流程一致：不管是否保存成功都继续）
-                            overwrite = save_info.get('overwrite', True)
-                            final_output_path = self.translator._calculate_output_path(ctx.image_name, save_info)
-                            self.translator._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "CONCURRENT")
+                            # 使用统一的保存和清理方法
+                            self.translator._save_and_cleanup_context(ctx, save_info, "CONCURRENT")
                             
                             # ✅ 保存修复后的图片到inpainted目录（使用渲染前备份的副本）
                             if img_inpainted_copy is not None:

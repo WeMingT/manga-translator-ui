@@ -418,6 +418,38 @@ class MangaTranslator:
         except Exception as e:
             logger.error(f"Error saving image to {output_path}: {e}")
             return False
+    
+    def _save_and_cleanup_context(self, ctx: Context, save_info: dict, mode_label: str = "BATCH") -> bool:
+        """
+        统一的保存和清理方法：保存翻译结果并清理内存
+        
+        Args:
+            ctx: Context对象
+            save_info: 保存信息字典
+            mode_label: 模式标签（用于日志）
+            
+        Returns:
+            bool: 是否成功保存
+        """
+        if not save_info or not ctx.result:
+            return False
+        
+        try:
+            overwrite = save_info.get('overwrite', True)
+            final_output_path = self._calculate_output_path(ctx.image_name, save_info)
+            success = self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, mode_label)
+            
+            # 标记成功
+            if success or not overwrite:  # 跳过已存在的文件也算成功
+                ctx.success = True
+            
+            # ✅ 保存后立即清理result以释放内存
+            ctx.result = None
+            
+            return success
+        except Exception as e:
+            logger.error(f"Error in _save_and_cleanup_context: {e}")
+            return False
 
     def _save_text_to_file(self, image_path: str, ctx: Context, config: Config = None):
         """保存翻译数据到JSON文件，使用新的目录结构"""
@@ -2997,11 +3029,7 @@ class MangaTranslator:
                     for ctx, config in preprocessed_contexts:
                         if save_info and ctx.result:
                             try:
-                                overwrite = save_info.get('overwrite', True)
-                                final_output_path = self._calculate_output_path(ctx.image_name, save_info)
-                                if self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "LOAD_TEXT"):
-                                    # 标记成功
-                                    ctx.success = True
+                                self._save_and_cleanup_context(ctx, save_info, "LOAD_TEXT")
                                     
                                     # 导出可编辑PSD（如果启用）
                                     if hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
@@ -3172,12 +3200,7 @@ class MangaTranslator:
                             ctx = await self._complete_translation_pipeline(ctx, config)
                         if save_info and ctx.result:
                             try:
-                                overwrite = save_info.get('overwrite', True)
-                                final_output_path = self._calculate_output_path(ctx.image_name, save_info)
-                                # 保存图片（可能实际保存或跳过已存在的文件）
-                                self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "BATCH")
-                                # ✅ 无论保存还是跳过，只要没有异常就标记成功
-                                ctx.success = True
+                                self._save_and_cleanup_context(ctx, save_info, "BATCH")
                                 
                                 # 导出可编辑PSD（如果启用）
                                 if hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
@@ -4995,9 +5018,7 @@ class MangaTranslator:
                     # --- BEGIN SAVE LOGIC ---
                     if save_info and ctx.result:
                         try:
-                            overwrite = save_info.get('overwrite', True)
-                            final_output_path = self._calculate_output_path(ctx.image_name, save_info)
-                            self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, "HQ")
+                            self._save_and_cleanup_context(ctx, save_info, "HQ")
                             
                             # 导出可编辑PSD（如果启用）
                             if hasattr(config, 'cli') and hasattr(config.cli, 'export_editable_psd') and config.cli.export_editable_psd:
@@ -5023,13 +5044,8 @@ class MangaTranslator:
                         # 使用循环变量中的config，而不是从ctx中获取
                         self._save_text_to_file(ctx.image_name, ctx, config)
 
-                    # ✅ 标记成功（在清理result之前）
+                    # ✅ 标记成功
                     ctx.success = True
-                    
-                    # ✅ 清理ctx中的大对象，只保留必要信息
-                    # 注意：只有在保存文件后才清理result（API模式下save_info为None，需要保留result）
-                    if save_info and hasattr(ctx, 'result'):
-                        ctx.result = None  # 保存后删除渲染结果
                     
                     # ✅ 清理中间处理图像（保留text_regions等元数据）
                     if hasattr(ctx, 'input') and ctx.input is not None:
