@@ -86,7 +86,7 @@ setup_miniconda() {
         SYSTEM_CONDA=$(which conda)
         echo -e "${GREEN}[OK] 检测到系统 Conda: $SYSTEM_CONDA${NC}"
         # 使用系统 Conda
-        MINICONDA_DIR=$(dirname $(dirname "$SYSTEM_CONDA"))
+        MINICONDA_DIR="$(dirname "$(dirname "$SYSTEM_CONDA")")"
         return 0
     fi
     
