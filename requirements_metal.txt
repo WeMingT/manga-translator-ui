@@ -2,7 +2,7 @@
 # 使用 MPS (Metal Performance Shaders) 进行 GPU 加速
 #
 # 安装方式:
-#   pip install -r requirements_macos.txt
+#   pip install -r requirements_metal.txt
 #   pip install git+https://github.com/lucasb-eyer/pydensecrf.git
 #
 # 注意: 不要从 pytorch.org 的 CUDA 源安装 PyTorch
