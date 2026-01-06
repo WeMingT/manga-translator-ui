@@ -6,7 +6,7 @@
 # =====================================================================
 
 # 使用脚本所在目录作为工作目录
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || { echo "Error: Failed to change directory"; exit 1; }
 SCRIPT_DIR="$(pwd)"
 
 # 配置
