@@ -137,7 +137,7 @@ setup_environment() {
     echo -e "${BLUE}[*] 设置 Conda 环境...${NC}"
     
     # 检查环境是否存在
-    if conda info --envs | grep -q "^$CONDA_ENV_NAME "; then
+    if conda env list | grep -qE "^${CONDA_ENV_NAME}[[:space:]]"; then
         echo -e "${GREEN}[OK] 检测到已有环境: $CONDA_ENV_NAME${NC}"
         read -p "是否删除并重新创建? (y/n) " -n 1 -r
         echo
