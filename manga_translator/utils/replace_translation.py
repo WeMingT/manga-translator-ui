@@ -575,9 +575,12 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                     MAP = np.argmax(Q, axis=0).reshape((h, w))
                     
                     # 转换回蒙版
-                    translated_mask = (MAP * 255).astype(np.uint8)
-                    
-                    logger.info("    使用 DenseCRF 优化蒙版边缘")
+                    edge_optimized = (MAP * 255).astype(np.uint8)
+
+                    # 叠加：扩张后的蒙版 OR 边缘优化后的蒙版
+                    translated_mask = cv2.bitwise_or(translated_mask, edge_optimized)
+
+                    logger.info("    使用 DenseCRF 优化蒙版边缘并与扩张蒙版叠加")
                 except ImportError:
                     logger.warning("    pydensecrf 未安装，跳过 CRF 优化，使用高斯模糊平滑")
                     # 回退到高斯模糊
