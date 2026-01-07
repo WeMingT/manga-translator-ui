@@ -579,17 +579,23 @@ class ExportService:
             from manga_translator.config import TranslatorConfig, UpscaleConfig, ColorizerConfig, InpainterConfig
             translator_cfg = TranslatorConfig(translator='none')
             
-            # 从config中提取upscale、colorizer和inpainter配置
+            # 从config中提取upscale、colorizer、inpainter和cli配置
             upscale_config = config.get('upscale', {})
             colorizer_config = config.get('colorizer', {})
             inpainter_config = config.get('inpainter', {})
+            cli_config = config.get('cli', {})
             upscale_cfg = UpscaleConfig(**upscale_config) if upscale_config else UpscaleConfig()
             colorizer_cfg = ColorizerConfig(**colorizer_config) if colorizer_config else ColorizerConfig()
             inpainter_cfg = InpainterConfig(**inpainter_config) if inpainter_config else InpainterConfig()
             
+            # 创建CliConfig对象（包含PSD导出配置）
+            from manga_translator.config import CliConfig
+            cli_cfg = CliConfig(**cli_config) if cli_config else CliConfig()
+            
             self.logger.info(f"Creating Config with upscale_ratio={upscale_cfg.upscale_ratio}, colorizer={colorizer_cfg.colorizer}, inpainting_size={inpainter_cfg.inpainting_size}")
+            self.logger.info(f"PSD导出配置: export_editable_psd={cli_cfg.export_editable_psd}, psd_font={cli_cfg.psd_font}, psd_script_only={cli_cfg.psd_script_only}")
 
-            cfg = Config(render=render_cfg, translator=translator_cfg, upscale=upscale_cfg, colorizer=colorizer_cfg, inpainter=inpainter_cfg)
+            cfg = Config(render=render_cfg, translator=translator_cfg, upscale=upscale_cfg, colorizer=colorizer_cfg, inpainter=inpainter_cfg, cli=cli_cfg)
 
             if progress_callback:
                 progress_callback("执行后端渲染...")
@@ -624,6 +630,26 @@ class ExportService:
                     except Exception as copy_error:
                         self.logger.error(f"复制结果图像失败: {copy_error}, ctx.result状态: closed={getattr(ctx.result, 'closed', 'N/A')}, mode={getattr(ctx.result, 'mode', 'N/A')}")
                         raise
+                    
+                    # 导出可编辑PSD（如果启用）
+                    if cfg.cli.export_editable_psd:
+                        try:
+                            from manga_translator.utils.photoshop_export import photoshop_export, get_psd_output_path
+                            psd_path = get_psd_output_path(image_path)
+                            default_font = cfg.cli.psd_font
+                            line_spacing = cfg.render.line_spacing if hasattr(cfg.render, 'line_spacing') else None
+                            script_only = cfg.cli.psd_script_only
+                            
+                            self.logger.info(f"开始导出PSD: {psd_path}")
+                            photoshop_export(psd_path, ctx, default_font, image_path, False, None, line_spacing, script_only)
+                            self.logger.info(f"✅ [PSD] 已导出可编辑PSD: {os.path.basename(psd_path)}")
+                            
+                            if progress_callback:
+                                progress_callback(f"已导出PSD: {os.path.basename(psd_path)}")
+                        except Exception as psd_err:
+                            self.logger.error(f"导出PSD失败: {psd_err}")
+                            import traceback
+                            self.logger.error(traceback.format_exc())
                     
                     # 关闭原始结果图像
                     try:

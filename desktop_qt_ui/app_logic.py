@@ -1492,6 +1492,13 @@ class MainAppLogic(QObject):
             self._ui_log("一个任务已经在运行中。", "WARNING")
             return
         
+        # ✅ 等待线程池中的旧任务完全结束（防止ONNX Runtime冲突）
+        if self.current_worker is not None:
+            self._ui_log("等待上一个任务完全结束...")
+            if not self.thread_pool.waitForDone(3000):  # 等待最多3秒
+                self._ui_log("上一个任务未能在3秒内结束，强制继续", "WARNING")
+            self.current_worker = None
+        
         # ✅ 线程池会自动管理任务，无需检查旧线程
 
         # 检查输出目录是否合法 (提前检查)
@@ -1695,15 +1702,17 @@ class MainAppLogic(QObject):
             # 通知worker停止
             self.current_worker.stop()
             
-            # 立即更新状态
-            self.state_manager.set_translating(False)
-            self.state_manager.set_status_message("任务已停止")
-            if hasattr(self, 'main_view') and self.main_view:
-                self.main_view.reset_progress()
-            
-            # 延迟清理资源
+            # ✅ 延迟更新状态，确保任务完全停止后才允许新任务启动
             from PyQt6.QtCore import QTimer
-            QTimer.singleShot(100, self._cleanup_after_task)
+            def delayed_cleanup():
+                self.state_manager.set_translating(False)
+                self.state_manager.set_status_message("任务已停止")
+                if hasattr(self, 'main_view') and self.main_view:
+                    self.main_view.reset_progress()
+                self._cleanup_after_task()
+            
+            # 等待1秒后才设置为可启动状态（给ONNX Runtime足够的清理时间）
+            QTimer.singleShot(1000, delayed_cleanup)
             
             return True
         
