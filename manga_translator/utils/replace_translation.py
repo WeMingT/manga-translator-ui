@@ -204,7 +204,15 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             logger.info(f"    生肉图区域: {len(raw_ctx.text_regions)} -> 过滤后: {len(raw_regions_filtered)}")
             
             if not raw_regions_filtered:
-                logger.warning("  [跳过] 过滤后无有效区域")
+                logger.warning("  [跳过] 过滤后无有效区域，直接输出原图")
+                # 直接复制原图到输出目录
+                try:
+                    from .generic import imwrite_unicode
+                    output_path = translator._result_path(os.path.basename(raw_path))
+                    shutil.copy2(raw_path, output_path)
+                    logger.info(f"  -> 已保存原图: {os.path.basename(raw_path)}")
+                except Exception as e:
+                    logger.error(f"  [错误] 复制原图失败: {e}")
                 raw_ctx.success = False
                 results.append(raw_ctx)
                 continue
@@ -221,7 +229,15 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             translated_ctx.image_name = translated_path
             
             if not translated_ctx.text_regions:
-                logger.warning("  [跳过] 翻译图未检测到文本区域")
+                logger.warning("  [跳过] 翻译图未检测到文本区域，直接输出原图")
+                # 直接复制原图到输出目录
+                try:
+                    from .generic import imwrite_unicode
+                    output_path = translator._result_path(os.path.basename(raw_path))
+                    shutil.copy2(raw_path, output_path)
+                    logger.info(f"  -> 已保存原图: {os.path.basename(raw_path)}")
+                except Exception as e:
+                    logger.error(f"  [错误] 复制原图失败: {e}")
                 raw_ctx.success = False
                 results.append(raw_ctx)
                 continue
@@ -350,8 +366,8 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                                 (inpainter_model is not None and str(inpainter_model) == 'none'))
             
             if is_none_inpainter:
-                # 修复模型为 none，使用简化算法：二值化 + 连通区域扩散 + 筛选有效框 + 膨胀
-                logger.info("    [修复模型=none] 使用简化蒙版优化算法（二值化 + 连通扩散 + 筛选 + 膨胀）...")
+                # 修复模型为 none，使用简化算法：二值化 + 连通区域扩散 + 筛选有效框 + DenseCRF精炼 + 双边滤波 + 膨胀
+                logger.info("    [修复模型=none] 使用增强蒙版优化算法（二值化 + 连通扩散 + 筛选 + DenseCRF + 双边滤波 + 膨胀）...")
                 if raw_ctx.mask_raw is not None:
                     h, w = raw_ctx.mask_raw.shape[:2]
                     
@@ -363,6 +379,24 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                     # 步骤1: 二值化
                     _, thres = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                     logger.info(f"    步骤1: 二值化")
+                    
+                    # 步骤1.5: 去掉小于等于10像素的连通区域
+                    num_labels_original, labels_original = cv2.connectedComponents(thres)
+                    thres_filtered = np.zeros((h, w), dtype=np.uint8)
+                    removed_count = 0
+                    kept_count_size = 0
+                    
+                    for label_id in range(1, num_labels_original):
+                        component = (labels_original == label_id).astype(np.uint8) * 255
+                        area = np.count_nonzero(component)
+                        if area > 10:
+                            thres_filtered = cv2.bitwise_or(thres_filtered, component)
+                            kept_count_size += 1
+                        else:
+                            removed_count += 1
+                    
+                    logger.info(f"    步骤1.5: 去掉小区域 移除 {removed_count} 个 ≤10像素的区域，保留 {kept_count_size} 个")
+                    thres = thres_filtered
                     
                     # 步骤2: 连通区域扩散（使用配置参数控制）
                     connect_ratio = config.render.paste_connect_distance_ratio if hasattr(config.render, 'paste_connect_distance_ratio') else 0.03
@@ -377,43 +411,147 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                     
                     logger.info(f"    步骤2b: 检测到 {num_labels-1} 个连通区域")
                     
-                    # 步骤3: 筛选有效框区域（如果有效框里有这个连通区域的任何部分，就保留整个连通区域的原始大小）
-                    valid_region_mask = np.zeros((h, w), dtype=np.uint8)
+                    # 步骤3: 使用 filter_masks 筛选有效框区域
+                    # 准备文本行列表 (x, y, w, h) 格式
+                    textlines = []
                     for region in inpaint_regions:
                         x, y, rw, rh = get_bounding_rect(region)
-                        x1 = max(0, int(x))
-                        y1 = max(0, int(y))
-                        x2 = min(w, int(x + rw))
-                        y2 = min(h, int(y + rh))
-                        valid_region_mask[y1:y2, x1:x2] = 255
+                        textlines.append((int(x), int(y), int(rw), int(rh)))
                     
-                    # 筛选：检查每个连通区域是否与有效框相交
-                    filtered_mask = np.zeros((h, w), dtype=np.uint8)
-                    kept_count = 0
-                    for label_id in range(1, num_labels):
-                        # 获取膨胀后的连通区域（用于判断是否相交）
-                        dilated_component = (labels_dilated == label_id).astype(np.uint8) * 255
+                    # 使用 filter_masks 过滤蒙版
+                    mask_ccs, cc2textline_assignment = filter_masks(thres, textlines, keep_threshold=0.01)
+                    
+                    # 合并所有保留的连通组件
+                    if mask_ccs:
+                        filtered_mask = np.zeros((h, w), dtype=np.uint8)
+                        for cc in mask_ccs:
+                            filtered_mask = cv2.bitwise_or(filtered_mask, cc)
+                        logger.info(f"    步骤3: filter_masks 筛选 保留 {len(mask_ccs)} 个连通组件")
+                    else:
+                        filtered_mask = np.zeros((h, w), dtype=np.uint8)
+                        logger.warning(f"    步骤3: filter_masks 未保留任何连通组件")
+                    
+                    # 步骤4: DenseCRF 精炼蒙版边缘
+                    try:
+                        import pydensecrf.densecrf as dcrf
+                        from pydensecrf.utils import unary_from_softmax
                         
-                        # 检查是否与有效框相交
-                        intersection = cv2.bitwise_and(dilated_component, valid_region_mask)
-                        if np.any(intersection):
-                            # 有交集，保留原始蒙版中属于这个连通区域的部分（保持原始大小）
-                            original_part = cv2.bitwise_and(thres, dilated_component)
-                            filtered_mask = cv2.bitwise_or(filtered_mask, original_part)
-                            kept_count += 1
+                        logger.info(f"    步骤4a: 使用 DenseCRF 精炼蒙版边缘...")
+                        
+                        # 准备图像（双边滤波预处理）
+                        img_for_crf = cv2.bilateralFilter(raw_ctx.img_rgb, 17, 80, 80)
+                        
+                        # 将蒙版转换为概率分布
+                        mask_softmax = np.zeros((h, w, 2), dtype=np.float32)
+                        mask_softmax[:, :, 0] = (255 - filtered_mask) / 255.0  # 背景概率
+                        mask_softmax[:, :, 1] = filtered_mask / 255.0          # 前景概率
+                        
+                        n_classes = 2
+                        feat_first = mask_softmax.transpose((2, 0, 1)).reshape((n_classes, -1))
+                        unary = unary_from_softmax(feat_first)
+                        unary = np.ascontiguousarray(unary)
+                        
+                        # 创建 DenseCRF 模型
+                        d = dcrf.DenseCRF2D(w, h, n_classes)
+                        d.setUnaryEnergy(unary)
+                        
+                        # 添加成对势能
+                        d.addPairwiseGaussian(sxy=1, compat=3, kernel=dcrf.DIAG_KERNEL,
+                                            normalization=dcrf.NO_NORMALIZATION)
+                        d.addPairwiseBilateral(sxy=23, srgb=7, rgbim=img_for_crf,
+                                             compat=20, kernel=dcrf.DIAG_KERNEL,
+                                             normalization=dcrf.NO_NORMALIZATION)
+                        
+                        # 推理
+                        Q = d.inference(5)
+                        res = np.argmax(Q, axis=0).reshape((h, w))
+                        crf_mask = np.array(res * 255, dtype=np.uint8)
+                        
+                        logger.info(f"    步骤4b: DenseCRF 精炼完成")
+                        filtered_mask = crf_mask
+                        
+                    except ImportError:
+                        logger.warning(f"    步骤4: pydensecrf 未安装，跳过 DenseCRF 精炼")
+                    except Exception as e:
+                        logger.warning(f"    步骤4: DenseCRF 精炼失败: {e}，使用原始蒙版")
                     
-                    logger.info(f"    步骤3: 筛选有效框区域 保留 {kept_count}/{num_labels-1} 个连通区域（原始大小）")
+                    # 步骤5: 对每个文本区域应用双边滤波优化（类似 complete_mask）
+                    logger.info(f"    步骤5: 对 {len(inpaint_regions)} 个文本区域应用双边滤波优化...")
                     
-                    # 步骤4: 最终膨胀（使用椭圆核 5x5，迭代2次）
-                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-                    final_mask = cv2.dilate(filtered_mask, kernel, iterations=2)
-                    logger.info(f"    步骤4: 最终膨胀(椭圆核5x5, 迭代2次)")
+                    for idx, region in enumerate(inpaint_regions):
+                        x, y, rw, rh = get_bounding_rect(region)
+                        text_size = min(rw, rh)
+                        extend_size = int(text_size * 0.1)
+                        
+                        x1 = max(int(x) - extend_size, 0)
+                        y1 = max(int(y) - extend_size, 0)
+                        x2 = min(int(x + rw) + extend_size, w)
+                        y2 = min(int(y + rh) + extend_size, h)
+                        
+                        if x2 <= x1 or y2 <= y1:
+                            continue
+                        
+                        # 提取区域
+                        mask_region = np.ascontiguousarray(filtered_mask[y1:y2, x1:x2])
+                        img_region = np.ascontiguousarray(raw_ctx.img_rgb[y1:y2, x1:x2])
+                        
+                        if mask_region.size == 0 or img_region.size == 0:
+                            continue
+                        
+                        # 使用 DenseCRF 再次精炼该区域
+                        try:
+                            rh_local, rw_local = mask_region.shape[:2]
+                            
+                            # 准备概率分布
+                            mask_softmax_local = np.zeros((rh_local, rw_local, 2), dtype=np.float32)
+                            mask_softmax_local[:, :, 0] = (255 - mask_region) / 255.0
+                            mask_softmax_local[:, :, 1] = mask_region / 255.0
+                            
+                            feat_first_local = mask_softmax_local.transpose((2, 0, 1)).reshape((2, -1))
+                            unary_local = unary_from_softmax(feat_first_local)
+                            unary_local = np.ascontiguousarray(unary_local)
+                            
+                            # 创建局部 DenseCRF
+                            d_local = dcrf.DenseCRF2D(rw_local, rh_local, 2)
+                            d_local.setUnaryEnergy(unary_local)
+                            d_local.addPairwiseGaussian(sxy=1, compat=3, kernel=dcrf.DIAG_KERNEL,
+                                                       normalization=dcrf.NO_NORMALIZATION)
+                            d_local.addPairwiseBilateral(sxy=23, srgb=7, rgbim=img_region,
+                                                        compat=20, kernel=dcrf.DIAG_KERNEL,
+                                                        normalization=dcrf.NO_NORMALIZATION)
+                            
+                            Q_local = d_local.inference(5)
+                            res_local = np.argmax(Q_local, axis=0).reshape((rh_local, rw_local))
+                            refined_region = np.array(res_local * 255, dtype=np.uint8)
+                            
+                            # 更新蒙版
+                            filtered_mask[y1:y2, x1:x2] = refined_region
+                            
+                        except Exception as e:
+                            logger.warning(f"      区域 {idx} DenseCRF 精炼失败: {e}")
+                    
+                    logger.info(f"    步骤5: 双边滤波优化完成")
+                    
+                    # 步骤6: 最终膨胀（可选，通过mask_dilation_offset控制）
+                    # mask_dilation_offset: 膨胀距离（像素数），设为0则跳过膨胀
+                    mask_dilation_offset = config.mask_dilation_offset if hasattr(config, 'mask_dilation_offset') else 0
+                    kernel_size = config.kernel_size if hasattr(config, 'kernel_size') else 3
+                    logger.info(f"    [调试] 参数: mask_dilation_offset={mask_dilation_offset}, kernel_size={kernel_size}")
+                    
+                    if mask_dilation_offset > 0:
+                        dilation_iterations = max(1, mask_dilation_offset // kernel_size)
+                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+                        final_mask = cv2.dilate(filtered_mask, kernel, iterations=dilation_iterations)
+                        logger.info(f"    步骤6: 最终膨胀(椭圆核{kernel_size}x{kernel_size}, 迭代{dilation_iterations}次, 总膨胀≈{mask_dilation_offset}像素)")
+                    else:
+                        final_mask = filtered_mask
+                        logger.info(f"    步骤6: 跳过最终膨胀（mask_dilation_offset=0）")
                     
                     raw_ctx.mask = final_mask
                 else:
                     logger.warning("    [警告] mask_raw 为空，无法生成蒙版")
                     raw_ctx.mask = None
-                raw_ctx.mask_is_refined = False
+                raw_ctx.mask_is_refined = True  # 标记为已精炼
             else:
                 # 正常流程：生成优化蒙版
                 logger.info("    Generating mask for inpainting...")
@@ -781,6 +919,125 @@ def find_translated_image(raw_image_path: str) -> Optional[str]:
         logger.error(f"无法列出目录文件: {e}")
     
     return None
+
+
+def filter_masks(mask_img: np.ndarray, textlines: List[Tuple[int, int, int, int]], keep_threshold: float = 1e-2) -> Tuple[List[np.ndarray], List[int]]:
+    """
+    过滤蒙版，只保留与文本行相关的连通组件
+    
+    Args:
+        mask_img: 蒙版图像（二值图）
+        textlines: 文本行列表 [(x, y, w, h), ...]
+        keep_threshold: 保留阈值（重叠率）
+        
+    Returns:
+        (保留的连通组件列表, 组件到文本行的分配列表)
+    """
+    mask_img = mask_img.copy()
+    
+    # 在蒙版上画出文本行边框（1像素黑线），用于分割连通区域
+    for (x, y, w, h) in textlines:
+        cv2.rectangle(mask_img, (x, y), (x + w, y + h), (0), 1)
+    
+    if len(textlines) == 0:
+        return [], []
+    
+    # 连通组件分析
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_img)
+    
+    cc2textline_assignment = []
+    result = []
+    M = len(textlines)
+    ratio_mat = np.zeros(shape=(num_labels, M), dtype=np.float32)
+    dist_mat = np.zeros(shape=(num_labels, M), dtype=np.float32)
+    
+    for i in range(1, num_labels):  # 跳过背景(0)
+        # 过滤太小的区域
+        if stats[i, cv2.CC_STAT_AREA] <= 9:
+            continue
+        
+        # 提取当前连通组件
+        cc = np.zeros_like(mask_img)
+        cc[labels == i] = 255
+        x1, y1, w1, h1 = cv2.boundingRect(cc)
+        area1 = w1 * h1
+        
+        # 计算与每个文本行的重叠率和距离
+        for j in range(M):
+            x2, y2, w2, h2 = textlines[j]
+            area2 = w2 * h2
+            
+            # 计算重叠面积
+            overlapping_area = area_overlap(x1, y1, w1, h1, x2, y2, w2, h2)
+            ratio_mat[i, j] = overlapping_area / min(area1, area2) if min(area1, area2) > 0 else 0
+            
+            # 计算距离
+            dist_mat[i, j] = rect_distance(x1, y1, x1 + w1, y1 + h1, x2, y2, x2 + w2, y2 + h2)
+        
+        # 找到重叠率最大的文本行
+        j = np.argmax(ratio_mat[i])
+        
+        # 检查面积：如果连通组件面积 >= 文本框面积，跳过（可能是背景噪声）
+        x2, y2, w2, h2 = textlines[j]
+        area2 = w2 * h2
+        if area1 >= area2:
+            continue
+        
+        if ratio_mat[i, j] > keep_threshold:
+            # 重叠率足够，保留
+            cc2textline_assignment.append(j)
+            result.append(np.copy(cc))
+        else:
+            # 重叠率不够，检查距离
+            j = np.argmin(dist_mat[i])
+            x2, y2, w2, h2 = textlines[j]
+            area2 = w2 * h2
+            unit = min([h1, w1, h2, w2])
+            
+            # 如果是小的蒙版片段且距离文本行很近，也保留
+            if dist_mat[i, j] < 0.5 * unit and area1 < area2:
+                cc2textline_assignment.append(j)
+                result.append(np.copy(cc))
+            # else: 丢弃
+    
+    return result, cc2textline_assignment
+
+
+def area_overlap(x1, y1, w1, h1, x2, y2, w2, h2) -> float:
+    """计算两个矩形的重叠面积"""
+    x_overlap = max(0, min(x1 + w1, x2 + w2) - max(x1, x2))
+    y_overlap = max(0, min(y1 + h1, y2 + h2) - max(y1, y2))
+    return x_overlap * y_overlap
+
+
+def rect_distance(x1, y1, x1b, y1b, x2, y2, x2b, y2b) -> float:
+    """计算两个矩形之间的距离"""
+    def dist(x1, y1, x2, y2):
+        return np.sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))
+    
+    left = x2b < x1
+    right = x1b < x2
+    bottom = y2b < y1
+    top = y1b < y2
+    
+    if top and left:
+        return dist(x1, y1b, x2b, y2)
+    elif left and bottom:
+        return dist(x1, y1, x2b, y2b)
+    elif bottom and right:
+        return dist(x1b, y1, x2, y2b)
+    elif right and top:
+        return dist(x1b, y1b, x2, y2)
+    elif left:
+        return x1 - x2b
+    elif right:
+        return x2 - x1b
+    elif bottom:
+        return y1 - y2b
+    elif top:
+        return y2 - y1b
+    else:  # rectangles intersect
+        return 0
 
 
 def get_bounding_rect(region: TextBlock) -> Tuple[float, float, float, float]:
