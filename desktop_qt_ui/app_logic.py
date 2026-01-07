@@ -878,7 +878,6 @@ class MainAppLogic(QObject):
                     "check_br_and_retry": self._t("label_check_br_and_retry"),
                     "strict_smart_scaling": self._t("label_strict_smart_scaling"),
                     "enable_template_alignment": self._t("label_enable_template_alignment"),
-                    "paste_connect_distance_ratio": self._t("label_paste_connect_distance_ratio"),
                     "paste_mask_dilation_pixels": self._t("label_paste_mask_dilation_pixels"),
                     "direction": self._t("label_direction"),
                     "uppercase": self._t("label_uppercase"),

@@ -466,14 +466,21 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                 if len(translated_mask.shape) == 3:
                     translated_mask = cv2.cvtColor(translated_mask, cv2.COLOR_BGR2GRAY)
                 
-                # === 完全复刻 win.py 的 darken_blend2 蒙版处理 ===
+                # === 使用配置的膨胀参数处理蒙版 ===
                 # 二值化
                 _, thres = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
-                # 膨胀（5x5椭圆核，2次迭代）
-                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-                translated_mask = cv2.dilate(thres, kernel, iterations=2)
                 
-                logger.info("    蒙版处理：二值化 + 膨胀(5x5椭圆核, 2次迭代)")
+                # 膨胀（使用配置参数）
+                dilation_pixels = config.render.paste_mask_dilation_pixels
+                if dilation_pixels > 0:
+                    # 根据配置计算迭代次数：pixels // 3
+                    iterations = max(dilation_pixels // 3, 1)
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                    translated_mask = cv2.dilate(thres, kernel, iterations=iterations)
+                    logger.info(f"    蒙版处理：二值化 + 膨胀(3x3椭圆核, {iterations}次迭代, 配置={dilation_pixels}像素)")
+                else:
+                    translated_mask = thres
+                    logger.info("    蒙版处理：仅二值化（膨胀已禁用）")
                 
                 # === 使用 darken_blend2 的合成逻辑 ===
                 # 1. 从翻译图中提取文字（使用蒙版）
