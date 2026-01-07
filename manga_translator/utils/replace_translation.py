@@ -366,29 +366,42 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                                 (inpainter_model is not None and str(inpainter_model) == 'none'))
             
             if is_none_inpainter:
-                # 修复模型为 none，直接调用原版 complete_mask
-                logger.info("    [修复模型=none] 使用原版 complete_mask 算法...")
+                # 修复模型为 none，使用替换翻译专用的检测模块
+                # 重新获取原始蒙版并用 REFINEMASK_INPAINT 精炼（和 win.py 一致）
+                logger.info("    [修复模型=none] 使用替换翻译专用检测模块...")
                 
-                if raw_ctx.mask_raw is not None:
-                    # 导入原版函数
-                    from ..mask_refinement.text_mask_utils import complete_mask
+                try:
+                    from .ctd_replace import detect_for_replace_translation
+                    from ..detection.ctd import ComicTextDetector
+                    from ..detection import get_detector
+                    from ..config import Detector
                     
-                    # 调用原版 complete_mask
-                    raw_ctx.mask = complete_mask(
-                        raw_ctx.img_rgb, 
-                        raw_ctx.mask_raw.copy(), 
-                        inpaint_regions,
-                        keep_threshold=0.01,
-                        dilation_offset=0,
-                        kernel_size=3
+                    # 获取 CTD 检测器实例
+                    detector = get_detector(Detector.ctd)
+                    if not detector.is_loaded():
+                        await detector.load(translator.device)
+                    
+                    # 使用新模块重新检测，获取原始蒙版和 REFINEMASK_INPAINT 精炼后的蒙版
+                    _, mask_raw, mask_refined = await detect_for_replace_translation(
+                        detector,
+                        raw_ctx.img_rgb,
+                        detect_size=config.detector.detection_size if hasattr(config.detector, 'detection_size') else 1536,
+                        verbose=translator.verbose
                     )
                     
-                    if raw_ctx.mask is None:
-                        logger.warning("    [警告] complete_mask 返回 None，使用空蒙版")
-                        raw_ctx.mask = np.zeros_like(raw_ctx.mask_raw)
-                else:
-                    logger.warning("    [警告] mask_raw 为空，无法生成蒙版")
-                    raw_ctx.mask = None
+                    raw_ctx.mask_raw = mask_raw  # 更新为真正的原始蒙版
+                    raw_ctx.mask = mask_refined   # 使用 REFINEMASK_INPAINT 精炼后的蒙版
+                    logger.info(f"    检测完成，原始蒙版像素: {np.count_nonzero(mask_raw)}, 精炼后像素: {np.count_nonzero(mask_refined) if mask_refined is not None else 0}")
+                    
+                except Exception as e:
+                    logger.warning(f"    [警告] 替换翻译专用检测失败: {e}，回退到简单膨胀")
+                    # 回退方案：简单膨胀
+                    if raw_ctx.mask_raw is not None:
+                        kernel = np.ones((5, 5), np.uint8)
+                        raw_ctx.mask = cv2.dilate(raw_ctx.mask_raw, kernel, iterations=1)
+                        raw_ctx.mask[raw_ctx.mask > 0] = 255
+                    else:
+                        raw_ctx.mask = None
                     
                 raw_ctx.mask_is_refined = True  # 标记为已精炼
             else:
@@ -418,7 +431,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
             # === 步骤6: 渲染或粘贴 ===
             # 检查是否启用直接粘贴模式
             if config.render.enable_template_alignment:
-                logger.info("  [5/5] 直接粘贴模式 - 使用高级图像合成算法")
+                logger.info("  [5/5] 直接粘贴模式 - 使用 darken_blend2 合成算法")
 
                 # 获取图像尺寸
                 h, w = raw_ctx.img_inpainted.shape[:2]
@@ -428,87 +441,13 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                     logger.warning("  [警告] 翻译图没有原始蒙版，使用生肉图的蒙版")
                     translated_mask = raw_ctx.mask
                 else:
-                    logger.info("    Using translated image's mask...")
+                    logger.info("    使用翻译图的蒙版...")
                     # 确保蒙版不为空
                     if translated_ctx.mask_raw is not None and translated_ctx.mask_raw.size > 0:
                         translated_mask = translated_ctx.mask_raw.copy()
                     else:
                         logger.warning("  [警告] 翻译图蒙版为空，使用生肉图的蒙版")
                         translated_mask = raw_ctx.mask
-
-                # 先筛选蒙版：只保留与匹配区域有交集的连通区域
-                if matched_regions:
-                    logger.info(f"    筛选蒙版：只保留与 {len(matched_regions)} 个匹配区域相交的蒙版连通区域")
-
-                    # 创建区域蒙版（只有匹配区域的外接矩形内为白色）
-                    region_mask = np.zeros((h, w), dtype=np.uint8)
-
-                    for region in matched_regions:
-                        x, y, rw, rh = get_bounding_rect(region)
-                        x1 = max(0, int(x))
-                        y1 = max(0, int(y))
-                        x2 = min(w, int(x + rw))
-                        y2 = min(h, int(y + rh))
-                        region_mask[y1:y2, x1:x2] = 255
-
-                    # 缩放 translated_mask 到目标尺寸（如果不同）
-                    if translated_mask.shape[:2] != (h, w):
-                        translated_mask = cv2.resize(translated_mask, (w, h), interpolation=cv2.INTER_NEAREST)
-
-                    # 确保 translated_mask 是单通道
-                    if len(translated_mask.shape) == 3:
-                        translated_mask = cv2.cvtColor(translated_mask, cv2.COLOR_BGR2GRAY)
-
-                    # 二值化
-                    _, translated_mask_binary = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
-
-                    # 1. 先膨胀蒙版，使距离小于指定比例的区域连通（仅用于检测连通性）
-                    connect_ratio = config.render.paste_connect_distance_ratio if hasattr(config.render, 'paste_connect_distance_ratio') else 0.03
-                    connect_distance = int(max(h, w) * connect_ratio)  # 默认长边的3%
-                    connect_iterations = max(1, connect_distance // 3)  # 3x3核，每次约3像素
-                    connect_kernel = np.ones((3, 3), np.uint8)
-                    dilated_for_connect = cv2.dilate(translated_mask_binary, connect_kernel, iterations=connect_iterations)
-                    logger.info(f"    步骤1: 膨胀{connect_distance}像素（长边{connect_ratio*100:.1f}%）检测连通区域")
-
-                    # 2. 在膨胀后的蒙版上找连通区域
-                    num_labels, labels_dilated = cv2.connectedComponents(dilated_for_connect)
-
-                    # 3. 筛选：检查每个连通区域是否与 region_mask 有交集
-                    filtered_mask = np.zeros((h, w), dtype=np.uint8)
-
-                    for label_id in range(1, num_labels):  # 0 是背景
-                        # 获取膨胀后的连通区域
-                        dilated_component = (labels_dilated == label_id).astype(np.uint8) * 255
-
-                        # 检查是否与 region_mask 有交集
-                        intersection = cv2.bitwise_and(dilated_component, region_mask)
-                        if np.any(intersection):
-                            # 有交集，保留原始蒙版中属于这个连通区域的部分
-                            original_part = cv2.bitwise_and(translated_mask_binary, dilated_component)
-                            filtered_mask = cv2.bitwise_or(filtered_mask, original_part)
-
-                    logger.info("    步骤2: 筛选与匹配区域相交的连通区域")
-
-                    # 4. 最后扩张蒙版（使用配置的膨胀大小）
-                    dilation_pixels = config.render.paste_mask_dilation_pixels if hasattr(config.render, 'paste_mask_dilation_pixels') else 20
-                    if dilation_pixels > 0:
-                        dilation_iterations = max(1, dilation_pixels // 3)  # 3x3核，每次约3像素
-                        kernel = np.ones((3, 3), np.uint8)
-                        translated_mask = cv2.dilate(filtered_mask, kernel, iterations=dilation_iterations)
-                        logger.info(f"    步骤3: 扩张蒙版{dilation_pixels}像素（{dilation_iterations}次迭代）")
-                    else:
-                        translated_mask = filtered_mask
-                        logger.info(f"    步骤3: 跳过蒙版扩张（膨胀大小=0）")
-
-                    logger.info(f"    蒙版处理完成")
-                else:
-                    # 没有匹配区域时，直接扩张原始蒙版
-                    dilation_pixels = config.render.paste_mask_dilation_pixels if hasattr(config.render, 'paste_mask_dilation_pixels') else 20
-                    if dilation_pixels > 0:
-                        dilation_iterations = max(1, dilation_pixels // 3)
-                        kernel = np.ones((3, 3), np.uint8)
-                        translated_mask = cv2.dilate(translated_mask, kernel, iterations=dilation_iterations)
-                    # 如果 dilation_pixels <= 0，保持原始蒙版不变
 
                 # 使用直接覆盖方式（在蒙版区域内用翻译图覆盖修复图）
                 result_img = raw_ctx.img_inpainted.copy()
@@ -519,72 +458,44 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                 if trans_img.shape[:2] != (h, w):
                     trans_img = cv2.resize(trans_img, (w, h), interpolation=cv2.INTER_LINEAR)
                 
+                # 缩放蒙版到目标尺寸（如果不同）
+                if translated_mask.shape[:2] != (h, w):
+                    translated_mask = cv2.resize(translated_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                
                 # 确保蒙版是单通道
                 if len(translated_mask.shape) == 3:
                     translated_mask = cv2.cvtColor(translated_mask, cv2.COLOR_BGR2GRAY)
                 
-                # 二值化蒙版，避免灰色小白点（只保留纯黑和纯白）
-                _, translated_mask = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
+                # === 完全复刻 win.py 的 darken_blend2 蒙版处理 ===
+                # 二值化
+                _, thres = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
+                # 膨胀（5x5椭圆核，2次迭代）
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                translated_mask = cv2.dilate(thres, kernel, iterations=2)
                 
-                # 使用 DenseCRF 优化蒙版边缘
-                try:
-                    import pydensecrf.densecrf as dcrf
-                    from pydensecrf.utils import unary_from_labels
-                    
-                    # 准备 CRF
-                    d = dcrf.DenseCRF2D(w, h, 2)  # 2个类别：前景和背景
-                    
-                    # 将蒙版转换为标签（0=背景，1=前景）
-                    labels = (translated_mask > 127).astype(np.int32)
-                    
-                    # 设置一元势（unary potential）
-                    U = unary_from_labels(labels, 2, gt_prob=0.7, zero_unsure=False)
-                    d.setUnaryEnergy(U)
-                    
-                    # 添加成对势（pairwise potential）
-                    # 使用翻译图的颜色信息
-                    trans_img_uint8 = trans_img.astype(np.uint8)
-                    d.addPairwiseGaussian(sxy=3, compat=3)
-                    d.addPairwiseBilateral(sxy=50, srgb=13, rgbim=trans_img_uint8, compat=10)
-                    
-                    # 推理
-                    Q = d.inference(5)  # 5次迭代
-                    MAP = np.argmax(Q, axis=0).reshape((h, w))
-                    
-                    # 转换回蒙版
-                    edge_optimized = (MAP * 255).astype(np.uint8)
-
-                    # 叠加：扩张后的蒙版 OR 边缘优化后的蒙版
-                    translated_mask = cv2.bitwise_or(translated_mask, edge_optimized)
-
-                    logger.info("    使用 DenseCRF 优化蒙版边缘并与扩张蒙版叠加")
-                except ImportError:
-                    logger.warning("    pydensecrf 未安装，跳过 CRF 优化，使用高斯模糊平滑")
-                    # 回退到高斯模糊
-                    translated_mask = cv2.GaussianBlur(translated_mask, (5, 5), 0)
-                    _, translated_mask = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
-                except Exception as e:
-                    logger.warning(f"    DenseCRF 优化失败: {e}，使用高斯模糊平滑")
-                    translated_mask = cv2.GaussianBlur(translated_mask, (5, 5), 0)
-                    _, translated_mask = cv2.threshold(translated_mask, 127, 255, cv2.THRESH_BINARY)
+                logger.info("    蒙版处理：二值化 + 膨胀(5x5椭圆核, 2次迭代)")
                 
-                # 提取蒙版区域的翻译图（用于调试）
-                mask_3ch = cv2.cvtColor(translated_mask, cv2.COLOR_GRAY2BGR)
-                trans_img_masked = cv2.bitwise_and(trans_img, mask_3ch)
+                # === 使用 darken_blend2 的合成逻辑 ===
+                # 1. 从翻译图中提取文字（使用蒙版）
+                text = cv2.bitwise_and(trans_img, trans_img, mask=translated_mask)
                 
-                # 保存调试图：蒙版区域的翻译图（要覆盖到生肉图的部分）
+                # 2. 从修复图中清除对应区域（准备放置文字）
+                result_img = cv2.bitwise_and(result_img, result_img, mask=cv2.bitwise_not(translated_mask))
+                
+                # 3. 合并：将提取的文字叠加到修复图上
+                result_img = cv2.add(result_img, text)
+                
+                logger.info("    使用 darken_blend2 合成逻辑：提取文字 -> 清除区域 -> 叠加合并")
+                
+                # 保存调试图（如果启用verbose）
                 if translator.verbose:
                     try:
-                        debug_masked_path = translator._result_path('debug_trans_masked.png')
-                        imwrite_unicode(debug_masked_path, cv2.cvtColor(trans_img_masked, cv2.COLOR_RGB2BGR), logger)
-                        logger.info(f"    [DEBUG] 保存蒙版区域的翻译图: {debug_masked_path}")
+                        # 保存提取的文字
+                        debug_text_path = translator._result_path('debug_extracted_text.png')
+                        imwrite_unicode(debug_text_path, cv2.cvtColor(text, cv2.COLOR_RGB2BGR), logger)
+                        logger.info(f"    [DEBUG] 保存提取的文字: {debug_text_path}")
                     except Exception as e:
                         logger.warning(f"    [DEBUG] 保存调试图失败: {e}")
-                
-                # 在蒙版区域内用翻译图覆盖
-                result_img = np.where(mask_3ch > 0, trans_img, result_img)
-                
-                logger.info("    使用直接覆盖方式合成图像（二值化蒙版）")
                 
                 # 使用 dump_image 将结果转换为 PIL Image
                 raw_ctx.result = dump_image(raw_ctx.input, result_img, getattr(raw_ctx, 'img_alpha', None))
@@ -815,12 +726,6 @@ def filter_masks(mask_img: np.ndarray, textlines: List[Tuple[int, int, int, int]
         
         # 找到重叠率最大的文本行
         j = np.argmax(ratio_mat[i])
-        
-        # 检查面积：如果连通组件面积 >= 文本框面积，跳过（可能是背景噪声）
-        x2, y2, w2, h2 = textlines[j]
-        area2 = w2 * h2
-        if area1 >= area2:
-            continue
         
         if ratio_mat[i, j] > keep_threshold:
             # 重叠率足够，保留
@@ -1229,3 +1134,83 @@ __all__ = [
     'filter_raw_regions_for_inpainting',
     'get_text_to_img_solid_ink',
 ]
+
+
+# ============================================================================
+# 以下是 win.py 版本的蒙版精炼函数（用于 inpainter=none 模式）
+# ============================================================================
+
+def _refine_mask_winpy(rgbimg, rawmask):
+    """
+    win.py 版本的 refine_mask 函数
+    使用 DenseCRF 优化蒙版边缘
+    """
+    try:
+        from pydensecrf.utils import unary_from_softmax
+        import pydensecrf.densecrf as dcrf
+        
+        if len(rawmask.shape) == 2:
+            rawmask = rawmask[:, :, None]
+        mask_softmax = np.concatenate([cv2.bitwise_not(rawmask)[:, :, None], rawmask], axis=2)
+        mask_softmax = mask_softmax.astype(np.float32) / 255.0
+        n_classes = 2
+        feat_first = mask_softmax.transpose((2, 0, 1)).reshape((n_classes, -1))
+        unary = unary_from_softmax(feat_first)
+        unary = np.ascontiguousarray(unary)
+
+        d = dcrf.DenseCRF2D(rgbimg.shape[1], rgbimg.shape[0], n_classes)
+
+        d.setUnaryEnergy(unary)
+        d.addPairwiseGaussian(sxy=1, compat=3, kernel=dcrf.DIAG_KERNEL,
+                              normalization=dcrf.NO_NORMALIZATION)
+
+        d.addPairwiseBilateral(sxy=23, srgb=7, rgbim=rgbimg,
+                               compat=20,
+                               kernel=dcrf.DIAG_KERNEL,
+                               normalization=dcrf.NO_NORMALIZATION)
+        Q = d.inference(5)
+        res = np.argmax(Q, axis=0).reshape((rgbimg.shape[0], rgbimg.shape[1]))
+        crf_mask = np.array(res * 255, dtype=np.uint8)
+        return crf_mask
+    except ImportError:
+        logger.warning("pydensecrf 未安装，跳过 CRF 优化")
+        return rawmask
+
+
+def _complete_mask_winpy(img_np: np.ndarray, ccs: List[np.ndarray], textlines: List[Tuple[int, int, int, int]], cc2textline_assignment):
+    """
+    win.py 版本的 complete_mask 函数
+    完成蒙版精炼
+    """
+    from tqdm import tqdm
+    
+    if len(ccs) == 0:
+        return None
+    textline_ccs = [np.zeros_like(ccs[0]) for _ in range(len(textlines))]
+    for i, cc in enumerate(ccs):
+        txtline = cc2textline_assignment[i]
+        textline_ccs[txtline] = cv2.bitwise_or(textline_ccs[txtline], cc)
+    final_mask = np.zeros_like(ccs[0])
+    img_np = cv2.bilateralFilter(img_np, 17, 80, 80)
+    for i, cc in enumerate(tqdm(textline_ccs, '[mask]', disable=True)):
+        x1, y1, w1, h1 = cv2.boundingRect(cc)
+        text_size = min(w1, h1)
+        extend_size = int(text_size * 0.1)
+        x1 = max(x1 - extend_size, 0)
+        y1 = max(y1 - extend_size, 0)
+        w1 += extend_size * 2
+        h1 += extend_size * 2
+        w1 = min(w1, img_np.shape[1] - x1 - 1)
+        h1 = min(h1, img_np.shape[0] - y1 - 1)
+        dilate_size = max((int(text_size * 0.3) // 2) * 2 + 1, 3)
+        kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_size, dilate_size))
+        cc_region = np.ascontiguousarray(cc[y1: y1 + h1, x1: x1 + w1])
+        if cc_region.size == 0:
+            continue
+        img_region = np.ascontiguousarray(img_np[y1: y1 + h1, x1: x1 + w1])
+        cc_region = _refine_mask_winpy(img_region, cc_region)
+        cc[y1: y1 + h1, x1: x1 + w1] = cc_region
+        cc = cv2.dilate(cc, kern)
+        final_mask = cv2.bitwise_or(final_mask, cc)
+    kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    return cv2.dilate(final_mask, kern)
