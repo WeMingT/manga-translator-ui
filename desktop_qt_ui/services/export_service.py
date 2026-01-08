@@ -191,6 +191,9 @@ class ExportService:
             
             # 保存当前图片到临时文件
             temp_image_path = os.path.join(temp_dir, "temp_image.png")
+            # 如果是CMYK模式，转换为RGB（PNG不支持CMYK）
+            if image.mode == 'CMYK':
+                image = image.convert('RGB')
             image.save(temp_image_path)
             
             # 保存区域数据到JSON文件
@@ -465,11 +468,15 @@ class ExportService:
                 rgb_image.close()
                 
             elif output_lower.endswith('.webp'):
-                # WEBP格式
+                # WEBP格式：如果是CMYK，转换为RGB
+                if image.mode == 'CMYK':
+                    image = image.convert('RGB')
                 image.save(temp_output_path, format='WEBP', quality=save_quality)
                 
             else:
-                # PNG或其他格式
+                # PNG或其他格式：如果是CMYK，转换为RGB（PNG不支持CMYK）
+                if image.mode == 'CMYK':
+                    image = image.convert('RGB')
                 image.save(temp_output_path, format='PNG')
             
             # 确保文件已写入
