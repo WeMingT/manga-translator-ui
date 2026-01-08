@@ -115,7 +115,8 @@ class ExportService:
                             mask: Optional[np.ndarray] = None,
                             progress_callback: Optional[callable] = None,
                             success_callback: Optional[callable] = None,
-                            error_callback: Optional[callable] = None):
+                            error_callback: Optional[callable] = None,
+                            source_image_path: Optional[str] = None):
         """
         导出后端渲染的图片
         
@@ -128,6 +129,7 @@ class ExportService:
             progress_callback: 进度回调
             success_callback: 成功回调
             error_callback: 错误回调
+            source_image_path: 原图路径（用于PSD导出）
         """
         if not image:
             if error_callback:
@@ -154,7 +156,7 @@ class ExportService:
         # 在后台线程中执行导出
         export_thread = threading.Thread(
             target=self._perform_backend_render_export,
-            args=(image_copy, regions_data, config, output_path, mask, progress_callback, success_callback, error_callback),
+            args=(image_copy, regions_data, config, output_path, mask, progress_callback, success_callback, error_callback, source_image_path),
             daemon=True
         )
         export_thread.start()
@@ -164,7 +166,8 @@ class ExportService:
                                      mask: Optional[np.ndarray] = None,
                                      progress_callback: Optional[callable] = None,
                                      success_callback: Optional[callable] = None,
-                                     error_callback: Optional[callable] = None):
+                                     error_callback: Optional[callable] = None,
+                                     source_image_path: Optional[str] = None):
         """在后台线程中执行后端渲染导出"""
         import gc
         import os
@@ -203,7 +206,7 @@ class ExportService:
             
             # 执行后端渲染
             rendered_image = self._execute_backend_render(
-                temp_image_path, regions_json_path, translator_params, config, progress_callback
+                temp_image_path, regions_json_path, translator_params, config, progress_callback, output_path, source_image_path
             )
             
             if not rendered_image:
@@ -541,7 +544,9 @@ class ExportService:
     
     def _execute_backend_render(self, image_path: str, regions_json_path: str,
                               translator_params: Dict[str, Any], config: Dict[str, Any],
-                              progress_callback: Optional[callable] = None) -> Optional[Image.Image]:
+                              progress_callback: Optional[callable] = None,
+                              output_path: str = None,
+                              source_image_path: str = None) -> Optional[Image.Image]:
         """执行后端渲染"""
         image = None
         try:
@@ -635,7 +640,18 @@ class ExportService:
                     if cfg.cli.export_editable_psd:
                         try:
                             from manga_translator.utils.photoshop_export import photoshop_export, get_psd_output_path
-                            psd_path = get_psd_output_path(image_path)
+                            
+                            # 优先使用原图路径生成PSD路径，其次使用输出路径，最后使用临时路径
+                            if source_image_path:
+                                # 使用原图路径生成PSD路径（正确的做法）
+                                psd_path = get_psd_output_path(source_image_path)
+                            elif output_path:
+                                # 如果没有原图路径，使用输出路径
+                                psd_path = get_psd_output_path(output_path)
+                            else:
+                                # 如果都没有，使用临时路径（向后兼容）
+                                psd_path = get_psd_output_path(image_path)
+                            
                             default_font = cfg.cli.psd_font
                             line_spacing = cfg.render.line_spacing if hasattr(cfg.render, 'line_spacing') else None
                             script_only = cfg.cli.psd_script_only
