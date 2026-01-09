@@ -2009,6 +2009,51 @@ class EditorController(QObject):
             # 保存JSON文件 - 传入source_path用于生成正确的键
             export_service._save_regions_data_with_path(regions, json_path, source_path, mask, config_dict)
             
+            # 通过后端渲染生成并保存inpainted图片到原图片目录
+            try:
+                from manga_translator.utils.path_manager import get_inpainted_path
+                import threading
+                
+                # 获取原图
+                original_image = self.model.get_image()
+                if original_image:
+                    inpainted_path = get_inpainted_path(source_path, create_dir=True)
+                    
+                    # 使用事件来等待后端渲染完成
+                    render_complete_event = threading.Event()
+                    render_error = [None]  # 使用列表来存储错误信息
+                    
+                    def inpainted_progress_callback(message):
+                        pass
+                    
+                    def inpainted_success_callback(message):
+                        self.logger.info(f"已更新原图片目录下的修复图片: {inpainted_path}")
+                        render_complete_event.set()
+                    
+                    def inpainted_error_callback(message):
+                        self.logger.warning(f"更新inpainted图片失败: {message}")
+                        render_error[0] = message
+                        render_complete_event.set()
+                    
+                    # 调用后端渲染服务
+                    export_service.export_rendered_image(
+                        image=original_image,
+                        regions_data=regions,
+                        config=config_dict,
+                        output_path=inpainted_path,
+                        mask=mask,
+                        progress_callback=inpainted_progress_callback,
+                        success_callback=inpainted_success_callback,
+                        error_callback=inpainted_error_callback,
+                        source_image_path=source_path
+                    )
+                    
+                    # 等待后端渲染完成（最多等待30秒）
+                    if not render_complete_event.wait(timeout=30):
+                        self.logger.warning("更新inpainted图片超时")
+            except Exception as e:
+                self.logger.warning(f"更新inpainted图片失败: {e}")
+            
             # 保存快照，标记为已保存状态
             self._save_export_snapshot()
             

@@ -35,7 +35,7 @@ networkx==3.5
 numpy>=2.0,<2.3
 omegaconf==2.3.0
 onnxruntime==1.20.1
-openai==1.63.0
+openai==2.14.0
 opencv-contrib-python>=4.10.0
 packaging<25.0
 pandas==2.3.1
@@ -54,20 +54,21 @@ rich==14.1.0
 safetensors==0.6.2
 spandrel==0.4.1
 scipy==1.16.1
-sentencepiece==0.2.1
+# sentencepiece 已移除，改用 tokenizers 库 (use_fast=True)
 setuptools==80.9.0
 Shapely==2.1.1
 scikit-image==0.25.2
 starlette==0.47.2
 tiktoken==0.11.0
 timm==1.0.19
-transformers==4.55.2
+transformers==4.55.0
+accelerate>=1.12.0
 tqdm==4.67.1
 unidic_lite==1.0.8
 uvicorn==0.35.0
 websockets==14.2
 # xformers==0.0.32.post2  # CPU版本不需要,仅GPU使用
-google-generativeai==0.8.5
+google-genai==1.57.0
 # pydensecrf - 预编译 wheel 文件 (Python 3.12 Windows)
 # 使用官方 GitHub 源
 pydensecrf @ https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl
@@ -80,7 +81,6 @@ open_clip_torch==3.1.0
 python-bidi==0.6.6
 tufup==0.9.0
 google-cloud==0.34.0
-google-genai==1.2.0
 
 
 # PDF/EPUB/CBZ 压缩包支持

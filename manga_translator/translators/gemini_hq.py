@@ -6,8 +6,8 @@ import json
 from io import BytesIO
 from typing import List, Dict, Any
 from PIL import Image
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google import genai
+from google.genai import types
 
 from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_gemini_response
 from .keys import GEMINI_API_KEY
@@ -24,7 +24,7 @@ BROWSER_HEADERS = {
 
 
 def encode_image_for_gemini(image, max_size=1024):
-    """将图片处理为适合Gemini API的格式"""
+    """将图片处理为适合Gemini API的格式，返回bytes和mime_type"""
     # 转换图片格式为RGB（处理所有可能的图片模式）
     if image.mode == "P":
         # 调色板模式：转换为RGBA（如果有透明度）或RGB
@@ -57,7 +57,12 @@ def encode_image_for_gemini(image, max_size=1024):
         new_w, new_h = int(w * scale), int(h * scale)
         image = image.resize((new_w, new_h), Image.LANCZOS)
 
-    return image
+    # 转换为 JPEG bytes
+    buffer = BytesIO()
+    image.save(buffer, format='JPEG', quality=85)
+    image_bytes = buffer.getvalue()
+    
+    return image_bytes, 'image/jpeg'
 
 
 def _flatten_prompt_data(data: Any, indent: int = 0) -> str:
@@ -112,23 +117,24 @@ class GeminiHighQualityTranslator(CommonTranslator):
         if self.model_name not in GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
             GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
         self._last_request_ts_key = self.model_name
+        # 新版 SDK 的安全设置
         self.safety_settings = [
-            {
-                "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
-                "threshold": HarmBlockThreshold.BLOCK_NONE,
-            },
-            {
-                "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                "threshold": HarmBlockThreshold.BLOCK_NONE,
-            },
-            {
-                "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                "threshold": HarmBlockThreshold.BLOCK_NONE,
-            },
-            {
-                "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                "threshold": HarmBlockThreshold.BLOCK_NONE,
-            },
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                threshold=types.HarmBlockThreshold.OFF,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                threshold=types.HarmBlockThreshold.OFF,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                threshold=types.HarmBlockThreshold.OFF,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                threshold=types.HarmBlockThreshold.OFF,
+            ),
         ]
         self._setup_client()
     
@@ -183,52 +189,32 @@ class GeminiHighQualityTranslator(CommonTranslator):
     def _setup_client(self, system_instruction=None):
         """设置Gemini客户端"""
         if not self.client and self.api_key:
-            # 构建 client_options，添加浏览器风格请求头避免 CF 拦截
-            client_options = {}
-            if self.base_url:
-                client_options["api_endpoint"] = self.base_url
-            
-            # 通过环境变量设置自定义请求头（google-api-core 支持）
-            import os
-            os.environ.setdefault('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'false')
-
-            genai.configure(
-                api_key=self.api_key,
-                transport='rest',  # 支持自定义base_url
-                client_options=client_options if client_options else None,
-                default_metadata=[
-                    ("user-agent", BROWSER_HEADERS["User-Agent"]),
-                    ("accept", BROWSER_HEADERS["Accept"]),
-                    ("accept-language", BROWSER_HEADERS["Accept-Language"]),
-                ]
+            # 新版 SDK 使用 genai.Client 初始化
+            # 检查是否使用自定义 API Base
+            is_custom_api = (
+                self.base_url 
+                and self.base_url.strip() 
+                and self.base_url.strip() not in ["https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/"]
             )
             
-            # 统一配置（不在客户端初始化时包含安全设置）
-            # 安全设置将在每次请求时动态添加，如果报错则自动回退
-            generation_config = {
-                "temperature": self.temperature,
-                "top_p": 0.95,
-                "top_k": 64,
-                "max_output_tokens": self.max_tokens,
-                "response_mime_type": "text/plain",
-            }
-            model_args = {
-                "model_name": self.model_name,
-                "generation_config": generation_config,
-            }
-            
-            # 如果提供了系统指令，则添加到模型配置中
-            if system_instruction:
-                model_args["system_instruction"] = system_instruction
-                self.logger.info(f"Gemini HQ客户端初始化完成（使用 system_instruction）。Base URL: {self.base_url or '默认'}")
+            if is_custom_api:
+                # 使用自定义 API Base（通过 http_options）
+                self.client = genai.Client(
+                    api_key=self.api_key,
+                    http_options=types.HttpOptions(
+                        base_url=self.base_url,
+                        headers=BROWSER_HEADERS
+                    )
+                )
+                self.logger.info(f"Gemini HQ客户端初始化完成（自定义API Base）。Base URL: {self.base_url}")
             else:
-                self.logger.info(f"Gemini HQ客户端初始化完成。Base URL: {self.base_url or '默认'}")
+                # 使用官方 API
+                self.client = genai.Client(api_key=self.api_key)
+                self.logger.info("Gemini HQ客户端初始化完成。使用官方API")
             
-            self.logger.info("安全设置策略：默认发送 BLOCK_NONE，如遇错误自动回退")
+            self.logger.info("安全设置策略：默认发送 OFF，如遇错误自动回退")
 
-            self.client = genai.GenerativeModel(**model_args)
     
-
     
     def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """构建系统提示词"""
@@ -335,7 +321,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
             self.logger.info(f"Image {i+1}: size={image.size}, mode={image.mode}")
         self.logger.info("--------------------")
 
-        # 准备图片列表（放在最后）
+        # 准备图片列表（放在最后）- 使用新版 SDK 的 Part 格式
         image_parts = []
         for data in batch_data:
             image = data['image']
@@ -355,8 +341,9 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 image = PILImage.fromarray(image_array)
                 self.logger.debug(f"已在图片上绘制 {len(text_regions)} 个带编号的文本框")
             
-            processed_image = encode_image_for_gemini(image)
-            image_parts.append(processed_image)
+            # 使用新版 SDK 的格式
+            image_bytes, mime_type = encode_image_for_gemini(image)
+            image_parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
         
         # 初始化重试信息
         retry_attempt = 0
@@ -374,21 +361,6 @@ class GeminiHighQualityTranslator(CommonTranslator):
         
         # 标记是否发送图片（降级机制）
         send_images = True
-
-        def generate_content_with_logging(**kwargs):
-            # 打印请求体（去除图片数据）- 已注释以减少日志输出
-            # log_kwargs = kwargs.copy()
-            # if 'contents' in log_kwargs and isinstance(log_kwargs['contents'], list):
-            #     serializable_contents = []
-            #     for item in log_kwargs['contents']:
-            #         if isinstance(item, Image.Image):
-            #             serializable_contents.append(f"<PIL.Image.Image size={item.size} mode={item.mode}>")
-            #         else:
-            #             serializable_contents.append(item)
-            #     log_kwargs['contents'] = serializable_contents
-            # 
-            # self.logger.info(f"--- Gemini Request Body ---\n{json.dumps(log_kwargs, indent=2, ensure_ascii=False)}\n---------------------------")
-            return self.client.generate_content(**kwargs)
 
         while is_infinite or attempt < max_retries:
             # 检查是否被取消
@@ -421,8 +393,8 @@ class GeminiHighQualityTranslator(CommonTranslator):
             system_instruction = self._get_system_instruction(_source_lang, _target_lang, custom_prompt_json=_custom_prompt_json, line_break_prompt_json=_line_break_prompt_json, retry_attempt=retry_attempt, retry_reason=retry_reason, extract_glossary=extract_glossary)
             
             # 初始化客户端（不传入 system_instruction）
-            self.client = None
-            self._setup_client(system_instruction=None)
+            if not self.client:
+                self._setup_client(system_instruction=None)
             
             if not self.client:
                 self.logger.error("Gemini客户端初始化失败")
@@ -443,11 +415,17 @@ class GeminiHighQualityTranslator(CommonTranslator):
                      self.logger.warning("降级模式：仅发送文本，不发送图片")
                 content_parts = [combined_prompt]
             
-            # 动态构建请求参数 - 默认总是发送安全设置
-            request_args = {
-                "contents": content_parts,
-                "safety_settings": self.safety_settings
-            }
+            # 动态调整温度：质量检查或BR检查失败时提高温度帮助跳出错误模式
+            current_temperature = self._get_retry_temperature(self.temperature, retry_attempt, retry_reason)
+            
+            # 构建生成配置
+            generation_config = types.GenerateContentConfig(
+                temperature=current_temperature,
+                top_p=0.95,
+                top_k=64,
+                max_output_tokens=self.max_tokens,
+                safety_settings=None if should_retry_without_safety else self.safety_settings,
+            )
 
             try:
                 # RPM限制
@@ -461,61 +439,47 @@ class GeminiHighQualityTranslator(CommonTranslator):
                         self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
                         await asyncio.sleep(sleep_time)
                 
-                # 如果需要回退，移除安全设置
-                if should_retry_without_safety and "safety_settings" in request_args:
-                    self.logger.warning("回退模式：移除安全设置参数")
-                    request_args = {k: v for k, v in request_args.items() if k != "safety_settings"}
-                
-                # 动态调整温度：质量检查或BR检查失败时提高温度帮助跳出错误模式
-                current_temperature = self._get_retry_temperature(self.temperature, retry_attempt, retry_reason)
                 if retry_attempt > 0 and current_temperature != self.temperature:
                     self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
-                    # 覆盖 generation_config 中的温度
-                    request_args["generation_config"] = {"temperature": current_temperature}
                 
-                # 设置5分钟超时
-                request_args["request_options"] = {"timeout": 300}
+                # 使用新版 SDK 的 generate_content 方法
                 response = await asyncio.to_thread(
-                    generate_content_with_logging,
-                    **request_args
+                    self.client.models.generate_content,
+                    model=self.model_name,
+                    contents=content_parts,
+                    config=generation_config
                 )
                 
                 # 在API调用成功后立即更新时间戳，确保所有请求（包括重试）都被计入速率限制
                 if self._MAX_REQUESTS_PER_MINUTE > 0:
+                    import time
                     GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
 
                 # 验证响应对象是否有效
                 validate_gemini_response(response, self.logger)
 
-                # 检查finish_reason，只有成功(1)才继续，其他都重试
+                # 检查finish_reason，只有成功(STOP)才继续，其他都重试
                 if hasattr(response, 'candidates') and response.candidates:
                     candidate = response.candidates[0]
                     if hasattr(candidate, 'finish_reason'):
                         finish_reason = candidate.finish_reason
+                        # 新版 SDK 的 finish_reason 是枚举类型
+                        finish_reason_str = str(finish_reason) if finish_reason else ""
 
-                        if finish_reason != 1:  # 不是STOP(成功)
+                        if "STOP" not in finish_reason_str.upper():  # 不是成功
                             attempt += 1
                             log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
 
                             # 显示具体的finish_reason信息
-                            finish_reason_map = {
-                                1: "STOP(成功)",
-                                2: "SAFETY(安全策略拦截)",
-                                3: "MAX_TOKENS(达到最大token限制)",
-                                4: "RECITATION(内容重复检测)",
-                                5: "OTHER(其他未知错误)"
-                            }
-                            reason_desc = finish_reason_map.get(finish_reason, f"未知错误码({finish_reason})")
-
-                            self.logger.warning(f"Gemini API失败 ({log_attempt}): finish_reason={finish_reason} - {reason_desc}")
+                            self.logger.warning(f"Gemini API失败 ({log_attempt}): finish_reason={finish_reason}")
                             
                             # 降级策略：如果是安全策略拦截或其他非成功状态，尝试不发送图片
-                            if finish_reason == 2 or finish_reason == 5: # SAFETY or OTHER
+                            if "SAFETY" in finish_reason_str.upper() or "OTHER" in finish_reason_str.upper():
                                 self.logger.warning("检测到安全策略拦截或未知错误，下次重试将不再发送图片")
                                 send_images = False
 
                             if not is_infinite and attempt >= max_retries:
-                                self.logger.error(f"Gemini翻译在多次重试后仍失败: {reason_desc}")
+                                self.logger.error(f"Gemini翻译在多次重试后仍失败: {finish_reason}")
                                 break
                             await asyncio.sleep(1)
                             continue
@@ -643,9 +607,6 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     self.logger.error("   3. 检查第三方API是否支持图片输入")
                     raise Exception(f"模型不支持多模态输入: {self.model_name}") from e
                 
-                # 检查是否是安全设置相关的错误
-                # is_safety_error 已经在上面定义了
-                
                 # 如果是安全设置错误且还没有尝试回退，则标记回退
                 if is_safety_error and not should_retry_without_safety:
                     self.logger.warning(f"检测到安全设置相关错误，将在下次重试时移除安全设置参数: {error_message}")
@@ -658,7 +619,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
                 self.logger.warning(f"Gemini高质量翻译出错 ({log_attempt}): {e}")
 
-                if "finish_reason: 2" in error_message or "finish_reason is 2" in error_message:
+                if "finish_reason: 2" in error_message or "finish_reason is 2" in error_message or "SAFETY" in error_message.upper():
                     self.logger.warning("检测到Gemini安全策略拦截。正在重试...")
                     send_images = False # 显式确保降级
                 
@@ -720,24 +681,14 @@ class GeminiHighQualityTranslator(CommonTranslator):
         try:
             simple_prompt = f"Translate the following {from_lang} text to {to_lang}. Provide only the translation:\n\n" + "\n".join(queries)
             
-            # 动态构建请求参数 - 默认总是发送安全设置
-            request_args = {
-                "contents": simple_prompt,
-                "safety_settings": self.safety_settings
-            }
-
-            def generate_content_with_logging(**kwargs):
-                log_kwargs = kwargs.copy()
-                if 'contents' in log_kwargs and isinstance(log_kwargs['contents'], list):
-                    serializable_contents = []
-                    for item in log_kwargs['contents']:
-                        if isinstance(item, Image.Image):
-                            serializable_contents.append(f"<PIL.Image.Image size={item.size} mode={item.mode}>")
-                        else:
-                            serializable_contents.append(item)
-                    log_kwargs['contents'] = serializable_contents
-                self.logger.info(f"--- Gemini Fallback Request Body ---\n{json.dumps(log_kwargs, indent=2, ensure_ascii=False)}\n------------------------------------")
-                return self.client.generate_content(**kwargs)
+            # 构建生成配置
+            generation_config = types.GenerateContentConfig(
+                temperature=self.temperature,
+                top_p=0.95,
+                top_k=64,
+                max_output_tokens=self.max_tokens,
+                safety_settings=self.safety_settings,
+            )
 
             # RPM限制
             if self._MAX_REQUESTS_PER_MINUTE > 0:
@@ -751,11 +702,12 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     await asyncio.sleep(sleep_time)
             
             try:
-                # 设置5分钟超时
-                request_args["request_options"] = {"timeout": 300}
+                # 使用新版 SDK 的 generate_content 方法
                 response = await asyncio.to_thread(
-                    generate_content_with_logging,
-                    **request_args
+                    self.client.models.generate_content,
+                    model=self.model_name,
+                    contents=simple_prompt,
+                    config=generation_config
                 )
             except Exception as e:
                 # 如果是安全设置错误，尝试移除安全设置后重试
@@ -764,18 +716,27 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     'safety_settings', 'safetysettings', 'harm', 'block', 'safety'
                 ]) or "400" in error_message
                 
-                if is_safety_error and "safety_settings" in request_args:
+                if is_safety_error:
                     self.logger.warning(f"后备翻译检测到安全设置错误，移除安全设置后重试: {error_message}")
-                    request_args = {k: v for k, v in request_args.items() if k != "safety_settings"}
+                    generation_config_no_safety = types.GenerateContentConfig(
+                        temperature=self.temperature,
+                        top_p=0.95,
+                        top_k=64,
+                        max_output_tokens=self.max_tokens,
+                        safety_settings=None,
+                    )
                     response = await asyncio.to_thread(
-                        generate_content_with_logging,
-                        **request_args
+                        self.client.models.generate_content,
+                        model=self.model_name,
+                        contents=simple_prompt,
+                        config=generation_config_no_safety
                     )
                 else:
                     raise
             
             # 在API调用成功后立即更新时间戳，确保所有请求（包括重试）都被计入速率限制
             if self._MAX_REQUESTS_PER_MINUTE > 0:
+                import time
                 GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
             
             # 验证响应对象是否有效

@@ -35,7 +35,21 @@ a = Analysis(
     pathex=[],
     binaries=onnx_binaries,
     datas=py3langid_datas + unidic_datas + onnx_datas,  # 添加所有数据文件
-    hiddenimports=['pydensecrf.eigen', 'bsdiff4.core', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'matplotlib', 'matplotlib.pyplot'] + onnx_hiddenimports,  # 添加隐式导入
+    hiddenimports=[
+        'pydensecrf.eigen', 
+        'bsdiff4.core', 
+        'PyQt6.QtCore', 
+        'PyQt6.QtGui', 
+        'PyQt6.QtWidgets', 
+        'matplotlib', 
+        'matplotlib.pyplot',
+        # PaddleOCR-VL 相关模块
+        'manga_translator.ocr.paddleocr_vl_model',
+        'manga_translator.ocr.paddleocr_vl_model.configuration_paddleocr_vl',
+        'manga_translator.ocr.paddleocr_vl_model.modeling_paddleocr_vl',
+        'manga_translator.ocr.paddleocr_vl_model.processing_paddleocr_vl',
+        'manga_translator.ocr.paddleocr_vl_model.image_processing',
+    ] + onnx_hiddenimports,  # 添加隐式导入
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[os.path.join(SPECPATH, 'pyi_rth_onnxruntime.py')],

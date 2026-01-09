@@ -175,6 +175,7 @@ examples/config.json
 
 # Ignore local build directories
 pydensecrf/
+pydensecrf_fork/
 
 # Ignore IDE directories
 .idea/

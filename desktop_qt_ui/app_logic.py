@@ -525,7 +525,7 @@ class MainAppLogic(QObject):
                     await client.close()
             
             elif "gemini" in translator_key.lower():
-                import google.generativeai as genai
+                from google import genai
                 
                 # 如果指定了自定义API Base（非空且非官方地址），使用OpenAI兼容模式
                 is_custom_api = (
@@ -564,15 +564,19 @@ class MainAppLogic(QObject):
                     loop = asyncio.get_event_loop()
                     
                     def sync_test():
-                        genai.configure(api_key=api_key)
+                        # 新版 SDK 使用 genai.Client
+                        client = genai.Client(api_key=api_key)
                         
                         # 如果指定了模型，测试该模型
                         if model and model.strip():
-                            test_model = genai.GenerativeModel(model)
-                            test_model.generate_content("test")
+                            client.models.generate_content(
+                                model=model,
+                                contents="test"
+                            )
                             return True, f"连接成功，模型 {model} 可用"
                         else:
-                            list(genai.list_models())
+                            # 列出模型
+                            list(client.models.list())
                             return True, "连接成功"
                     
                     try:
@@ -636,7 +640,7 @@ class MainAppLogic(QObject):
                     await client.close()
             
             elif "gemini" in translator_key.lower():
-                import google.generativeai as genai
+                from google import genai
                 
                 # 如果指定了自定义API Base（非空且非官方地址），使用OpenAI兼容模式
                 is_custom_api = (
@@ -663,8 +667,9 @@ class MainAppLogic(QObject):
                     loop = asyncio.get_event_loop()
                     
                     def sync_get_models():
-                        genai.configure(api_key=api_key)
-                        models = list(genai.list_models())
+                        # 新版 SDK 使用 genai.Client
+                        client = genai.Client(api_key=api_key)
+                        models = list(client.models.list())
                         # 获取所有模型名称
                         model_names = [m.name.replace("models/", "") for m in models]
                         return True, model_names, "获取成功"

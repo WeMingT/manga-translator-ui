@@ -70,19 +70,28 @@ class ModelPaddleOCRVL(OfflineOCR):
         """加载模型"""
         # 动态导入，避免未使用时加载
         from transformers import AutoProcessor
+        
+        # 在导入后立即过滤警告
+        import warnings
+        warnings.filterwarnings('ignore', message='.*slow image processor.*')
 
         # 确定模型路径 - 使用 models/ocr/paddleocr_vl
         model_path = os.path.join(self.model_dir, self.MODEL_DIR_NAME)
+        
+        # 自动修补模型文件
+        from .paddleocr_vl_patcher import patch_paddleocr_vl_files, register_ernie_modules
+        if os.path.exists(model_path):
+            patch_paddleocr_vl_files(model_path)
+            register_ernie_modules(model_path)
+        
         use_relative_path = False
         original_cwd = None
 
         if not os.path.exists(model_path) or not os.path.exists(os.path.join(model_path, "config.json")):
             # 如果本地没有，尝试从 HuggingFace 加载
             model_path = "jzhang533/PaddleOCR-VL-For-Manga"
-            self.logger.info(f"本地模型不存在，使用 HuggingFace 模型: {model_path}")
         else:
-            self.logger.info(f"使用本地模型: {model_path}")
-            # Windows 中文路径兼容：sentencepiece 无法处理非 ASCII 路径
+            # Windows 中文路径兼容：使用 tokenizers 后端（use_fast=True）避免 sentencepiece 路径问题
             # 通过切换工作目录使用相对路径来规避
             if sys.platform == 'win32':
                 try:
@@ -90,7 +99,6 @@ class ModelPaddleOCRVL(OfflineOCR):
                     model_path.encode('ascii')
                 except UnicodeEncodeError:
                     use_relative_path = True
-                    self.logger.info("检测到中文路径，使用相对路径加载模式")
 
         # 设置设备
         if device == 'cuda' and torch.cuda.is_available():
@@ -107,8 +115,6 @@ class ModelPaddleOCRVL(OfflineOCR):
             self.use_gpu = False
             torch_dtype = torch.float32
 
-        self.logger.info(f"加载 PaddleOCR-VL 模型到 {self.device}...")
-
         try:
             # 如果需要使用相对路径，切换工作目录
             if use_relative_path:
@@ -118,20 +124,71 @@ class ModelPaddleOCRVL(OfflineOCR):
             else:
                 load_path = model_path
 
-            # 加载处理器和模型
-            self.processor = AutoProcessor.from_pretrained(
-                load_path,
-                trust_remote_code=True,
-                local_files_only=use_relative_path,
-                use_fast=False
+            # 直接从 tokenizer.json 加载纯快速 tokenizer，完全避免 sentencepiece
+            from transformers import PreTrainedTokenizerFast
+            import json
+            
+            tokenizer_json_path = os.path.join(load_path if not use_relative_path else ".", "tokenizer.json")
+            tokenizer_config_path = os.path.join(load_path if not use_relative_path else ".", "tokenizer_config.json")
+            chat_template_path = os.path.join(load_path if not use_relative_path else ".", "chat_template.jinja")
+            
+            # 读取 tokenizer 配置
+            with open(tokenizer_config_path, 'r', encoding='utf-8') as f:
+                tokenizer_config = json.load(f)
+            
+            # 读取 chat_template
+            chat_template = None
+            if os.path.exists(chat_template_path):
+                with open(chat_template_path, 'r', encoding='utf-8') as f:
+                    chat_template = f.read()
+            
+            # 使用 PreTrainedTokenizerFast 直接加载，不依赖 sentencepiece
+            tokenizer = PreTrainedTokenizerFast(
+                tokenizer_file=tokenizer_json_path,
+                bos_token=tokenizer_config.get('bos_token', '<s>'),
+                eos_token=tokenizer_config.get('eos_token', '</s>'),
+                unk_token=tokenizer_config.get('unk_token', '<unk>'),
+                pad_token=tokenizer_config.get('pad_token'),
+                model_max_length=tokenizer_config.get('model_max_length', 1000000000000000019884624838656),
+                clean_up_tokenization_spaces=tokenizer_config.get('clean_up_tokenization_spaces', False)
             )
+            
+            # 手动设置 chat_template
+            if chat_template:
+                tokenizer.chat_template = chat_template
+            
+            # 加载 image processor（使用慢速模式）
+            from transformers import AutoImageProcessor
+            
+            # 过滤 slow image processor 警告
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', message='.*slow image processor.*')
+                image_processor = AutoImageProcessor.from_pretrained(
+                    load_path,
+                    trust_remote_code=True,
+                    local_files_only=use_relative_path
+                )
+            
+            # 手动创建 processor，直接导入自定义类避免 AutoProcessor 再次加载 tokenizer
+            sys.path.insert(0, load_path if not use_relative_path else ".")
+            try:
+                from processing_paddleocr_vl import PaddleOCRVLProcessor
+                self.processor = PaddleOCRVLProcessor(
+                    image_processor=image_processor,
+                    tokenizer=tokenizer,
+                    chat_template=tokenizer.chat_template if hasattr(tokenizer, 'chat_template') else None
+                )
+            finally:
+                if (load_path if not use_relative_path else ".") in sys.path:
+                    sys.path.remove(load_path if not use_relative_path else ".")
 
             # 使用 AutoModel 加载自定义模型架构
             from transformers import AutoModel
             self.model = AutoModel.from_pretrained(
                 load_path,
                 trust_remote_code=True,
-                torch_dtype=torch_dtype,
+                dtype=torch_dtype,  # 使用 dtype 而不是 torch_dtype
                 device_map=self.device if self.device != 'cpu' else None,
                 local_files_only=use_relative_path
             )
@@ -144,7 +201,6 @@ class ModelPaddleOCRVL(OfflineOCR):
             self.model = self.model.to(self.device)
 
         self.model.eval()
-        self.logger.info("PaddleOCR-VL 模型加载完成")
 
         # 加载 48px 模型用于颜色预测
         await self._load_color_model(device)
@@ -181,8 +237,6 @@ class ModelPaddleOCRVL(OfflineOCR):
 
                 if device == 'cuda' or device == 'mps':
                     self.color_model = self.color_model.to(device)
-
-                self.logger.info("48px 颜色预测模型已加载")
             else:
                 self.logger.warning(f"48px 模型文件不存在: {dict_48px_path} 或 {ckpt_48px_path}")
                 self.color_model = None
@@ -203,7 +257,6 @@ class ModelPaddleOCRVL(OfflineOCR):
             self.color_model = None
         if self.use_gpu:
             torch.cuda.empty_cache()
-        self.logger.info("PaddleOCR-VL 模型已卸载")
 
     def _recognize_single(self, img: np.ndarray) -> str:
         """
@@ -236,8 +289,8 @@ class ModelPaddleOCRVL(OfflineOCR):
             }
         ]
 
-        # 使用聊天模板
-        text = self.processor.apply_chat_template(
+        # 直接使用 tokenizer 的聊天模板
+        text = self.processor.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
 
@@ -248,6 +301,10 @@ class ModelPaddleOCRVL(OfflineOCR):
             return_tensors="pt",
             padding=True
         )
+        
+        # 移除模型不需要的 token_type_ids
+        if 'token_type_ids' in inputs:
+            del inputs['token_type_ids']
 
         # 移动到设备
         inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}

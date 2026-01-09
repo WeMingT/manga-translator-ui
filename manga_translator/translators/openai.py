@@ -326,8 +326,11 @@ class OpenAITranslator(CommonTranslator):
                 # 验证响应对象是否有效
                 validate_openai_response(response, self.logger)
 
-                # 检查成功条件
-                if response.choices and response.choices[0].message.content and response.choices[0].finish_reason != 'content_filter':
+                # 检查成功条件：有内容就尝试处理，后续会有质量检查
+                finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
+                has_content = response.choices and response.choices[0].message.content
+                
+                if has_content:
                     result_text = response.choices[0].message.content.strip()
                     
                     # 统一的编码清理（处理UTF-16-LE等编码问题）
@@ -434,16 +437,28 @@ class OpenAITranslator(CommonTranslator):
                 # 如果不成功，则记录原因并准备重试
                 retry_attempt += 1
                 log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
-                finish_reason = response.choices[0].finish_reason if (response and response.choices) else "N/A"
-
+                
+                # finish_reason 已在上面获取，根据不同情况处理
                 if finish_reason == 'content_filter':
                     retry_reason = "Content filter triggered"
                     self.logger.warning(f"OpenAI内容被安全策略拦截 ({log_attempt})。正在重试...")
                     last_exception = Exception("OpenAI content filter triggered")
+                elif finish_reason == 'length':
+                    retry_reason = "Response truncated due to length limit"
+                    self.logger.warning(f"OpenAI回复被截断（达到token限制） ({log_attempt})。正在重试...")
+                    last_exception = Exception("OpenAI response truncated due to length limit")
+                elif finish_reason == 'tool_calls':
+                    retry_reason = "Tool calls instead of translation"
+                    self.logger.warning(f"OpenAI尝试调用工具而非返回翻译 ({log_attempt})。正在重试...")
+                    last_exception = Exception("OpenAI attempted tool calls instead of translation")
+                elif not has_content:
+                    retry_reason = f"Empty content (finish_reason: {finish_reason})"
+                    self.logger.warning(f"OpenAI返回空内容 (finish_reason: '{finish_reason}') ({log_attempt})。正在重试...")
+                    last_exception = Exception(f"OpenAI returned empty content (finish_reason: {finish_reason})")
                 else:
-                    retry_reason = f"Empty content or unexpected finish_reason: {finish_reason}"
-                    self.logger.warning(f"OpenAI返回空内容或意外的结束原因 '{finish_reason}' ({log_attempt})。正在重试...")
-                    last_exception = Exception(f"OpenAI returned empty content or unexpected finish_reason: {finish_reason}")
+                    retry_reason = f"Unexpected finish_reason: {finish_reason}"
+                    self.logger.warning(f"OpenAI返回意外的结束原因 '{finish_reason}' ({log_attempt})。正在重试...")
+                    last_exception = Exception(f"OpenAI returned unexpected finish_reason: {finish_reason}")
 
                 if not is_infinite and attempt >= max_retries:
                     self.logger.error("OpenAI翻译在多次重试后仍然失败。即将终止程序。")

@@ -218,10 +218,10 @@ class ExportService:
             # 保存渲染结果
             self._save_rendered_image(rendered_image, output_path, config)
             
+            self.logger.info(f"图片已成功导出到: {output_path}")
+            
             if success_callback:
                 success_callback(f"图片已导出到: {output_path}")
-            
-            self.logger.info(f"图片已成功导出到: {output_path}")
 
         except Exception as e:
             error_msg = f"后端渲染导出失败: {e}"
