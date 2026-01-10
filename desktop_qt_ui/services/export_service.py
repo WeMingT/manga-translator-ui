@@ -116,7 +116,8 @@ class ExportService:
                             progress_callback: Optional[callable] = None,
                             success_callback: Optional[callable] = None,
                             error_callback: Optional[callable] = None,
-                            source_image_path: Optional[str] = None):
+                            source_image_path: Optional[str] = None,
+                            save_inpainted_only: bool = False):
         """
         导出后端渲染的图片
         
@@ -130,6 +131,7 @@ class ExportService:
             success_callback: 成功回调
             error_callback: 错误回调
             source_image_path: 原图路径（用于PSD导出）
+            save_inpainted_only: 是否只保存修复后的图片（不渲染翻译文字）
         """
         if not image:
             if error_callback:
@@ -156,7 +158,7 @@ class ExportService:
         # 在后台线程中执行导出
         export_thread = threading.Thread(
             target=self._perform_backend_render_export,
-            args=(image_copy, regions_data, config, output_path, mask, progress_callback, success_callback, error_callback, source_image_path),
+            args=(image_copy, regions_data, config, output_path, mask, progress_callback, success_callback, error_callback, source_image_path, save_inpainted_only),
             daemon=True
         )
         export_thread.start()
@@ -167,7 +169,8 @@ class ExportService:
                                      progress_callback: Optional[callable] = None,
                                      success_callback: Optional[callable] = None,
                                      error_callback: Optional[callable] = None,
-                                     source_image_path: Optional[str] = None):
+                                     source_image_path: Optional[str] = None,
+                                     save_inpainted_only: bool = False):
         """在后台线程中执行后端渲染导出"""
         import gc
         import os
@@ -209,7 +212,7 @@ class ExportService:
             
             # 执行后端渲染
             rendered_image = self._execute_backend_render(
-                temp_image_path, regions_json_path, translator_params, config, progress_callback, output_path, source_image_path
+                temp_image_path, regions_json_path, translator_params, config, progress_callback, output_path, source_image_path, save_inpainted_only
             )
             
             if not rendered_image:
@@ -553,7 +556,8 @@ class ExportService:
                               translator_params: Dict[str, Any], config: Dict[str, Any],
                               progress_callback: Optional[callable] = None,
                               output_path: str = None,
-                              source_image_path: str = None) -> Optional[Image.Image]:
+                              source_image_path: str = None,
+                              save_inpainted_only: bool = False) -> Optional[Image.Image]:
         """执行后端渲染"""
         image = None
         try:
@@ -634,17 +638,35 @@ class ExportService:
             try:
                 ctx = loop.run_until_complete(translator.translate(image, cfg, image_name=image.name))
 
-                if ctx.result is not None:
-                    # ctx.result is already a PIL Image object, no conversion needed.
-                    # 复制图像以避免 "Operation on closed image" 错误
-                    try:
+                # 根据参数决定返回inpainted还是result
+                if save_inpainted_only:
+                    # 只保存修复后的图片（不渲染翻译文字）
+                    # 注意：需要在批次清理之前获取img_inpainted
+                    if hasattr(ctx, 'img_inpainted') and ctx.img_inpainted is not None:
+                        # 将numpy数组转换为PIL Image（立即复制，避免被清理）
+                        import cv2
+                        import numpy as np
+                        inpainted_copy = np.copy(ctx.img_inpainted)  # 立即复制
+                        inpainted_bgr = cv2.cvtColor(inpainted_copy, cv2.COLOR_RGB2BGR)
+                        inpainted_rgb = cv2.cvtColor(inpainted_bgr, cv2.COLOR_BGR2RGB)
+                        result_image = Image.fromarray(inpainted_rgb)
+                        
+                        self.logger.info("返回修复后的图片（inpainted）")
+                    else:
+                        self.logger.warning("ctx.img_inpainted不存在，回退到result")
+                        if ctx.result is not None:
+                            result_image = ctx.result.copy()
+                        else:
+                            return None
+                else:
+                    # 返回翻译后的图片（带翻译文字）
+                    if ctx.result is not None:
                         result_image = ctx.result.copy()
-                    except Exception as copy_error:
-                        self.logger.error(f"复制结果图像失败: {copy_error}, ctx.result状态: closed={getattr(ctx.result, 'closed', 'N/A')}, mode={getattr(ctx.result, 'mode', 'N/A')}")
-                        raise
-                    
-                    # 导出可编辑PSD（如果启用）
-                    if cfg.cli.export_editable_psd:
+                    else:
+                        return None
+                
+                # 导出可编辑PSD（如果启用）
+                if cfg.cli.export_editable_psd and not save_inpainted_only:
                         try:
                             from manga_translator.utils.photoshop_export import photoshop_export, get_psd_output_path
                             
@@ -677,31 +699,23 @@ class ExportService:
                             self.logger.error(f"导出PSD失败: {psd_err}")
                             import traceback
                             self.logger.error(traceback.format_exc())
-                    
-                    # 关闭原始结果图像
+                
+                # 关闭原始结果图像
+                if hasattr(ctx, 'result') and ctx.result is not None:
                     try:
                         ctx.result.close()
                     except Exception as close_error:
                         self.logger.error(f"关闭ctx.result失败: {close_error}")
-                    
-                    # 关闭输入图像以释放内存
-                    if image:
-                        try:
-                            image.close()
-                            image = None
-                        except Exception as close_error:
-                            self.logger.error(f"关闭输入图像失败: {close_error}")
-                    
-                    return result_image
-                else:
-                    # 详细记录失败原因
-                    error_msg = "后端渲染没有生成结果"
-                    if hasattr(ctx, 'translation_error') and ctx.translation_error:
-                        error_msg += f", 错误: {ctx.translation_error}"
-                    if hasattr(ctx, 'text_regions'):
-                        error_msg += f", 区域数: {len(ctx.text_regions) if ctx.text_regions else 0}"
-                    self.logger.error(error_msg)
-                    return None
+                
+                # 关闭输入图像以释放内存
+                if image:
+                    try:
+                        image.close()
+                        image = None
+                    except Exception as close_error:
+                        self.logger.error(f"关闭输入图像失败: {close_error}")
+                
+                return result_image
 
             except Exception as translate_error:
                 self.logger.error(f"translator.translate执行失败: {translate_error}")
