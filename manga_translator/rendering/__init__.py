@@ -1421,8 +1421,8 @@ def render(
         if config and config.render.disable_auto_wrap:
             text_to_render = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text_to_render, flags=re.IGNORECASE)
         else:
-            # 如果没有开启AI断句，移除所有BR标记（避免显示在渲染结果中）
-            text_to_render = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', ' ', text_to_render, flags=re.IGNORECASE)
+            # 如果没有开启AI断句，删除所有BR标记（避免显示在渲染结果中）
+            text_to_render = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '', text_to_render, flags=re.IGNORECASE)
 
         # Automatically add horizontal tags for vertical text
         if region.vertical and config.render.auto_rotate_symbols:

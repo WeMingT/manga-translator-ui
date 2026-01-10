@@ -1896,6 +1896,16 @@ class EditorController(QObject):
             else:
                 config_dict = {}
             
+            # 强制开启AI断句模式，保留用户手动编辑的换行符
+            if 'render' not in config_dict:
+                config_dict['render'] = {}
+            config_dict['render']['disable_auto_wrap'] = True
+            
+            # 强制开启AI断句模式，确保用户手动编辑的换行符被保留
+            if 'render' not in config_dict:
+                config_dict['render'] = {}
+            config_dict['render']['disable_auto_wrap'] = True
+            
 
 
             # 确保区域数据包含渲染所需的所有信息
@@ -2009,48 +2019,62 @@ class EditorController(QObject):
             # 保存JSON文件 - 传入source_path用于生成正确的键
             export_service._save_regions_data_with_path(regions, json_path, source_path, mask, config_dict)
             
-            # 通过后端渲染生成并保存inpainted图片到原图片目录
+            # 直接调用后端inpainting模块生成并保存inpainted图片
             try:
                 from manga_translator.utils.path_manager import get_inpainted_path
-                import threading
+                from PIL import Image
+                import numpy as np
+                import cv2
                 
-                # 获取原图
+                # 获取原图和蒙版
                 original_image = self.model.get_image()
-                if original_image:
+                if original_image and mask is not None:
                     inpainted_path = get_inpainted_path(source_path, create_dir=True)
                     
-                    # 使用事件来等待后端渲染完成
-                    render_complete_event = threading.Event()
-                    render_error = [None]  # 使用列表来存储错误信息
+                    # 转换PIL图像为numpy数组
+                    if isinstance(original_image, Image.Image):
+                        img_rgb = np.array(original_image.convert('RGB'))
+                    else:
+                        img_rgb = original_image
                     
-                    def inpainted_progress_callback(message):
-                        pass
-                    
-                    def inpainted_success_callback(message):
+                    # 直接调用后端inpainting模块
+                    try:
+                        from manga_translator.inpainting import dispatch
+                        from manga_translator.config import InpainterConfig
+                        
+                        # 获取inpainter配置
+                        inpainter_config = config_dict.get('inpainter', {})
+                        inpainter_cfg = InpainterConfig(**inpainter_config) if inpainter_config else InpainterConfig()
+                        
+                        # 获取GPU配置
+                        cli_config = config_dict.get('cli', {})
+                        use_gpu = cli_config.get('use_gpu', False)
+                        device = 'cuda' if use_gpu else 'cpu'
+                        
+                        # 执行inpainting（异步调用）
+                        self.logger.info(f"开始修复图片: {inpainter_cfg.inpainter}, device={device}")
+                        img_inpainted = await dispatch(
+                            inpainter_cfg.inpainter,
+                            img_rgb,
+                            mask,
+                            inpainter_cfg,  # 传入完整的config对象
+                            inpainting_size=inpainter_cfg.inpainting_size,
+                            device=device,
+                            verbose=False
+                        )
+                        
+                        # 保存inpainted图片
+                        inpainted_bgr = cv2.cvtColor(img_inpainted, cv2.COLOR_RGB2BGR)
+                        from manga_translator.utils import imwrite_unicode
+                        import logging
+                        manga_logger = logging.getLogger('manga_translator')
+                        imwrite_unicode(inpainted_path, inpainted_bgr, manga_logger)
+                        
                         self.logger.info(f"已更新原图片目录下的修复图片: {inpainted_path}")
-                        render_complete_event.set()
-                    
-                    def inpainted_error_callback(message):
-                        self.logger.warning(f"更新inpainted图片失败: {message}")
-                        render_error[0] = message
-                        render_complete_event.set()
-                    
-                    # 调用后端渲染服务
-                    export_service.export_rendered_image(
-                        image=original_image,
-                        regions_data=regions,
-                        config=config_dict,
-                        output_path=inpainted_path,
-                        mask=mask,
-                        progress_callback=inpainted_progress_callback,
-                        success_callback=inpainted_success_callback,
-                        error_callback=inpainted_error_callback,
-                        source_image_path=source_path
-                    )
-                    
-                    # 等待后端渲染完成（最多等待30秒）
-                    if not render_complete_event.wait(timeout=30):
-                        self.logger.warning("更新inpainted图片超时")
+                    except Exception as e:
+                        self.logger.warning(f"直接调用inpainting失败: {e}")
+                        import traceback
+                        self.logger.warning(traceback.format_exc())
             except Exception as e:
                 self.logger.warning(f"更新inpainted图片失败: {e}")
             
