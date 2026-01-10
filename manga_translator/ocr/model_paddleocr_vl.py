@@ -105,15 +105,15 @@ class ModelPaddleOCRVL(OfflineOCR):
             self.device = 'cuda'
             self.use_gpu = True
             # 使用 bfloat16 以节省显存
-            torch_dtype = torch.bfloat16
+            model_dtype = torch.bfloat16
         elif device == 'mps' and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             self.device = 'mps'
             self.use_gpu = True
-            torch_dtype = torch.float16
+            model_dtype = torch.float16
         else:
             self.device = 'cpu'
             self.use_gpu = False
-            torch_dtype = torch.float32
+            model_dtype = torch.float32
 
         try:
             # 如果需要使用相对路径，切换工作目录
@@ -188,7 +188,7 @@ class ModelPaddleOCRVL(OfflineOCR):
             self.model = AutoModel.from_pretrained(
                 load_path,
                 trust_remote_code=True,
-                dtype=torch_dtype,  # 使用 dtype 而不是 torch_dtype
+                torch_dtype=model_dtype,
                 device_map=self.device if self.device != 'cpu' else None,
                 local_files_only=use_relative_path
             )
