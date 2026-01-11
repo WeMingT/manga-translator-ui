@@ -358,12 +358,15 @@ def run_pip_requirements(requirements_file, desc=None):
         
         # 检查是否是 PyTorch 相关包，需要使用主源
         use_primary = is_pytorch_package(pkg_display) and primary_index_url
+        
+        # 检查是否需要忽略版本限制
+        pkg_to_install = pkg
+        if pkg_display.lower() in ignore_version_packages or use_primary:
+            pkg_to_install = pkg_display
+            print(f"    (忽略版本限制，安装最新版)")
+        
         if use_primary:
             print(f"    (使用 PyTorch 源: {primary_index_url})")
-            # PyTorch 相关包忽略版本锁定，安装最新版以保证版本一致性
-            pkg_to_install = pkg_display
-        else:
-            pkg_to_install = pkg
         
         cmd = build_pip_command(f'install "{pkg_to_install}"', mirror, use_primary_index=use_primary)
         
