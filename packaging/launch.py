@@ -279,6 +279,17 @@ def run_pip_requirements(requirements_file, desc=None):
         'mpi-rt', 'tcmlib'
     ]
     
+    # 需要忽略版本限制的包（安装时去掉版本号，安装最新兼容版本）
+    ignore_version_packages = [
+        'xformers',        # PyTorch 扩展，必须与 torch 版本匹配
+        'transformers',    # 与 PyTorch 版本强相关，避免 torch._C 模块错误
+        'accelerate',      # transformers 的加速库
+        'timm',            # 图像模型库，依赖 PyTorch
+        'kornia',          # 计算机视觉库，依赖 PyTorch
+        'spandrel',        # 神经网络架构库，依赖 PyTorch
+        'open_clip_torch'  # CLIP 模型，依赖 PyTorch
+    ]
+    
     def is_pytorch_package(pkg_name):
         """检查是否是需要从 PyTorch 源下载的包"""
         pkg_lower = pkg_name.lower()
