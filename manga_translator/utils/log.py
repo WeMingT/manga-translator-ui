@@ -1,4 +1,5 @@
 import logging
+import sys
 import colorama
 
 from .generic import replace_prefix
@@ -15,7 +16,10 @@ class Formatter(logging.Formatter):
             self._style._fmt = '[%(name)s] %(message)s'
         else:
             self._style._fmt = '[%(name)s] %(message)s'
-        return super().formatMessage(record)
+        result = super().formatMessage(record)
+        # ✅ 每次格式化后强制刷新输出
+        sys.stdout.flush()
+        return result
 
 class Filter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
@@ -36,9 +40,21 @@ def init_logging():
         return
     _initialized = True
     
+    # ✅ 强制刷新标准输出（解决日志卡住问题）
+    import sys
+    import os
+    # 设置环境变量，禁用 Python 输出缓冲
+    os.environ['PYTHONUNBUFFERED'] = '1'
+    # 如果 stdout 有 reconfigure 方法，设置为无缓冲
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except:
+            pass
+    
     # 强制添加 handler（不依赖 basicConfig）
     if not logging.root.handlers:
-        handler = logging.StreamHandler()
+        handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.INFO)
         logging.root.addHandler(handler)
     
@@ -49,6 +65,8 @@ def init_logging():
             h.setFormatter(Formatter())
             h.addFilter(Filter())
             h.setLevel(logging.INFO)
+            # ✅ 强制每次日志后刷新输出
+            h.flush()
     
     # Explicitly set the root logger level
     root.setLevel(logging.INFO)
