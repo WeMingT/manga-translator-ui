@@ -312,6 +312,9 @@ class LamaMPEInpainter(OfflineInpainter):
         new_h = h if h % pad_size == 0 else (pad_size - (h % pad_size)) + h
         new_w = w if w % pad_size == 0 else (pad_size - (w % pad_size)) + w
         
+        # ✅ 添加日志输出（与PyTorch版本一致）
+        self.logger.info(f'Inpainting resolution: {new_w}x{new_h}')
+        
         # Padding
         img_pad = np.pad(image, ((0, new_h - h), (0, new_w - w), (0, 0)), mode='symmetric')
         mask_pad_single = np.pad(mask_resized, ((0, new_h - h), (0, new_w - w)), mode='constant', constant_values=0)
@@ -624,6 +627,9 @@ class LamaLargeInpainter(LamaMPEInpainter):
                 new_w = width
             new_h = int(new_h / 16) * 16
             new_w = int(new_w / 16) * 16
+            
+            # ✅ 添加日志输出（与PyTorch版本一致）
+            self.logger.info(f'Inpainting resolution: {new_w}x{new_h}')
             
             # 记录内存使用情况（用于调试）
             estimated_memory_mb = (new_h * new_w * 3 * 4 * 2) / (1024 * 1024)  # 粗略估算
