@@ -544,22 +544,29 @@ if exist ".git" (
     
     REM 清理前确认
     echo ========================================
-    echo [警告] 即将删除现有文件
+    echo ??????  警告：即将删除文件  ??????
     echo ========================================
     echo.
-    echo 将删除以下内容:
-    echo   - 所有代码文件
-    echo   - .git 目录
+    echo ╔════════════════════════════════════════╗
+    echo ║  ??  危险操作：将删除大量文件！  ??   ║
+    echo ╚════════════════════════════════════════╝
     echo.
-    echo 将保留以下内容:
-    echo   - venv / conda_env (Python环境)
-    echo   - PortableGit (便携版Git)
-    echo   - Miniconda3 (Conda环境)
-    echo   - 安装脚本
+    echo 【删除范围】
+    echo   除保留文件外的全部文件和文件夹都将被删除！
+    echo.
+    echo 【仅保留以下内容】
+    echo   ? venv / conda_env (Python环境)
+    echo   ? PortableGit (便携版Git)
+    echo   ? Miniconda3 (Conda环境)
+    echo   ? 安装脚本（步骤1-首次安装.bat）
+    echo.
+    echo ╔════════════════════════════════════════╗
+    echo ║  其他所有文件和文件夹都将被永久删除！ ║
+    echo ╚════════════════════════════════════════╝
     echo.
     echo 是否继续?
     echo [1] 是 - 删除并重新克隆
-    echo [2] 否 - 取消安装
+    echo [2] 否 - 取消安装（推荐先备份重要文件）
     echo.
     set /p confirm_delete="请选择 (1/2, 默认2): "
     
