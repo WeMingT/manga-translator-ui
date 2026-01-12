@@ -608,9 +608,30 @@ class MainAppLogic(QObject):
         try:
             if "openai" in translator_key.lower():
                 from openai import AsyncOpenAI
+                import httpx
+                
+                # 使用与翻译器相同的浏览器请求头，避免被 Cloudflare 拦截
+                browser_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
+                    "Connection": "keep-alive",
+                    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+                    "Sec-Ch-Ua-Mobile": "?0",
+                    "Sec-Ch-Ua-Platform": '"Windows"',
+                }
+                
+                # 创建自定义 HTTP 客户端
+                http_client = httpx.AsyncClient(
+                    headers=browser_headers,
+                    timeout=httpx.Timeout(60.0, connect=30.0)
+                )
+                
                 client = AsyncOpenAI(
                     api_key=api_key,
-                    base_url=api_base or "https://api.openai.com/v1"
+                    base_url=api_base or "https://api.openai.com/v1",
+                    default_headers=browser_headers,
+                    http_client=http_client
                 )
                 
                 try:
