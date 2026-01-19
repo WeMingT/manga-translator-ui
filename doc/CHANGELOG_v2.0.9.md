@@ -17,6 +17,7 @@
 
 ## 🐛 修复
 
+- 修复 Qt 编辑器翻译图查看模式下图片不显示的问题（翻译后的图片现在正确加载到 inpainted 层）
 - 修复 `AsyncGeminiCurlCffi` 响应解析时 `NoneType` 不可迭代错误
 - 修复 Gemini API 安全设置格式错误（去掉枚举类名前缀）
 - 修复 Gemini API 请求缺少 `role` 字段导致 400 错误

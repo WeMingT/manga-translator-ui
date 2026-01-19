@@ -615,14 +615,19 @@ class EditorController(QObject):
             
             self.model.set_source_image_path(image_path)
 
+            # 翻译后的图片应该显示在inpainted层，原图层保持透明
             if not hasattr(self, '_user_adjusted_alpha') or not self._user_adjusted_alpha:
-                self.model.set_original_image_alpha(1.0)
+                self.model.set_original_image_alpha(0.0)
 
+            # 将翻译后的图片同时设置为原图和inpainted图
+            # 这样无论原图透明度如何调整，都能看到翻译后的图
             self.model.set_image(image)
+            self.model.set_inpainted_image(image)
+            
             self._set_regions([])
             self.model.set_raw_mask(None)
             self.model.set_refined_mask(None)
-            self.model.set_inpainted_image_path(None)
+            self.model.set_inpainted_image_path(image_path)
 
             # 禁用导出功能
             if self.view and hasattr(self.view, 'toolbar'):
