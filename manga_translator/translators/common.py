@@ -104,6 +104,541 @@ class MultimodalUnsupportedException(Exception):
             f"模型 {model_name} 不支持多模态输入（图片+文本）"
         )
 
+
+# ============================================================================
+# AsyncOpenAI 客户端包装器 - 使用 curl_cffi 绕过 TLS 指纹检测
+# ============================================================================
+
+class AsyncOpenAICurlCffi:
+    """
+    异步 OpenAI 客户端包装器，使用 curl_cffi 绕过 TLS 指纹检测
+    完全兼容 AsyncOpenAI 的接口，可直接替换使用
+
+    用法:
+        client = AsyncOpenAICurlCffi(
+            api_key="your-api-key",
+            base_url="https://api.openai.com/v1",
+            default_headers={"User-Agent": "..."},
+            impersonate="chrome110"
+        )
+
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}]
+        )
+    """
+
+    class ChatCompletions:
+        """聊天完成接口"""
+
+        def __init__(self, parent):
+            self.parent = parent
+
+        async def create(self, model, messages, temperature=None, max_tokens=None, **kwargs):
+            """创建聊天完成请求"""
+            url = f"{self.parent.base_url}/chat/completions"
+
+            headers = {
+                "Authorization": f"Bearer {self.parent.api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # 合并默认请求头
+            if self.parent.default_headers:
+                headers.update(self.parent.default_headers)
+
+            # 构建请求数据
+            data = {
+                "model": model,
+                "messages": messages
+            }
+
+            if temperature is not None:
+                data["temperature"] = temperature
+            if max_tokens is not None:
+                data["max_tokens"] = max_tokens
+
+            # 添加其他参数
+            data.update(kwargs)
+
+            # 发送异步请求
+            response = await self.parent.session.post(
+                url,
+                json=data,
+                headers=headers,
+                timeout=self.parent.timeout
+            )
+
+            if response.status_code != 200:
+                print(f"[AsyncOpenAICurlCffi] Error - URL: {url}")
+                print(f"[AsyncOpenAICurlCffi] Error - Status: {response.status_code}")
+                print(f"[AsyncOpenAICurlCffi] Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                error_msg = f"API request failed with status {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
+                except:
+                    error_msg = f"{error_msg}: {response.text[:500] if response.text else '(empty)'}"
+                raise Exception(error_msg)
+
+            result = response.json()
+
+            # 转换为类似 OpenAI SDK 的响应对象
+            return _OpenAIResponse(result)
+
+    class Chat:
+        """聊天接口"""
+
+        def __init__(self, parent):
+            self.completions = AsyncOpenAICurlCffi.ChatCompletions(parent)
+
+    class Models:
+        """模型列表接口"""
+
+        def __init__(self, parent):
+            self.parent = parent
+
+        async def list(self):
+            """获取可用模型列表"""
+            url = f"{self.parent.base_url}/models"
+
+            headers = {
+                "Authorization": f"Bearer {self.parent.api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # 合并默认请求头
+            if self.parent.default_headers:
+                headers.update(self.parent.default_headers)
+
+            # 发送异步请求
+            response = await self.parent.session.get(
+                url,
+                headers=headers,
+                timeout=self.parent.timeout
+            )
+
+            if response.status_code != 200:
+                print(f"[AsyncOpenAICurlCffi] List Error - URL: {url}")
+                print(f"[AsyncOpenAICurlCffi] List Error - Status: {response.status_code}")
+                print(f"[AsyncOpenAICurlCffi] List Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                error_msg = f"API request failed with status {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
+                except:
+                    error_msg = f"{error_msg}: {response.text[:200] if response.text else '(empty)'}"
+                raise Exception(error_msg)
+
+            # 检查响应内容类型
+            content_type = response.headers.get('content-type', '')
+            if 'application/json' not in content_type and 'text/json' not in content_type:
+                # 可能返回了 HTML 页面，说明 API 不支持 /models 端点
+                raise Exception("API 不支持获取模型列表（返回了非 JSON 响应）。请手动输入模型名称。")
+
+            try:
+                result = response.json()
+            except Exception as e:
+                raise Exception(f"无法解析 API 响应: {str(e)}。请手动输入模型名称。")
+
+            # 转换为类似 OpenAI SDK 的响应对象
+            return _ModelsResponse(result)
+
+    def __init__(self, api_key, base_url="https://api.openai.com/v1",
+                 default_headers=None, http_client=None, impersonate="chrome110", timeout=30):
+        """
+        初始化异步客户端
+
+        Args:
+            api_key: OpenAI API 密钥
+            base_url: API 基础 URL
+            default_headers: 默认请求头
+            http_client: 忽略此参数（为了兼容性）
+            impersonate: 模拟的浏览器类型 (chrome110, chrome120, safari15_5 等)
+            timeout: 请求超时时间（秒）
+        """
+        self.api_key = api_key
+        self.base_url = base_url.rstrip('/')
+        self.default_headers = default_headers or {}
+        self.timeout = timeout
+        self.impersonate = impersonate
+
+        # 延迟导入 curl_cffi，避免在不需要时导入
+        try:
+            from curl_cffi.requests import AsyncSession
+            self.session = AsyncSession(impersonate=impersonate)
+        except ImportError:
+            raise ImportError(
+                "curl_cffi is required for TLS fingerprint bypass. "
+                "Install it with: pip install curl_cffi"
+            )
+
+        # 创建聊天接口
+        self.chat = self.Chat(self)
+        # 创建模型列表接口
+        self.models = self.Models(self)
+
+    async def close(self):
+        """关闭 session"""
+        if hasattr(self.session, 'close'):
+            await self.session.close()
+
+    async def __aenter__(self):
+        """异步上下文管理器入口"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步上下文管理器退出"""
+        await self.close()
+
+
+class _OpenAIResponse:
+    """模拟 OpenAI SDK 的响应对象"""
+
+    class Choice:
+        class Message:
+            def __init__(self, content):
+                self.content = content
+
+        def __init__(self, message_content, finish_reason):
+            self.message = self.Message(message_content)
+            self.finish_reason = finish_reason
+
+    class Usage:
+        def __init__(self, total_tokens, prompt_tokens=0, completion_tokens=0):
+            self.total_tokens = total_tokens
+            self.prompt_tokens = prompt_tokens
+            self.completion_tokens = completion_tokens
+
+    def __init__(self, data):
+        self.model = data.get('model', '')
+        self.choices = [
+            self.Choice(
+                choice['message']['content'],
+                choice.get('finish_reason', 'stop')
+            )
+            for choice in data.get('choices', [])
+        ]
+        usage_data = data.get('usage', {})
+        self.usage = self.Usage(
+            usage_data.get('total_tokens', 0),
+            usage_data.get('prompt_tokens', 0),
+            usage_data.get('completion_tokens', 0)
+        )
+
+
+class _ModelsResponse:
+    """模拟 OpenAI SDK 的模型列表响应对象"""
+
+    class Model:
+        def __init__(self, model_data):
+            self.id = model_data.get('id', '')
+            self.object = model_data.get('object', 'model')
+            self.created = model_data.get('created', 0)
+            self.owned_by = model_data.get('owned_by', '')
+
+    def __init__(self, data):
+        self.data = [
+            self.Model(model_data)
+            for model_data in data.get('data', [])
+        ]
+        self.object = data.get('object', 'list')
+
+
+# ============================================================================
+# AsyncGemini 客户端包装器 - 使用 curl_cffi 绕过 TLS 指纹检测
+# ============================================================================
+
+class AsyncGeminiCurlCffi:
+    """
+    异步 Gemini 客户端包装器，使用 curl_cffi 绕过 TLS 指纹检测
+    兼容 Google genai SDK 的接口
+
+    用法:
+        client = AsyncGeminiCurlCffi(
+            api_key="your-api-key",
+            base_url="https://generativelanguage.googleapis.com",
+            impersonate="chrome110"
+        )
+
+        response = await client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents="Hello"
+        )
+    """
+
+    class Models:
+        """模型接口"""
+
+        def __init__(self, parent):
+            self.parent = parent
+
+        async def generate_content(self, model, contents, generation_config=None, safety_settings=None, **kwargs):
+            """生成内容请求"""
+            # 对模型名进行 URL 编码，处理包含 "/" 的模型名（如 z-ai/glm4.7）
+            import urllib.parse
+            encoded_model = urllib.parse.quote(model, safe='')
+
+            # 构建 URL - Gemini API 格式
+            url = f"{self.parent.base_url}/v1beta/models/{encoded_model}:generateContent"
+
+            # 实际请求使用完整的 API Key
+            request_headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.parent.api_key
+            }
+
+            # 合并默认请求头
+            if self.parent.default_headers:
+                request_headers.update(self.parent.default_headers)
+
+            # 构建请求数据
+            data = {}
+
+            # 处理 contents 参数
+            if isinstance(contents, str):
+                data["contents"] = [{"role": "user", "parts": [{"text": contents}]}]
+            elif isinstance(contents, list):
+                # 如果是列表，检查是否已有 role 字段，没有则添加
+                processed_contents = []
+                for item in contents:
+                    if isinstance(item, dict):
+                        if "role" not in item:
+                            # 添加默认 role
+                            item = {"role": "user", **item}
+                        processed_contents.append(item)
+                    else:
+                        processed_contents.append({"role": "user", "parts": [{"text": str(item)}]})
+                data["contents"] = processed_contents
+            else:
+                data["contents"] = [{"role": "user", "parts": [{"text": str(contents)}]}]
+
+            # 添加生成配置
+            if generation_config:
+                config_dict = {}
+                if hasattr(generation_config, 'temperature'):
+                    config_dict['temperature'] = generation_config.temperature
+                if hasattr(generation_config, 'top_p'):
+                    config_dict['topP'] = generation_config.top_p
+                if hasattr(generation_config, 'top_k'):
+                    config_dict['topK'] = generation_config.top_k
+                if hasattr(generation_config, 'max_output_tokens'):
+                    config_dict['maxOutputTokens'] = generation_config.max_output_tokens
+                if config_dict:
+                    data["generationConfig"] = config_dict
+
+            # 添加安全设置
+            if safety_settings:
+                safety_list = []
+                for setting in safety_settings:
+                    if hasattr(setting, 'category') and hasattr(setting, 'threshold'):
+                        # 提取枚举值名称，去掉类名前缀
+                        # 例如: "HarmCategory.HARM_CATEGORY_HARASSMENT" -> "HARM_CATEGORY_HARASSMENT"
+                        # 例如: "HarmBlockThreshold.OFF" -> "OFF"
+                        category_str = str(setting.category)
+                        threshold_str = str(setting.threshold)
+
+                        # 去掉枚举类名前缀
+                        if '.' in category_str:
+                            category_str = category_str.split('.')[-1]
+                        if '.' in threshold_str:
+                            threshold_str = threshold_str.split('.')[-1]
+
+                        safety_list.append({
+                            "category": category_str,
+                            "threshold": threshold_str
+                        })
+                if safety_list:
+                    data["safetySettings"] = safety_list
+
+            # 添加其他参数
+            data.update(kwargs)
+
+            # 发送异步请求
+            response = await self.parent.session.post(
+                url,
+                json=data,
+                headers=request_headers,
+                timeout=self.parent.timeout
+            )
+
+            if response.status_code != 200:
+                print(f"[AsyncGeminiCurlCffi] Error - URL: {url}")
+                print(f"[AsyncGeminiCurlCffi] Error - Status: {response.status_code}")
+                print(f"[AsyncGeminiCurlCffi] Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                error_msg = f"Gemini API request failed with status {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
+                except:
+                    error_msg = f"{error_msg}: {response.text[:500] if response.text else '(empty response)'}"
+                raise Exception(error_msg)
+
+            # 检查响应内容类型和内容
+            content_type = response.headers.get('content-type', '')
+            if 'application/json' not in content_type and 'text/json' not in content_type:
+                raise Exception(f"API 返回了非 JSON 响应 (Content-Type: {content_type}): {response.text[:200] if response.text else '(empty)'}")
+
+            try:
+                result = response.json()
+            except Exception as e:
+                raise Exception(f"无法解析 API 响应: {str(e)}。响应内容: {response.text[:200] if response.text else '(empty)'}")
+
+            # 转换为类似 Gemini SDK 的响应对象
+            return _GeminiResponse(result)
+
+        async def list(self):
+            """获取可用模型列表"""
+            url = f"{self.parent.base_url}/v1beta/models"
+
+            headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.parent.api_key
+            }
+
+            # 合并默认请求头
+            if self.parent.default_headers:
+                headers.update(self.parent.default_headers)
+
+            # 发送异步请求
+            response = await self.parent.session.get(
+                url,
+                headers=headers,
+                timeout=self.parent.timeout
+            )
+
+            if response.status_code != 200:
+                print(f"[AsyncGeminiCurlCffi] List Error - URL: {url}")
+                print(f"[AsyncGeminiCurlCffi] List Error - Status: {response.status_code}")
+                print(f"[AsyncGeminiCurlCffi] List Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                error_msg = f"Gemini API request failed with status {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
+                except:
+                    error_msg = f"{error_msg}: {response.text[:200] if response.text else '(empty)'}"
+                raise Exception(error_msg)
+
+            # 检查响应内容类型
+            content_type = response.headers.get('content-type', '')
+            if 'application/json' not in content_type and 'text/json' not in content_type:
+                # 可能返回了 HTML 页面，说明 API 不支持 /models 端点
+                raise Exception("API 不支持获取模型列表（返回了非 JSON 响应）。请手动输入模型名称。")
+
+            try:
+                result = response.json()
+            except Exception as e:
+                raise Exception(f"无法解析 API 响应: {str(e)}。请手动输入模型名称。")
+
+            # 返回模型列表
+            return _GeminiModelsResponse(result)
+
+    def __init__(self, api_key, base_url="https://generativelanguage.googleapis.com",
+                 default_headers=None, impersonate="chrome110", timeout=300):
+        """
+        初始化异步客户端
+
+        Args:
+            api_key: Gemini API 密钥
+            base_url: API 基础 URL
+            default_headers: 默认请求头
+            impersonate: 模拟的浏览器类型 (chrome110, chrome120, safari15_5 等)
+            timeout: 请求超时时间（秒）
+        """
+        self.api_key = api_key
+        self.base_url = base_url.rstrip('/')
+        self.default_headers = default_headers or {}
+        self.timeout = timeout
+        self.impersonate = impersonate
+
+        # 延迟导入 curl_cffi，避免在不需要时导入
+        try:
+            from curl_cffi.requests import AsyncSession
+            self.session = AsyncSession(impersonate=impersonate)
+        except ImportError:
+            raise ImportError(
+                "curl_cffi is required for TLS fingerprint bypass. "
+                "Install it with: pip install curl_cffi"
+            )
+
+        # 创建模型接口
+        self.models = self.Models(self)
+
+    async def close(self):
+        """关闭 session"""
+        if hasattr(self.session, 'close'):
+            await self.session.close()
+
+    async def __aenter__(self):
+        """异步上下文管理器入口"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步上下文管理器退出"""
+        await self.close()
+
+
+class _GeminiResponse:
+    """模拟 Gemini SDK 的响应对象"""
+
+    class Candidate:
+        class Content:
+            class Part:
+                def __init__(self, text):
+                    self.text = text
+
+            def __init__(self, parts_data):
+                parts_data = parts_data or []
+                self.parts = [self.Part(p.get('text', '') if p else '') for p in parts_data]
+
+        def __init__(self, candidate_data):
+            content_data = candidate_data.get('content') or {}
+            parts_data = content_data.get('parts') or []
+            self.content = self.Content(parts_data)
+            self.finish_reason = candidate_data.get('finishReason', 'STOP')
+
+    def __init__(self, data):
+        candidates_data = data.get('candidates') or [] if data else []
+        self.candidates = [self.Candidate(c) for c in candidates_data]
+
+        # 提供便捷的 text 属性
+        if self.candidates and self.candidates[0].content.parts:
+            self._text = self.candidates[0].content.parts[0].text
+        else:
+            self._text = ""
+
+    @property
+    def text(self):
+        return self._text
+
+
+class _GeminiModelsResponse:
+    """模拟 Gemini SDK 的模型列表响应对象"""
+
+    class Model:
+        def __init__(self, model_data):
+            self.name = model_data.get('name', '')
+            self.display_name = model_data.get('displayName', '')
+            self.description = model_data.get('description', '')
+            # 从 name 中提取模型 ID (格式: models/gemini-1.5-flash)
+            if '/' in self.name:
+                self.id = self.name.split('/')[-1]
+            else:
+                self.id = self.name
+
+    def __init__(self, data):
+        # 使用 or [] 确保即使 models 是 None 也能正确处理
+        models_data = data.get('models') or [] if data else []
+        self._models = [self.Model(m) for m in models_data]
+
+    def __iter__(self):
+        return iter(self._models)
+
+
 def validate_openai_response(response, logger=None) -> bool:
     """
     验证OpenAI API响应对象的有效性

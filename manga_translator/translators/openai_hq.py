@@ -11,7 +11,7 @@ import httpx
 import openai
 from openai import AsyncOpenAI
 
-from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, merge_glossary_to_file, get_glossary_extraction_prompt, parse_hq_response, validate_openai_response
+from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, merge_glossary_to_file, get_glossary_extraction_prompt, parse_hq_response, validate_openai_response, AsyncOpenAICurlCffi
 from .keys import OPENAI_API_KEY, OPENAI_MODEL
 from ..utils import Context
 
@@ -178,7 +178,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
     
     def _setup_client(self, force_recreate: bool = False):
         """设置OpenAI客户端
-        
+
         Args:
             force_recreate: 是否强制重建客户端（用于重试时断开旧连接）
         """
@@ -196,18 +196,31 @@ class OpenAIHighQualityTranslator(CommonTranslator):
             except Exception as e:
                 self.logger.debug(f"关闭旧客户端时出错（可忽略）: {e}")
             self.client = None
-        
+
         if not self.client:
-            # 使用浏览器式请求头，避免被 Cloudflare 阻止
-            self.client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                default_headers=BROWSER_HEADERS,
-                http_client=httpx.AsyncClient(
-                    headers=BROWSER_HEADERS,
-                    timeout=httpx.Timeout(300.0, connect=60.0)
+            # 尝试使用 curl_cffi 客户端绕过 TLS 指纹检测
+            try:
+                self.client = AsyncOpenAICurlCffi(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    default_headers=BROWSER_HEADERS,
+                    impersonate="chrome110",
+                    timeout=300.0
                 )
-            )
+                self.logger.debug("已创建新的OpenAI HQ客户端连接（使用 curl_cffi TLS 指纹伪装）")
+            except ImportError:
+                # 如果 curl_cffi 不可用，回退到标准客户端
+                self.logger.warning("curl_cffi 未安装，使用标准 OpenAI 客户端（可能被 TLS 指纹检测阻止）")
+                self.client = AsyncOpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    default_headers=BROWSER_HEADERS,
+                    http_client=httpx.AsyncClient(
+                        headers=BROWSER_HEADERS,
+                        timeout=httpx.Timeout(300.0, connect=60.0)
+                    )
+                )
+                self.logger.debug("已创建新的OpenAI HQ客户端连接（标准模式）")
     
     async def _cleanup(self):
         """清理资源"""
@@ -645,9 +658,9 @@ This is an incorrect response because it includes extra text and explanations.
                 if is_multimodal_unsupported:
                     self.logger.error(f"❌ 模型 {self.model} 不支持多模态输入（图片+文本）")
                     self.logger.error("💡 解决方案：")
-                    self.logger.error("   1. 使用支持多模态的模型（如 gpt-4o, gpt-4-vision-preview）")
-                    self.logger.error("   2. 或者切换到普通翻译模式（不使用 _hq 高质量翻译器）")
-                    self.logger.error("   3. DeepSeek模型不支持多模态，请勿使用 openai_hq 翻译器")
+                    self.logger.error("   1. 使用支持多模态的模型（如 gpt-5.2、gpt-5.2-mini）")
+                    self.logger.error("   2. 或者切换到普通翻译模式（不使用高质量翻译器）")
+                    self.logger.error("   3. DeepSeek模型不支持多模态，请勿使用 OpenAI高质量翻译")
                     raise Exception(f"模型不支持多模态输入: {self.model}") from e
                 else:
                     # 其他400错误，正常重试
@@ -669,12 +682,12 @@ This is an incorrect response because it includes extra text and explanations.
                 attempt += 1
                 log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
                 last_exception = e
-                
+
                 # 降级检查：502错误
                 if '502' in str(e):
                      self.logger.warning(f"检测到网络错误(502)，下次重试将不再发送图片。错误信息: {e}")
                      send_images = False
-                
+
                 self.logger.warning(f"OpenAI高质量翻译出错 ({log_attempt}): {e}")
                 
                 if not is_infinite and attempt >= max_retries:

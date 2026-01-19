@@ -464,6 +464,7 @@ class ExportService:
             output_lower = output_path.lower()
             save_quality = config.get('cli', {}).get('save_quality', 95)
             
+            # 需要转换为RGB的格式（不支持透明度或CMYK）
             if output_lower.endswith(('.jpg', '.jpeg')):
                 # JPEG格式：转换为RGB
                 rgb_image = image.convert('RGB')
@@ -471,13 +472,52 @@ class ExportService:
                 rgb_image.close()
                 
             elif output_lower.endswith('.webp'):
-                # WEBP格式：如果是CMYK，转换为RGB
+                # WEBP格式：支持透明度，但不支持CMYK
                 if image.mode == 'CMYK':
                     image = image.convert('RGB')
                 image.save(temp_output_path, format='WEBP', quality=save_quality)
                 
+            elif output_lower.endswith('.avif'):
+                # AVIF格式：支持透明度，但不支持CMYK
+                if image.mode == 'CMYK':
+                    image = image.convert('RGB')
+                image.save(temp_output_path, format='AVIF', quality=save_quality)
+                
+            elif output_lower.endswith(('.heic', '.heif')):
+                # HEIC/HEIF格式：需要 pillow-heif 库支持
+                try:
+                    import pillow_heif
+                    # 注册 HEIF 插件
+                    pillow_heif.register_heif_opener()
+                    
+                    if image.mode == 'CMYK':
+                        image = image.convert('RGB')
+                    image.save(temp_output_path, format='HEIF', quality=save_quality)
+                except ImportError:
+                    self.logger.warning("HEIC/HEIF 格式需要安装 pillow-heif 库，降级为 PNG 格式")
+                    if image.mode == 'CMYK':
+                        image = image.convert('RGB')
+                    # 修改输出路径为 PNG
+                    temp_output_path = output_path.rsplit('.', 1)[0] + '.png.tmp'
+                    output_path = output_path.rsplit('.', 1)[0] + '.png'
+                    image.save(temp_output_path, format='PNG')
+                
+            elif output_lower.endswith('.bmp'):
+                # BMP格式：转换为RGB（不支持透明度）
+                if image.mode in ('RGBA', 'LA', 'P'):
+                    image = image.convert('RGB')
+                elif image.mode == 'CMYK':
+                    image = image.convert('RGB')
+                image.save(temp_output_path, format='BMP')
+                
+            elif output_lower.endswith(('.tiff', '.tif')):
+                # TIFF格式：支持多种模式
+                if image.mode == 'CMYK':
+                    image = image.convert('RGB')
+                image.save(temp_output_path, format='TIFF')
+                
             else:
-                # PNG或其他格式：如果是CMYK，转换为RGB（PNG不支持CMYK）
+                # PNG或其他格式：支持透明度，但不支持CMYK
                 if image.mode == 'CMYK':
                     image = image.convert('RGB')
                 image.save(temp_output_path, format='PNG')
@@ -498,6 +538,7 @@ class ExportService:
                     os.remove(temp_output_path)
                 except:
                     pass
+            raise
             raise
     
     def _prepare_translator_params(self, config: Dict[str, Any]) -> Dict[str, Any]:

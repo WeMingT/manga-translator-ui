@@ -483,12 +483,23 @@ class MainAppLogic(QObject):
         """异步测试API连接（如果指定了模型，会测试该模型是否可用）"""
         try:
             if "openai" in translator_key.lower():
-                from openai import AsyncOpenAI
-                client = AsyncOpenAI(
-                    api_key=api_key,
-                    base_url=api_base or "https://api.openai.com/v1"
-                )
-                
+                # 尝试使用 curl_cffi 客户端绕过 TLS 指纹检测
+                try:
+                    from manga_translator.translators.common import AsyncOpenAICurlCffi
+                    client = AsyncOpenAICurlCffi(
+                        api_key=api_key,
+                        base_url=api_base or "https://api.openai.com/v1",
+                        impersonate="chrome110",
+                        timeout=30.0
+                    )
+                except ImportError:
+                    # 如果 curl_cffi 不可用，回退到标准客户端
+                    from openai import AsyncOpenAI
+                    client = AsyncOpenAI(
+                        api_key=api_key,
+                        base_url=api_base or "https://api.openai.com/v1"
+                    )
+
                 try:
                     # 如果指定了模型，测试该模型是否可用
                     if model and model.strip():
@@ -511,48 +522,53 @@ class MainAppLogic(QObject):
                     await client.close()
             
             elif "gemini" in translator_key.lower():
-                from google import genai
-                
-                # 如果指定了自定义API Base（非空且非官方地址），使用OpenAI兼容模式
-                is_custom_api = (
-                    api_base 
-                    and api_base.strip() 
-                    and api_base.strip() not in ["https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/"]
-                )
-                
-                if is_custom_api:
-                    from openai import AsyncOpenAI
-                    client = AsyncOpenAI(
+                # 统一使用 AsyncGeminiCurlCffi（Google 认证方式 + curl_cffi TLS 指纹伪装）
+                base_url = api_base.strip() if api_base and api_base.strip() else "https://generativelanguage.googleapis.com"
+
+                try:
+                    from manga_translator.translators.common import AsyncGeminiCurlCffi
+                    client = AsyncGeminiCurlCffi(
                         api_key=api_key,
-                        base_url=api_base.strip()
+                        base_url=base_url,
+                        impersonate="chrome110",
+                        timeout=30.0
                     )
-                    
+
                     try:
                         # 如果指定了模型，测试该模型
                         if model and model.strip():
                             try:
-                                await client.chat.completions.create(
+                                await client.models.generate_content(
                                     model=model,
-                                    messages=[{"role": "user", "content": "test"}],
-                                    max_tokens=5
+                                    contents="test"
                                 )
                                 return True, f"连接成功，模型 {model} 可用"
                             except Exception as e:
                                 return False, f"连接成功但模型 {model} 不可用: {str(e)}"
                         else:
+                            # 尝试列出模型
                             await client.models.list()
                             return True, "连接成功"
                     finally:
                         await client.close()
-                else:
-                    # 使用官方Gemini API - 在线程池中执行同步调用
+
+                except ImportError:
+                    # 如果 curl_cffi 不可用，回退到标准 SDK
+                    from google import genai
                     import asyncio
                     loop = asyncio.get_event_loop()
-                    
+
                     def sync_test():
                         # 新版 SDK 使用 genai.Client
-                        client = genai.Client(api_key=api_key)
-                        
+                        if base_url != "https://generativelanguage.googleapis.com":
+                            from google.genai import types
+                            client = genai.Client(
+                                api_key=api_key,
+                                http_options=types.HttpOptions(base_url=base_url)
+                            )
+                        else:
+                            client = genai.Client(api_key=api_key)
+
                         # 如果指定了模型，测试该模型
                         if model and model.strip():
                             client.models.generate_content(
@@ -564,7 +580,7 @@ class MainAppLogic(QObject):
                             # 列出模型
                             list(client.models.list())
                             return True, "连接成功"
-                    
+
                     try:
                         return await loop.run_in_executor(None, sync_test)
                     except Exception as e:
@@ -608,32 +624,22 @@ class MainAppLogic(QObject):
         """异步获取可用模型列表"""
         try:
             if "openai" in translator_key.lower():
-                from openai import AsyncOpenAI
-                import httpx
-                
-                # 使用与翻译器相同的浏览器请求头，避免被 Cloudflare 拦截
-                browser_headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                    "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
-                    "Connection": "keep-alive",
-                    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-                    "Sec-Ch-Ua-Mobile": "?0",
-                    "Sec-Ch-Ua-Platform": '"Windows"',
-                }
-                
-                # 创建自定义 HTTP 客户端
-                http_client = httpx.AsyncClient(
-                    headers=browser_headers,
-                    timeout=httpx.Timeout(60.0, connect=30.0)
-                )
-                
-                client = AsyncOpenAI(
-                    api_key=api_key,
-                    base_url=api_base or "https://api.openai.com/v1",
-                    default_headers=browser_headers,
-                    http_client=http_client
-                )
+                # 尝试使用 curl_cffi 客户端绕过 TLS 指纹检测
+                try:
+                    from manga_translator.translators.common import AsyncOpenAICurlCffi
+                    client = AsyncOpenAICurlCffi(
+                        api_key=api_key,
+                        base_url=api_base or "https://api.openai.com/v1",
+                        impersonate="chrome110",
+                        timeout=60.0
+                    )
+                except ImportError:
+                    from openai import AsyncOpenAI
+                    client = AsyncOpenAI(
+                        api_key=api_key,
+                        base_url=api_base or "https://api.openai.com/v1",
+                        timeout=60.0,
+                    )
                 
                 try:
                     models_response = await client.models.list()
@@ -647,40 +653,56 @@ class MainAppLogic(QObject):
                     await client.close()
             
             elif "gemini" in translator_key.lower():
-                from google import genai
-                
-                # 如果指定了自定义API Base（非空且非官方地址），使用OpenAI兼容模式
-                is_custom_api = (
-                    api_base 
-                    and api_base.strip() 
-                    and api_base.strip() not in ["https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/"]
-                )
-                
-                if is_custom_api:
-                    from openai import AsyncOpenAI
-                    client = AsyncOpenAI(
+                # Gemini API - 使用 curl_cffi 绕过 TLS 指纹检测，使用 Google Gemini 认证格式
+                try:
+                    from manga_translator.translators.common import AsyncGeminiCurlCffi
+
+                    # 确定 base_url
+                    base_url = api_base.strip() if api_base and api_base.strip() else "https://generativelanguage.googleapis.com"
+
+                    client = AsyncGeminiCurlCffi(
                         api_key=api_key,
-                        base_url=api_base.strip()
+                        base_url=base_url,
+                        impersonate="chrome110",
+                        timeout=60.0
                     )
                     try:
                         models_response = await client.models.list()
-                        model_ids = [m.id for m in models_response.data]
+                        model_ids = [m.id for m in models_response]
                         return True, model_ids, "获取成功"
                     finally:
                         await client.close()
-                else:
-                    # 使用官方Gemini API - 在线程池中执行同步调用
+                except ImportError:
+                    # 如果 curl_cffi 不可用，回退到标准客户端
+                    from google import genai
+                    from google.genai import types
                     import asyncio
                     loop = asyncio.get_event_loop()
-                    
-                    def sync_get_models():
-                        # 新版 SDK 使用 genai.Client
-                        client = genai.Client(api_key=api_key)
-                        models = list(client.models.list())
-                        # 获取所有模型名称
-                        model_names = [m.name.replace("models/", "") for m in models]
-                        return True, model_names, "获取成功"
-                    
+
+                    # 检查是否是自定义API
+                    is_custom_api = (
+                        api_base
+                        and api_base.strip()
+                        and api_base.strip() not in ["https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/"]
+                    )
+
+                    if is_custom_api:
+                        # 自定义 API 使用 http_options
+                        def sync_get_models():
+                            client = genai.Client(
+                                api_key=api_key,
+                                http_options=types.HttpOptions(base_url=api_base.strip())
+                            )
+                            models = list(client.models.list())
+                            model_names = [m.name.replace("models/", "") for m in models]
+                            return True, model_names, "获取成功"
+                    else:
+                        def sync_get_models():
+                            client = genai.Client(api_key=api_key)
+                            models = list(client.models.list())
+                            model_names = [m.name.replace("models/", "") for m in models]
+                            return True, model_names, "获取成功"
+
                     return await loop.run_in_executor(None, sync_get_models)
             
             elif "sakura" in translator_key.lower():
@@ -2114,7 +2136,7 @@ class TranslationWorker(QObject):
             friendly_msg += "      - 建议：设置为 10 或更高（-1 表示无限重试）\n\n"
             friendly_msg += "   3. 更换翻译模型\n"
             friendly_msg += "      - 某些模型对断句标记的理解更好\n"
-            friendly_msg += "      - 建议：尝试 gpt-4o 或 gemini-2.0-flash-exp\n\n"
+            friendly_msg += "      - 建议：尝试 gpt-5.2、gemini-3-pro 或 grok-4.2\n\n"
             friendly_msg += "   4. 关闭「AI断句」功能\n"
             friendly_msg += "      - 位置：高级设置 → 渲染设置 → AI断句\n"
             friendly_msg += "      - 说明：使用传统的自动换行（可能导致排版不够精确）\n\n"
@@ -2136,7 +2158,7 @@ class TranslationWorker(QObject):
             friendly_msg += "      - 说明：多次重试通常能让AI返回正确数量的翻译\n\n"
             friendly_msg += "   2. 更换翻译模型\n"
             friendly_msg += "      - 某些模型对指令的遵循能力更强\n"
-            friendly_msg += "      - 建议：尝试 gpt-4o 或 gemini-2.0-flash-exp\n\n"
+            friendly_msg += "      - 建议：尝试 gpt-5.2、gemini-3-pro 或 grok-4.2\n\n"
             friendly_msg += "   3. 减小批量大小\n"
             friendly_msg += "      - 位置：高级设置 → 批量大小\n"
             friendly_msg += "      - 建议：将批量大小减小（如从 3 减到 1 或 2）\n"
@@ -2153,28 +2175,34 @@ class TranslationWorker(QObject):
             friendly_msg += "      - 建议：设置为 10 或更高（-1 表示无限重试）\n\n"
             friendly_msg += "   2. 更换翻译模型\n"
             friendly_msg += "      - 某些模型翻译质量更稳定\n"
-            friendly_msg += "      - 建议：尝试 gpt-4o 或 gemini-2.0-flash-exp\n\n"
+            friendly_msg += "      - 建议：尝试 gpt-5.2、gemini-3-pro 或 grok-4.2\n\n"
             friendly_msg += "   3. 减小批量大小\n"
             friendly_msg += "      - 位置：高级设置 → 批量大小\n"
             friendly_msg += "      - 建议：将批量大小减小（如从 3 减到 1 或 2）\n"
             friendly_msg += "      - 说明：批量处理的文本越少，AI翻译质量越稳定\n\n"
-        
+
         # 检查是否是模型不支持多模态
-        elif "不支持多模态" in real_error or "multimodal" in real_error.lower() or "vision" in real_error.lower():
+        elif ("不支持多模态" in real_error or
+              "multimodal" in real_error.lower() or
+              "vision" in real_error.lower() or
+              "image_url" in real_error.lower() or
+              "expected `text`" in real_error.lower() or
+              "unknown variant" in real_error.lower()):
             friendly_msg += "🔍 错误原因：模型不支持多模态输入\n\n"
             friendly_msg += "📝 详细说明：\n"
-            friendly_msg += "   当前使用的是「高质量翻译器」（openai_hq 或 gemini_hq），\n"
+            friendly_msg += "   当前使用的是「高质量翻译器」（OpenAI高质量翻译 或 Gemini高质量翻译），\n"
             friendly_msg += "   这些翻译器需要发送图片给AI进行分析，但当前模型不支持图片输入。\n\n"
             friendly_msg += "💡 解决方案（选择其一）：\n"
-            friendly_msg += "   1. ⭐ 更换为支持多模态的模型（推荐）\n"
-            friendly_msg += "      - OpenAI: gpt-4o, gpt-4-turbo, gpt-4-vision-preview\n"
-            friendly_msg += "      - Gemini: gemini-2.0-flash-exp, gemini-1.5-pro, gemini-1.5-flash\n"
-            friendly_msg += "      - 注意：DeepSeek模型不支持多模态\n\n"
-            friendly_msg += "   2. 切换到普通翻译器\n"
+            friendly_msg += "   1. ⭐ 切换到普通翻译器（推荐）\n"
             friendly_msg += "      - 位置：翻译设置 → 翻译器\n"
-            friendly_msg += "      - 将 openai_hq 改为 openai\n"
-            friendly_msg += "      - 将 gemini_hq 改为 gemini\n"
+            friendly_msg += "      - 将「OpenAI高质量翻译」改为「OpenAI」\n"
+            friendly_msg += "      - 将「Gemini高质量翻译」改为「Google Gemini」\n"
             friendly_msg += "      - 说明：普通翻译器不需要发送图片，只翻译文本\n\n"
+            friendly_msg += "   2. 更换为支持多模态的模型\n"
+            friendly_msg += "      - OpenAI: gpt-5.2、gpt-5.2-mini\n"
+            friendly_msg += "      - Gemini: gemini-3-pro、gemini-3-flash\n"
+            friendly_msg += "      - Grok: grok-4.2\n"
+            friendly_msg += "      - 注意：DeepSeek模型不支持多模态\n\n"
         
         # 检查是否是404错误（API地址或模型配置错误）
         elif "API_404_ERROR" in real_error or "404" in real_error or "HTML错误页面" in real_error:
@@ -2288,7 +2316,7 @@ class TranslationWorker(QObject):
             friendly_msg += "      - 注意：地址末尾的 /v1 不要多加或少加\n\n"
             friendly_msg += "   3. 检查模型名称\n"
             friendly_msg += "      - 位置：翻译设置 → 环境变量 → MODEL\n"
-            friendly_msg += "      - 确认模型名称拼写正确（如 gpt-4o 不是 gpt4o）\n"
+            friendly_msg += "      - 确认模型名称拼写正确（如 gpt-5.2 不是 gpt52）\n"
             friendly_msg += "      - 使用「测试连接」功能查看可用模型列表\n\n"
             friendly_msg += "   4. 验证模型可用性\n"
             friendly_msg += "      - 某些模型可能已下线或更名\n"

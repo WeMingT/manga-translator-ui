@@ -9,7 +9,7 @@ from PIL import Image
 from google import genai
 from google.genai import types
 
-from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_gemini_response
+from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_gemini_response, AsyncGeminiCurlCffi
 from .keys import GEMINI_API_KEY
 from ..utils import Context
 
@@ -194,29 +194,53 @@ class GeminiHighQualityTranslator(CommonTranslator):
     def _setup_client(self, system_instruction=None):
         """设置Gemini客户端"""
         if not self.client and self.api_key:
-            # 新版 SDK 使用 genai.Client 初始化
             # 检查是否使用自定义 API Base
             is_custom_api = (
-                self.base_url 
-                and self.base_url.strip() 
+                self.base_url
+                and self.base_url.strip()
                 and self.base_url.strip() not in ["https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/"]
             )
-            
+
             if is_custom_api:
-                # 使用自定义 API Base（通过 http_options）
-                self.client = genai.Client(
-                    api_key=self.api_key,
-                    http_options=types.HttpOptions(
+                # 自定义 API Base - 尝试使用 curl_cffi 绕过 TLS 指纹检测
+                try:
+                    self.client = AsyncGeminiCurlCffi(
+                        api_key=self.api_key,
                         base_url=self.base_url,
-                        headers=BROWSER_HEADERS
+                        default_headers=BROWSER_HEADERS,
+                        impersonate="chrome110",
+                        timeout=300
                     )
-                )
-                self.logger.info(f"Gemini HQ客户端初始化完成（自定义API Base）。Base URL: {self.base_url}")
+                    self._use_curl_cffi = True
+                    self.logger.info(f"Gemini HQ客户端初始化完成（自定义API Base + curl_cffi TLS 指纹伪装）。Base URL: {self.base_url}")
+                except ImportError:
+                    # 回退到标准客户端
+                    self.client = genai.Client(
+                        api_key=self.api_key,
+                        http_options=types.HttpOptions(
+                            base_url=self.base_url,
+                            headers=BROWSER_HEADERS
+                        )
+                    )
+                    self._use_curl_cffi = False
+                    self.logger.info(f"Gemini HQ客户端初始化完成（自定义API Base，标准模式）。Base URL: {self.base_url}")
             else:
-                # 使用官方 API
-                self.client = genai.Client(api_key=self.api_key)
-                self.logger.info("Gemini HQ客户端初始化完成。使用官方API")
-            
+                # 官方 API - 尝试使用 curl_cffi 绕过 TLS 指纹检测
+                try:
+                    self.client = AsyncGeminiCurlCffi(
+                        api_key=self.api_key,
+                        default_headers=BROWSER_HEADERS,
+                        impersonate="chrome110",
+                        timeout=300
+                    )
+                    self._use_curl_cffi = True
+                    self.logger.info("Gemini HQ客户端初始化完成（使用 curl_cffi TLS 指纹伪装）")
+                except ImportError:
+                    # 回退到标准客户端
+                    self.client = genai.Client(api_key=self.api_key)
+                    self._use_curl_cffi = False
+                    self.logger.info("Gemini HQ客户端初始化完成（标准模式）")
+
             self.logger.info("安全设置策略：默认发送 OFF，如遇错误自动回退")
 
     
@@ -453,14 +477,24 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 
                 if retry_attempt > 0 and current_temperature != self.temperature:
                     self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
-                
-                # 使用新版 SDK 的 generate_content 方法
-                response = await asyncio.to_thread(
-                    self.client.models.generate_content,
-                    model=self.model_name,
-                    contents=content_parts,
-                    config=generation_config
-                )
+
+                # 根据客户端类型调用不同的 API
+                if getattr(self, '_use_curl_cffi', False):
+                    # 使用 curl_cffi 异步客户端
+                    response = await self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=content_parts,
+                        generation_config=generation_config,
+                        safety_settings=None if should_retry_without_safety else self.safety_settings
+                    )
+                else:
+                    # 使用标准 SDK（同步调用包装为异步）
+                    response = await asyncio.to_thread(
+                        self.client.models.generate_content,
+                        model=self.model_name,
+                        contents=content_parts,
+                        config=generation_config
+                    )
                 
                 # 在API调用成功后立即更新时间戳，确保所有请求（包括重试）都被计入速率限制
                 if self._MAX_REQUESTS_PER_MINUTE > 0:
@@ -614,8 +648,8 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 if is_bad_request and is_multimodal_unsupported:
                     self.logger.error(f"❌ 模型 {self.model_name} 不支持多模态输入（图片+文本）")
                     self.logger.error("💡 解决方案：")
-                    self.logger.error("   1. 使用支持多模态的Gemini模型（如 gemini-1.5-flash, gemini-1.5-pro）")
-                    self.logger.error("   2. 或者切换到普通翻译模式（不使用 _hq 高质量翻译器）")
+                    self.logger.error("   1. 使用支持多模态的Gemini模型（如 gemini-3-pro、gemini-3-flash）")
+                    self.logger.error("   2. 或者切换到普通翻译模式（不使用高质量翻译器）")
                     self.logger.error("   3. 检查第三方API是否支持图片输入")
                     raise Exception(f"模型不支持多模态输入: {self.model_name}") from e
                 
@@ -721,35 +755,53 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     await asyncio.sleep(sleep_time)
             
             try:
-                # 使用新版 SDK 的 generate_content 方法
-                response = await asyncio.to_thread(
-                    self.client.models.generate_content,
-                    model=self.model_name,
-                    contents=simple_prompt,
-                    config=generation_config
-                )
+                # 根据客户端类型调用不同的 API
+                if getattr(self, '_use_curl_cffi', False):
+                    # 使用 curl_cffi 异步客户端
+                    response = await self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=simple_prompt,
+                        generation_config=generation_config,
+                        safety_settings=self.safety_settings
+                    )
+                else:
+                    # 使用标准 SDK（同步调用包装为异步）
+                    response = await asyncio.to_thread(
+                        self.client.models.generate_content,
+                        model=self.model_name,
+                        contents=simple_prompt,
+                        config=generation_config
+                    )
             except Exception as e:
                 # 如果是安全设置错误，尝试移除安全设置后重试
                 error_message = str(e)
                 is_safety_error = any(keyword in error_message.lower() for keyword in [
                     'safety_settings', 'safetysettings', 'harm', 'block', 'safety'
                 ]) or "400" in error_message
-                
+
                 if is_safety_error:
                     self.logger.warning(f"后备翻译检测到安全设置错误，移除安全设置后重试: {error_message}")
-                    generation_config_no_safety = types.GenerateContentConfig(
-                        temperature=self.temperature,
-                        top_p=0.95,
-                        top_k=64,
-                        max_output_tokens=self.max_tokens,
-                        safety_settings=None,
-                    )
-                    response = await asyncio.to_thread(
-                        self.client.models.generate_content,
-                        model=self.model_name,
-                        contents=simple_prompt,
-                        config=generation_config_no_safety
-                    )
+                    if getattr(self, '_use_curl_cffi', False):
+                        response = await self.client.models.generate_content(
+                            model=self.model_name,
+                            contents=simple_prompt,
+                            generation_config=generation_config,
+                            safety_settings=None
+                        )
+                    else:
+                        generation_config_no_safety = types.GenerateContentConfig(
+                            temperature=self.temperature,
+                            top_p=0.95,
+                            top_k=64,
+                            max_output_tokens=self.max_tokens,
+                            safety_settings=None,
+                        )
+                        response = await asyncio.to_thread(
+                            self.client.models.generate_content,
+                            model=self.model_name,
+                            contents=simple_prompt,
+                            config=generation_config_no_safety
+                        )
                 else:
                     raise
             

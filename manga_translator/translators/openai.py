@@ -7,7 +7,7 @@ import httpx
 # import openai
 from openai import AsyncOpenAI
 
-from .common import CommonTranslator, VALID_LANGUAGES, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_openai_response
+from .common import CommonTranslator, VALID_LANGUAGES, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_openai_response, AsyncOpenAICurlCffi
 from .keys import OPENAI_API_KEY, OPENAI_MODEL
 from ..utils import Context
 
@@ -128,7 +128,7 @@ class OpenAITranslator(CommonTranslator):
     
     def _setup_client(self, force_recreate: bool = False):
         """设置OpenAI客户端
-        
+
         Args:
             force_recreate: 是否强制重建客户端（用于重试时断开旧连接）
         """
@@ -146,19 +146,31 @@ class OpenAITranslator(CommonTranslator):
             except Exception as e:
                 self.logger.debug(f"关闭旧客户端时出错（可忽略）: {e}")
             self.client = None
-        
+
         if not self.client:
-            # 使用浏览器式请求头，避免被 Cloudflare 阻止
-            self.client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                default_headers=BROWSER_HEADERS,
-                http_client=httpx.AsyncClient(
-                    headers=BROWSER_HEADERS,
-                    timeout=httpx.Timeout(300.0, connect=60.0)
+            # 尝试使用 curl_cffi 客户端绕过 TLS 指纹检测
+            try:
+                self.client = AsyncOpenAICurlCffi(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    default_headers=BROWSER_HEADERS,
+                    impersonate="chrome110",
+                    timeout=300.0
                 )
-            )
-            self.logger.debug("已创建新的OpenAI客户端连接")
+                self.logger.debug("已创建新的OpenAI客户端连接（使用 curl_cffi TLS 指纹伪装）")
+            except ImportError:
+                # 如果 curl_cffi 不可用，回退到标准客户端
+                self.logger.warning("curl_cffi 未安装，使用标准 OpenAI 客户端（可能被 TLS 指纹检测阻止）")
+                self.client = AsyncOpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    default_headers=BROWSER_HEADERS,
+                    http_client=httpx.AsyncClient(
+                        headers=BROWSER_HEADERS,
+                        timeout=httpx.Timeout(300.0, connect=60.0)
+                    )
+                )
+                self.logger.debug("已创建新的OpenAI客户端连接（标准模式）")
     
     async def _cleanup(self):
         """清理资源"""

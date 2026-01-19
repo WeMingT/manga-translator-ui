@@ -1,0 +1,29 @@
+# v2.0.9 更新日志
+
+发布日期：待定
+
+## ✨ 新功能
+
+- **增强的输出格式支持**：
+  - Qt 编辑器和翻译后端现在支持更多输出格式
+  - 新增支持：AVIF、BMP、TIFF、HEIC/HEIF 格式
+  - 完整支持列表：PNG、JPEG、WebP、AVIF、BMP、TIFF、HEIC/HEIF
+  - HEIC/HEIF 格式需要安装 `pillow-heif` 库，未安装时自动降级为 PNG
+
+- **curl_cffi TLS 指纹伪装**：
+  - Gemini 翻译器支持 curl_cffi 绕过 TLS 指纹检测
+  - 支持自定义 Gemini API Base 使用 Google 原生认证方式（x-goog-api-key）
+  - 支持包含 "/" 的模型名（如 z-ai/glm4.7）自动 URL 编码
+
+## 🐛 修复
+
+- 修复 `AsyncGeminiCurlCffi` 响应解析时 `NoneType` 不可迭代错误
+- 修复 Gemini API 安全设置格式错误（去掉枚举类名前缀）
+- 修复 Gemini API 请求缺少 `role` 字段导致 400 错误
+- 修复多模态不支持错误检测（新增 `image_url`、`expected \`text\``、`unknown variant` 关键词）
+
+## 🔧 优化
+
+- curl_cffi 客户端仅在出错时打印日志
+- 更新模型推荐为最新版本（gpt-5.2、gemini-3-pro、grok-4.2）
+- 友好错误提示使用 UI 显示名称（OpenAI高质量翻译、Google Gemini 等）
