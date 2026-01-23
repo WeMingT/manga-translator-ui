@@ -280,19 +280,22 @@ def run_pip_requirements(requirements_file, desc=None):
     ]
     
     # 需要忽略版本限制的包（安装时去掉版本号，安装最新兼容版本）
+    # 注意：暂时禁用，因为这些包安装最新版会拉取不兼容的 torch 版本
     ignore_version_packages = [
-        'xformers',        # PyTorch 扩展，必须与 torch 版本匹配
-        'transformers',    # 与 PyTorch 版本强相关，避免 torch._C 模块错误
-        'accelerate',      # transformers 的加速库
-        'timm',            # 图像模型库，依赖 PyTorch
-        'kornia',          # 计算机视觉库，依赖 PyTorch
-        'spandrel',        # 神经网络架构库，依赖 PyTorch
-        'open_clip_torch'  # CLIP 模型，依赖 PyTorch
+        # 'xformers',        # PyTorch 扩展，必须与 torch 版本匹配
+        # 'transformers',    # 与 PyTorch 版本强相关，避免 torch._C 模块错误
+        # 'accelerate',      # transformers 的加速库
+        # 'timm',            # 图像模型库，依赖 PyTorch
+        # 'kornia',          # 计算机视觉库，依赖 PyTorch
+        # 'spandrel',        # 神经网络架构库，依赖 PyTorch
+        # 'open_clip_torch'  # CLIP 模型，依赖 PyTorch
     ]
     
-    # PyTorch 核心包版本锁定（强制指定版本，其他依赖会自动跟随兼容版本）
+    # PyTorch 核心包版本锁定（强制指定版本，必须同时锁定三个包防止版本冲突）
     locked_versions = {
         'torch': '2.9.1',
+        'torchvision': '0.22.1',
+        'torchaudio': '2.6.1',
     }
     
     def is_pytorch_package(pkg_name):
