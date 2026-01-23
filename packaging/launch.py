@@ -290,6 +290,11 @@ def run_pip_requirements(requirements_file, desc=None):
         'open_clip_torch'  # CLIP 模型，依赖 PyTorch
     ]
     
+    # PyTorch 核心包版本锁定（强制指定版本，其他依赖会自动跟随兼容版本）
+    locked_versions = {
+        'torch': '2.9.1',
+    }
+    
     def is_pytorch_package(pkg_name):
         """检查是否是需要从 PyTorch 源下载的包"""
         pkg_lower = pkg_name.lower()
@@ -372,7 +377,13 @@ def run_pip_requirements(requirements_file, desc=None):
         
         # 检查是否需要忽略版本限制
         pkg_to_install = pkg
-        if pkg_display.lower() in ignore_version_packages or use_primary:
+        pkg_lower = pkg_display.lower()
+        
+        # 优先检查版本锁定
+        if pkg_lower in locked_versions:
+            pkg_to_install = f"{pkg_display}=={locked_versions[pkg_lower]}"
+            print(f"    (版本锁定: {locked_versions[pkg_lower]})")
+        elif pkg_lower in ignore_version_packages or use_primary:
             pkg_to_install = pkg_display
             print(f"    (忽略版本限制，安装最新版)")
         
