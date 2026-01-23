@@ -280,15 +280,15 @@ def run_pip_requirements(requirements_file, desc=None):
     ]
     
     # 需要忽略版本限制的包（安装时去掉版本号，安装最新兼容版本）
-    # 注意：暂时禁用，因为这些包安装最新版会拉取不兼容的 torch 版本
+    # 注意：功能已在下方逻辑中禁用
     ignore_version_packages = [
-        # 'xformers',        # PyTorch 扩展，必须与 torch 版本匹配
-        # 'transformers',    # 与 PyTorch 版本强相关，避免 torch._C 模块错误
-        # 'accelerate',      # transformers 的加速库
-        # 'timm',            # 图像模型库，依赖 PyTorch
-        # 'kornia',          # 计算机视觉库，依赖 PyTorch
-        # 'spandrel',        # 神经网络架构库，依赖 PyTorch
-        # 'open_clip_torch'  # CLIP 模型，依赖 PyTorch
+        'xformers',        # PyTorch 扩展，必须与 torch 版本匹配
+        'transformers',    # 与 PyTorch 版本强相关，避免 torch._C 模块错误
+        'accelerate',      # transformers 的加速库
+        'timm',            # 图像模型库，依赖 PyTorch
+        'kornia',          # 计算机视觉库，依赖 PyTorch
+        'spandrel',        # 神经网络架构库，依赖 PyTorch
+        'open_clip_torch'  # CLIP 模型，依赖 PyTorch
     ]
     
     # PyTorch 核心包版本锁定（强制指定版本，必须同时锁定三个包防止版本冲突）
@@ -386,9 +386,10 @@ def run_pip_requirements(requirements_file, desc=None):
         if pkg_lower in locked_versions:
             pkg_to_install = f"{pkg_display}=={locked_versions[pkg_lower]}"
             print(f"    (版本锁定: {locked_versions[pkg_lower]})")
-        elif pkg_lower in ignore_version_packages or use_primary:
-            pkg_to_install = pkg_display
-            print(f"    (忽略版本限制，安装最新版)")
+        # 暂时禁用忽略版本限制功能，防止拉取不兼容的 torch 版本
+        # elif pkg_lower in ignore_version_packages or use_primary:
+        #     pkg_to_install = pkg_display
+        #     print(f"    (忽略版本限制，安装最新版)")
         
         if use_primary:
             print(f"    (使用 PyTorch 源: {primary_index_url})")
