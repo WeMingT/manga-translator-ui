@@ -14,6 +14,7 @@
 
 </div>
 
+
 一键翻译漫画图片中的文字，支持日漫、韩漫、美漫，黑白漫和彩漫均可识别。自动检测、翻译、嵌字，支持日语、中文、英语等多种语言，内置可视化编辑器可调整文本框。
 
 **💬 QQ 交流群：1079089991（密码：kP9#mB2!vR5*sL1）** | **🐛 [提交 Issue](https://github.com/hgmzhn/manga-translator-ui/issues)**
@@ -405,3 +406,9 @@ python -m manga_translator --help
 - **模型来源**：[MangaJaNai](https://github.com/the-database/MangaJaNai)
 - **模型协议**：CC BY-NC 4.0
 - **使用限制**：仅限非商业用途
+
+---
+
+## ⚠️ 特别声明
+
+该款 AI 翻译工具仅供个人合法用途，任何使用该工具进行直接或者间接非法盈利活动的行为，均不属于授权范围，也不受到任何支持和认可。
