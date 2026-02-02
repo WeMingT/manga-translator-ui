@@ -265,10 +265,20 @@ class AsyncOpenAICurlCffi:
         self.timeout = timeout
         self.impersonate = impersonate
 
+        # 检测是否是本地地址（本地地址不需要 impersonate，且可能导致超时）
+        local_indicators = ['localhost', '127.0.0.1', '0.0.0.0', '192.168.', '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.']
+        is_local = any(indicator in base_url.lower() for indicator in local_indicators)
+
         # 延迟导入 curl_cffi，避免在不需要时导入
         try:
             from curl_cffi.requests import AsyncSession
-            self.session = AsyncSession(impersonate=impersonate)
+            if is_local:
+                # 本地连接：不使用 impersonate，避免 HTTP/2 兼容性问题
+                self.session = AsyncSession()
+                print(f"[AsyncOpenAICurlCffi] Local address detected, disabled impersonate for: {base_url}")
+            else:
+                # 云端连接：使用 impersonate 绕过 TLS 指纹检测
+                self.session = AsyncSession(impersonate=impersonate)
         except ImportError:
             raise ImportError(
                 "curl_cffi is required for TLS fingerprint bypass. "
@@ -555,10 +565,20 @@ class AsyncGeminiCurlCffi:
         self.timeout = timeout
         self.impersonate = impersonate
 
+        # 检测是否是本地地址（本地地址不需要 impersonate，且可能导致超时）
+        local_indicators = ['localhost', '127.0.0.1', '0.0.0.0', '192.168.', '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.']
+        is_local = any(indicator in base_url.lower() for indicator in local_indicators)
+
         # 延迟导入 curl_cffi，避免在不需要时导入
         try:
             from curl_cffi.requests import AsyncSession
-            self.session = AsyncSession(impersonate=impersonate)
+            if is_local:
+                # 本地连接：不使用 impersonate，避免 HTTP/2 兼容性问题
+                self.session = AsyncSession()
+                print(f"[AsyncGeminiCurlCffi] Local address detected, disabled impersonate for: {base_url}")
+            else:
+                # 云端连接：使用 impersonate 绕过 TLS 指纹检测
+                self.session = AsyncSession(impersonate=impersonate)
         except ImportError:
             raise ImportError(
                 "curl_cffi is required for TLS fingerprint bypass. "
