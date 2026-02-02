@@ -1243,14 +1243,8 @@ class MainView(QWidget):
         
         _, widget = self.env_widgets[key]
         api_key = widget.text().strip()
-        
-        if not api_key:
-            QMessageBox.warning(
-                self,
-                self._t("Warning"),
-                self._t("Please enter API key first")
-            )
-            return
+
+        # 本地API（如LM Studio）可能不需要密钥，跳过检查
         
         # 获取当前翻译器
         translator_combo = self.findChild(QComboBox, "translator.translator")
@@ -1330,8 +1324,9 @@ class MainView(QWidget):
 
     def _on_get_models_clicked(self, key: str):
         """获取可用模型列表"""
-        from PyQt6.QtWidgets import QMessageBox, QInputDialog, QProgressDialog
+        from PyQt6.QtWidgets import QMessageBox, QProgressDialog
         from PyQt6.QtCore import Qt
+        from desktop_qt_ui.widgets.model_selector_dialog import ModelSelectorDialog
         import asyncio
         
         # 获取当前翻译器
@@ -1353,14 +1348,8 @@ class MainView(QWidget):
                 api_key = api_widget.text().strip()
                 break
         
-        if not api_key:
-            QMessageBox.warning(
-                self,
-                self._t("Warning"),
-                self._t("Please enter API key first")
-            )
-            return
-        
+        # 本地API（如LM Studio）可能不需要密钥，跳过检查
+
         # 获取API Base（如果有）
         api_base = None
         for env_key in self.env_widgets.keys():
@@ -1402,14 +1391,12 @@ class MainView(QWidget):
             progress.close()
             if success:
                 if models:
-                    # 显示模型选择对话框
-                    selected_model, ok = QInputDialog.getItem(
-                        self,
+                    # 显示带搜索功能的模型选择对话框
+                    selected_model, ok = ModelSelectorDialog.get_model(
+                        models,
                         self._t("Select Model"),
                         self._t("Available models:"),
-                        models,
-                        0,
-                        False
+                        self
                     )
                     
                     if ok and selected_model:
