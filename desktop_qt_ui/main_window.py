@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
                 self.theme_check_timer.timeout.connect(self._check_system_theme_change)
             
             if not self.theme_check_timer.isActive():
-                self.theme_check_timer.start(1000)
+                self.theme_check_timer.start(5000)
         else:
             # 停止监听
             if hasattr(self, 'theme_check_timer'):
