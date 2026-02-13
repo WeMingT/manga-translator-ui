@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import math
 import os
 import sys
 from typing import Optional
@@ -87,6 +88,8 @@ class EditorController(QObject):
         self.model.controller = self
 
         self._connect_model_signals()
+        if hasattr(self.history_service, "undo_redo_state_changed"):
+            self.history_service.undo_redo_state_changed.connect(self._on_history_undo_redo_state_changed)
     
     # ========== Resource Access Helpers (新的资源访问辅助方法) ==========
     
@@ -252,12 +255,50 @@ class EditorController(QObject):
         if not translations:
             return
 
-        for index, text in translations.items():
-            # 更新model中的数据 (Model proxies to ResourceManager)
-            self.model.update_region_data(index, 'translation', text)
+        commands = []
+        for raw_index, text in translations.items():
+            try:
+                index = int(raw_index)
+            except (TypeError, ValueError):
+                continue
 
-        # 一次性通知视图更新
-        self.model.regions_changed.emit(self.model.get_regions())
+            old_region_data = self._get_region_by_index(index)
+            if not old_region_data or old_region_data.get("translation", "") == text:
+                continue
+
+            new_region_data = old_region_data.copy()
+            new_region_data["translation"] = text
+            commands.append(
+                UpdateRegionCommand(
+                    model=self.model,
+                    region_index=index,
+                    old_data=old_region_data,
+                    new_data=new_region_data,
+                    description=f"Batch Update Translation Region {index}",
+                    merge_key=f"region:{index}:translation",
+                )
+            )
+
+        if not commands:
+            return
+
+        macro_name = f"Batch Update Translations ({len(commands)})"
+        if hasattr(self.history_service, "macro"):
+            with self.history_service.macro(macro_name):
+                for command in commands:
+                    self.execute_command(command, update_ui=False)
+        elif hasattr(self.history_service, "begin_macro") and hasattr(self.history_service, "end_macro"):
+            self.history_service.begin_macro(macro_name)
+            try:
+                for command in commands:
+                    self.execute_command(command, update_ui=False)
+            finally:
+                self.history_service.end_macro()
+        else:
+            for command in commands:
+                self.execute_command(command, update_ui=False)
+
+        self._update_undo_redo_buttons()
 
     def _run_on_main_thread(self, func, *args):
         """确保一个函数在主GUI线程上运行"""
@@ -372,6 +413,9 @@ class EditorController(QObject):
 
         # 清空历史记录
         self.history_service.clear()
+        if hasattr(self.history_service, "mark_clean"):
+            self.history_service.mark_clean()
+        self._update_undo_redo_buttons()
         
         # 清空导出快照（每张图片独立）
         self._last_export_snapshot = None
@@ -1083,7 +1127,8 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Translation Region {region_index}"
+            description=f"Update Translation Region {region_index}",
+            merge_key=f"region:{region_index}:translation",
         )
         self.execute_command(command)
 
@@ -1101,7 +1146,8 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Original Text Region {region_index}"
+            description=f"Update Original Text Region {region_index}",
+            merge_key=f"region:{region_index}:text",
         )
         self.execute_command(command)
 
@@ -1133,7 +1179,8 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Font Size Region {region_index}"
+            description=f"Update Font Size Region {region_index}",
+            merge_key=f"region:{region_index}:font_size",
         )
         self.execute_command(command)
 
@@ -1150,7 +1197,8 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Font Color Region {region_index}"
+            description=f"Update Font Color Region {region_index}",
+            merge_key=f"region:{region_index}:font_color",
         )
         self.execute_command(command)
 
@@ -1170,7 +1218,8 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Stroke Color Region {region_index}"
+            description=f"Update Stroke Color Region {region_index}",
+            merge_key=f"region:{region_index}:bg_colors",
         )
         self.execute_command(command)
 
@@ -1187,7 +1236,8 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Stroke Width Region {region_index}"
+            description=f"Update Stroke Width Region {region_index}",
+            merge_key=f"region:{region_index}:stroke_width",
         )
         self.execute_command(command)
 
@@ -1223,7 +1273,8 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Font Family Region {region_index}"
+            description=f"Update Font Family Region {region_index}",
+            merge_key=f"region:{region_index}:font_path",
         )
         self.execute_command(command)
 
@@ -1244,7 +1295,8 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Alignment to {alignment_value}"
+            description=f"Update Alignment to {alignment_value}",
+            merge_key=f"region:{region_index}:alignment",
         )
         self.execute_command(command)
 
@@ -1287,16 +1339,20 @@ class EditorController(QObject):
             region_index=region_index,
             old_data=old_region_data,
             new_data=new_region_data,
-            description=f"Update Direction to {direction_value}"
+            description=f"Update Direction to {direction_value}",
+            merge_key=f"region:{region_index}:direction",
         )
         self.execute_command(command)
 
-    def execute_command(self, command):
+    def execute_command(self, command, update_ui: bool = True):
         """执行命令并更新UI - 使用 Qt 的 QUndoStack"""
         if command:
-            # Qt 的 push() 会自动调用 command.redo()
-            self.history_service.push_command(command)
-            self._update_undo_redo_buttons()
+            if hasattr(self.history_service, "execute"):
+                self.history_service.execute(command)
+            else:
+                self.history_service.push_command(command)
+            if update_ui:
+                self._update_undo_redo_buttons()
 
     def undo(self):
         """撤销操作 - 使用 Qt 的 QUndoStack"""
@@ -1394,16 +1450,17 @@ class EditorController(QObject):
         if not region_indices:
             return
 
-        # 重置 _last_edited_region_index,确保删除操作触发完全更新
+        # 清理视图里的几何编辑上下文，确保删除触发正确刷新
         if self.view and hasattr(self.view, 'graphics_view'):
             graphics_view = self.view.graphics_view
-            if graphics_view and hasattr(graphics_view, '_last_edited_region_index'):
-                graphics_view._last_edited_region_index = None
+            if graphics_view and hasattr(graphics_view, '_clear_pending_geometry_edits'):
+                graphics_view._clear_pending_geometry_edits()
 
         # 按索引倒序处理，避免索引变化问题
         sorted_indices = sorted(region_indices, reverse=True)
 
         regions_to_delete = []  # 需要完全删除的区域索引
+        pending_commands = []  # 批量提交，合并为单次撤回
 
         for region_index in sorted_indices:
             if 0 <= region_index < len(self.model.get_regions()):
@@ -1471,7 +1528,7 @@ class EditorController(QObject):
                             new_data=new_data,
                             description=f"Delete Polygon {active_polygon_index} from Region {region_index}"
                         )
-                        self.execute_command(command)
+                        pending_commands.append(command)
                 else:
                     # 没有紫色多边形,删除整个区域
                     regions_to_delete.append(region_index)
@@ -1492,7 +1549,26 @@ class EditorController(QObject):
                         region_data=region_data,
                         description=f"Delete Region {region_index}"
                     )
-                    self.execute_command(command)
+                    pending_commands.append(command)
+
+        if pending_commands:
+            macro_name = f"Delete Regions ({len(pending_commands)} ops)"
+            if hasattr(self.history_service, "macro"):
+                with self.history_service.macro(macro_name):
+                    for command in pending_commands:
+                        self.execute_command(command, update_ui=False)
+            elif hasattr(self.history_service, "begin_macro") and hasattr(self.history_service, "end_macro"):
+                self.history_service.begin_macro(macro_name)
+                try:
+                    for command in pending_commands:
+                        self.execute_command(command, update_ui=False)
+                finally:
+                    self.history_service.end_macro()
+            else:
+                for command in pending_commands:
+                    self.execute_command(command, update_ui=False)
+
+            self._update_undo_redo_buttons()
 
         # 清除选择
         self.model.set_selection([])
@@ -1576,42 +1652,22 @@ class EditorController(QObject):
         new_index = len(self.model.get_regions()) - 1
         self.model.set_selection([new_index])
 
+    @pyqtSlot(bool, bool)
+    def _on_history_undo_redo_state_changed(self, can_undo: bool, can_redo: bool):
+        """历史栈状态变化回调。"""
+        if hasattr(self, 'view') and self.view:
+            if hasattr(self.view, 'toolbar') and self.view.toolbar:
+                self.view.toolbar.update_undo_redo_state(can_undo, can_redo)
+
     def _update_undo_redo_buttons(self):
-        """更新撤销/重做按钮的启用状态，并检查内存限制"""
+        """主动刷新撤销/重做按钮状态。"""
         # 检查history_service是否已初始化
         if not hasattr(self, 'history_service') or self.history_service is None:
             return
         
         can_undo = self.history_service.can_undo()
         can_redo = self.history_service.can_redo()
-        
-        # 限制撤销栈大小，防止内存无限增长
-        self._limit_undo_stack_memory()
-        
-        # 通过view更新工具栏按钮状态
-        if hasattr(self, 'view') and self.view:
-            if hasattr(self.view, 'toolbar') and self.view.toolbar:
-                self.view.toolbar.update_undo_redo_state(can_undo, can_redo)
-
-    def _limit_undo_stack_memory(self, max_items=50):
-        """
-        限制撤销栈的内存占用
-        由于QUndoStack默认没有限制，我们需要手动清理
-        """
-        if hasattr(self.history_service, 'undo_stack'):
-            stack = self.history_service.undo_stack
-            if stack.count() > max_items:
-                # 这是一个hack：QUndoStack没有直接删除旧命令的方法
-                # 我们只能通过设置新的limit来强制清理
-                current_limit = stack.undoLimit()
-                # 临时减小limit以触发清理
-                stack.setUndoLimit(max_items)
-                # 恢复原来的limit (或者就保持这个limit)
-                # stack.setUndoLimit(current_limit)
-                
-                # 触发垃圾回收
-                import gc
-                gc.collect()
+        self._on_history_undo_redo_state_changed(can_undo, can_redo)
 
     @pyqtSlot()
     def open_file_dialog_and_load(self):
@@ -1795,6 +1851,27 @@ class EditorController(QObject):
                 # 确保有方向
                 if not enhanced_region.get('direction'):
                     enhanced_region['direction'] = 'auto'
+
+                # 白框编辑后的导出：将白框中心同步到 center，确保后端渲染位置与预览一致
+                wf_local = enhanced_region.get('white_frame_rect_local')
+                center = enhanced_region.get('center')
+                if (
+                    isinstance(wf_local, (list, tuple)) and len(wf_local) == 4 and
+                    isinstance(center, (list, tuple)) and len(center) >= 2
+                ):
+                    try:
+                        cx, cy = float(center[0]), float(center[1])
+                        left, top, right, bottom = (float(v) for v in wf_local)
+                        local_cx = (left + right) / 2.0
+                        local_cy = (top + bottom) / 2.0
+
+                        theta = math.radians(float(enhanced_region.get('angle') or 0.0))
+                        cos_t, sin_t = math.cos(theta), math.sin(theta)
+                        render_cx = cx + local_cx * cos_t - local_cy * sin_t
+                        render_cy = cy + local_cx * sin_t + local_cy * cos_t
+                        enhanced_region['center'] = [render_cx, render_cy]
+                    except (TypeError, ValueError):
+                        pass
 
                 # 从渲染参数服务获取完整的渲染参数
                 from services import get_render_parameter_service

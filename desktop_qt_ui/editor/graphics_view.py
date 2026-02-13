@@ -64,7 +64,7 @@ class GraphicsView(QGraphicsView):
 
         self._region_items = []
         self._image_np = None
-        self._last_edited_region_index = None
+        self._pending_geometry_edit_kinds: dict[int, str] = {}
 
         # --- Mask Editing State ---
         self._active_tool = 'select'
@@ -98,7 +98,6 @@ class GraphicsView(QGraphicsView):
         self._text_blocks_cache: list[TextBlock] = []
         self._dst_points_cache: list[np.ndarray] = []
         self._render_snapshot_cache: list[RegionRenderSnapshot | None] = []
-        self._last_geometry_edit_kind: str | None = None
         # --- 结束新增 ---
 
         self._setup_view()
@@ -226,8 +225,7 @@ class GraphicsView(QGraphicsView):
             # 重置所有绘制状态
             self._is_drawing = False
             self._is_drawing_textbox = False
-            self._last_edited_region_index = None
-            self._last_geometry_edit_kind = None
+            self._clear_pending_geometry_edits()
 
             # 关闭线程池（如果存在）
             if hasattr(self, '_render_executor'):
@@ -453,15 +451,30 @@ class GraphicsView(QGraphicsView):
 
     def on_regions_changed(self, regions):
         """槽：当模型中的区域数据变化时，根据情况选择性更新或完全更新。"""
-        if self._last_edited_region_index is not None:
-            # A specific item was manipulated in the view. Perform a targeted update.
-            self._perform_single_item_update(self._last_edited_region_index)
-            self._last_edited_region_index = None # Reset after use
-        else:
-            # A general change occurred (e.g., new translation). Perform full debounced update.
-            self._text_render_cache.clear()
-            self._render_snapshot_cache = []
-            self.render_debounce_timer.start()
+        # 优先处理由交互编辑触发的几何 targeted 更新（按 region 独立消费上下文）
+        # 仅在 item 数量未变化时使用 targeted 路径；增删区域必须走完整重建。
+        same_item_count = len(regions) == len(self._region_items)
+        pending_indices = list(self._pending_geometry_edit_kinds.keys())
+        handled = False
+        if same_item_count:
+            for region_index in pending_indices:
+                edit_kind = self._consume_pending_geometry_edit(region_index)
+                if edit_kind is None:
+                    continue
+                if 0 <= region_index < len(self._region_items):
+                    self._perform_single_item_update(region_index, edit_kind=edit_kind)
+                    handled = True
+
+        if handled:
+            return
+
+        # 走完整更新时清空交互上下文，避免旧状态污染下一次刷新。
+        self._clear_pending_geometry_edits()
+
+        # A general change occurred (e.g., new translation). Perform full debounced update.
+        self._text_render_cache.clear()
+        self._render_snapshot_cache = []
+        self.render_debounce_timer.start()
 
     def _values_equal(self, left, right) -> bool:
         try:
@@ -498,11 +511,9 @@ class GraphicsView(QGraphicsView):
             return "white_frame"
         return "other"
 
-    def _perform_single_item_update(self, index):
+    def _perform_single_item_update(self, index, edit_kind: str | None = None):
         """对单个区域执行targeted更新。"""
         try:
-            self._last_edited_region_index = None  # 防止残留
-
             if not (0 <= index < len(self._region_items)):
                 return
 
@@ -512,8 +523,8 @@ class GraphicsView(QGraphicsView):
             if not region_data or item is None or item.scene() is None:
                 return
 
-            edit_kind = getattr(self, "_last_geometry_edit_kind", None)
-            self._last_geometry_edit_kind = None
+            if edit_kind is None:
+                edit_kind = self._consume_pending_geometry_edit(index)
 
             if edit_kind == "white_frame":
                 # 白框编辑：不调 update_from_data（避免覆盖当前白框）
@@ -521,9 +532,15 @@ class GraphicsView(QGraphicsView):
                 override = self._build_dst_points_from_item(item)
                 self._recalculate_single_region_render_data(index, override_dst_points=override)
             else:
-                # 风格/文本类 targeted 更新不应回滚当前 item 几何。
+                # 风格/文本类 targeted 更新尽量不回滚当前 item 几何。
+                # 但当模型几何与 item 几何不一致（如 undo/redo 白框）时，
+                # 必须以模型几何为准，否则会出现“尺寸回滚但位置不回滚”。
                 region_for_item = region_data.copy()
-                if hasattr(item, "geo") and item.geo is not None:
+                if (
+                    hasattr(item, "geo")
+                    and item.geo is not None
+                    and self._region_geometry_matches_item(region_data, item)
+                ):
                     try:
                         region_for_item.update(item.geo.to_region_data_patch())
                         region_for_item["center"] = list(item.geo.center)
@@ -538,6 +555,41 @@ class GraphicsView(QGraphicsView):
                 item.update()
         except (RuntimeError, AttributeError) as e:
             print(f"[View] Warning: Item update failed for index {index}: {e}")
+
+    def _set_pending_geometry_edit(self, region_index: int, edit_kind: str):
+        self._pending_geometry_edit_kinds[int(region_index)] = str(edit_kind)
+
+    def _consume_pending_geometry_edit(self, region_index: int) -> str | None:
+        return self._pending_geometry_edit_kinds.pop(int(region_index), None)
+
+    def _clear_pending_geometry_edits(self):
+        self._pending_geometry_edit_kinds.clear()
+
+    def _region_geometry_matches_item(self, region_data: dict, item: RegionTextItem) -> bool:
+        """判断 model 中几何是否与当前 item 几何一致。"""
+        try:
+            if not hasattr(item, "geo") or item.geo is None:
+                return False
+
+            if not self._values_equal(region_data.get("center"), list(item.geo.center)):
+                return False
+            if not self._values_equal(region_data.get("angle"), float(item.geo.angle)):
+                return False
+            if not self._values_equal(region_data.get("lines"), item.geo.lines):
+                return False
+            if not self._values_equal(
+                region_data.get("has_custom_white_frame", False),
+                bool(item.geo.has_custom_white_frame),
+            ):
+                return False
+
+            model_wf = region_data.get("white_frame_rect_local")
+            item_wf = item.geo.white_frame_local
+            if model_wf is None and item_wf is None:
+                return True
+            return self._values_equal(model_wf, item_wf)
+        except Exception:
+            return False
 
     def _build_dst_points_from_item(self, item):
         """从 item 的白框构建渲染 dst_points（世界坐标轴对齐矩形）。"""
@@ -877,8 +929,10 @@ class GraphicsView(QGraphicsView):
 
 
     def _on_region_geometry_changed(self, region_index, new_region_data):
-        self._last_edited_region_index = region_index
-        self._last_geometry_edit_kind = self._infer_geometry_edit_kind(region_index, new_region_data)
+        self._set_pending_geometry_edit(
+            region_index,
+            self._infer_geometry_edit_kind(region_index, new_region_data),
+        )
         self.region_geometry_changed.emit(region_index, new_region_data)
 
 
@@ -1559,8 +1613,8 @@ class GraphicsView(QGraphicsView):
             if controller:
                 from editor.commands import AddRegionCommand
 
-                # 重置 _last_edited_region_index,确保触发完全更新
-                self._last_edited_region_index = None
+                # 新建文本框前清理几何交互上下文，避免污染后续刷新路径
+                self._clear_pending_geometry_edits()
 
                 # 使用命令模式添加新区域
                 command = AddRegionCommand(

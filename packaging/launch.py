@@ -692,44 +692,38 @@ def detect_amd_gfx_version(gpu_name):
     
     gpu_name_upper = gpu_name.upper()
     
-    # AMD 显卡型号到 gfx 版本的映射
-    # 参考: https://github.com/ROCm/ROCm
-    # 注意：只有部分 gfx 版本在 AMD ROCm PyTorch 源中有 torch 包
+    # AMD 显卡型号到 gfx 版本的映射（Windows ROCm 7.2 + PyTorch 支持列表）
     amd_gpu_mapping = {
-        # RDNA 3 架构 (RX 7000 系列) - 部分支持
-        'gfx110X-all': {
-            'keywords': ['RX 7'],  # 通用 RX 7000 系列
-            'name': 'RDNA 3 (RX 7000 系列)',
-            'has_torch': True
-        },
-        'gfx110X-dgpu': {
-            'keywords': ['7900 XTX', '7900 XT', '7950'],  # 高端型号
-            'name': 'RDNA 3 (Navi 31)',
-            'has_torch': True
-        },
-        'gfx1151': {
-            'keywords': ['7800 XT', '7700 XT', '7600'],
-            'name': 'RDNA 3 (Navi 32/33)',
-            'has_torch': True
-        },
-        # gfx1150 没有 torch 支持
-        
-        # RDNA 4 架构 (RX 9000 系列) - 支持
-        'gfx120X-all': {
-            'keywords': ['RX 9', '9070 XT', '9070', '9060 XT', '9060', '9050'],
-            'name': 'RDNA 4 (RX 9000 系列)',
-            'has_torch': True
-        },
-        
         # CDNA 数据中心系列 - 支持
         'gfx94X-dcgpu': {
-            'keywords': ['MI200', 'MI210', 'MI250', 'MI260'],
-            'name': 'CDNA 2 (MI200 系列)',
+            'keywords': ['MI300A', 'MI300X'],
+            'name': 'CDNA (MI300A/MI300X)',
             'has_torch': True
         },
         'gfx950-dcgpu': {
-            'keywords': ['MI300'],
-            'name': 'CDNA 3 (MI300 系列)',
+            'keywords': ['MI350X', 'MI355X'],
+            'name': 'CDNA (MI350X/MI355X)',
+            'has_torch': True
+        },
+
+        # RDNA 3 架构 - 支持的具体型号
+        'gfx110X-dgpu': {
+            'keywords': ['RX 7900 XTX', '7900 XTX', 'RX 7800 XT', '7800 XT', 'RX 7700S', '7700S', 'FRAMEWORK LAPTOP 16'],
+            'name': 'RDNA 3 (RX 7900 XTX / RX 7800 XT / RX 7700S)',
+            'has_torch': True
+        },
+
+        # Strix Halo iGPU - 支持
+        'gfx1151': {
+            'keywords': ['STRIX HALO'],
+            'name': 'Strix Halo iGPU',
+            'has_torch': True
+        },
+
+        # RDNA 4 架构 - 支持的具体型号
+        'gfx120X-all': {
+            'keywords': ['RX 9060 XT', 'RX 9060', 'RX 9070 XT', 'RX 9070'],
+            'name': 'RDNA 4 (RX 9060/9070 系列)',
             'has_torch': True
         },
         
@@ -763,6 +757,41 @@ def detect_amd_gfx_version(gpu_name):
                 return gfx_version, info['name'], info.get('has_torch', False)
     
     return None, None, False
+
+
+def print_supported_amd_gpu_types():
+    """打印当前支持的 AMD 显卡类型"""
+    print('当前支持的 AMD 显卡类型:')
+    print('  - MI300A / MI300X (gfx94X-dcgpu)')
+    print('  - MI350X / MI355X (gfx950-dcgpu)')
+    print('  - RX 7900 XTX / RX 7800 XT / RX 7700S (Framework Laptop 16) (gfx110X-dgpu)')
+    print('  - AMD Strix Halo iGPU (gfx1151)')
+    print('  - RX 9060 / RX 9060 XT / RX 9070 / RX 9070 XT (gfx120X-all)')
+    print('  ⚠️  Windows 版 ROCm 7.2 PyTorch 需要 AMD 显卡驱动 26.1.1')
+
+
+def choose_when_amd_unsupported():
+    """AMD 不支持时给用户选择，默认 CPU"""
+    print('')
+    print('⚠️  当前显卡不在 AMD ROCm PyTorch 支持列表中。')
+    print_supported_amd_gpu_types()
+    print('')
+    print('请选择:')
+    print('  [1] 使用 CPU 版本 (默认, 推荐)')
+    print('  [2] 强制安装 AMD 版本 (实验性, 可能失败)')
+    print('  [3] 退出安装')
+    print('')
+
+    while True:
+        choice = input('请选择 (1/2/3, 默认1): ').strip()
+        if choice in ['', '1']:
+            return 'cpu'
+        elif choice == '2':
+            return 'force_amd'
+        elif choice == '3':
+            return 'exit'
+        else:
+            print('无效输入,请输入 1, 2 或 3')
 
 
 def detect_installed_pytorch_version():
@@ -906,6 +935,7 @@ def prepare_environment(args):
         # 如果手动指定了 requirements_amd.txt，需要检测 gfx 版本并安装 AMD PyTorch
         if requirements_file == 'requirements_amd.txt':
             use_amd_pytorch = True
+            detected_installed_amd = False
             # 尝试从环境中检测已安装的 AMD PyTorch 版本（在子进程中检测）
             try:
                 code = """
@@ -931,6 +961,7 @@ except:
                 if result.returncode == 0:
                     output = result.stdout.strip()
                     if output.startswith('installed|'):
+                        detected_installed_amd = True
                         rocm_version = output.split('|')[1]
                         # 已安装 AMD ROCm PyTorch，获取版本信息
                         print(f'\n检测到已安装 AMD ROCm PyTorch')
@@ -943,27 +974,36 @@ except:
                             # 自动检测 gfx 版本
                             detected_gfx, arch_name, has_torch = detect_amd_gfx_version(gpu_name) if gpu_name else (None, None, False)
                             
-                            if detected_gfx:
+                            if detected_gfx and has_torch:
                                 print(f'\n自动识别架构: {arch_name}')
                                 print(f'对应 gfx 版本: {detected_gfx}')
-                                
-                                if not has_torch:
-                                    print(f'⚠️  警告: {detected_gfx} 不支持 AMD ROCm PyTorch')
-                                    print('建议使用 CPU 版本')
-                                    use_amd_pytorch = False
-                                
-                                use_detected = input(f'使用检测到的 {detected_gfx}? (y/n, 默认y): ').strip().lower()
-                                if use_detected in ['', 'y', 'yes']:
+                                print('✓ 使用自动检测到的 gfx 版本')
+                                amd_gfx_version = detected_gfx
+                            elif detected_gfx and not has_torch:
+                                print(f'\n⚠️  警告: {detected_gfx} 不支持 AMD ROCm PyTorch')
+                                user_action = choose_when_amd_unsupported()
+                                if user_action == 'exit':
+                                    print('已取消安装，请确认显卡型号和驱动版本后重试。')
+                                    sys.exit(0)
+                                elif user_action == 'force_amd':
+                                    print('⚠️  已选择强制安装 AMD 版本，兼容性无法保证。')
+                                    use_amd_pytorch = True
                                     amd_gfx_version = detected_gfx
                                 else:
-                                    amd_gfx_version = input('请输入您的 gfx 版本: ').strip()
+                                    requirements_file = 'requirements_cpu.txt'
+                                    use_amd_pytorch = False
                             else:
-                                print('\n无法自动检测 gfx 版本')
-                                amd_gfx_version = input('请输入您的 gfx 版本 (如 gfx110X-all): ').strip()
-                            
-                            if not amd_gfx_version:
-                                print('[INFO] 未输入 gfx 版本，跳过 AMD PyTorch 更新')
-                                use_amd_pytorch = False
+                                print('\n⚠️  无法自动检测到受支持的 AMD gfx 版本')
+                                user_action = choose_when_amd_unsupported()
+                                if user_action == 'exit':
+                                    print('已取消安装，请确认显卡型号和驱动版本后重试。')
+                                    sys.exit(0)
+                                elif user_action == 'force_amd':
+                                    print('⚠️  已选择强制安装 AMD 版本，兼容性无法保证。')
+                                    use_amd_pytorch = True
+                                else:
+                                    requirements_file = 'requirements_cpu.txt'
+                                    use_amd_pytorch = False
                         else:
                             use_amd_pytorch = False
             except Exception:
@@ -972,9 +1012,15 @@ except:
             
             if not use_amd_pytorch:
                 # 未安装或非 AMD PyTorch
-                print('\n未检测到 AMD ROCm PyTorch')
-                print('[INFO] 手动指定了 requirements_amd.txt，但未安装 AMD PyTorch')
-                print('[INFO] 如需安装 AMD PyTorch，请运行 步骤1-首次安装.bat')
+                if requirements_file == 'requirements_amd.txt':
+                    if detected_installed_amd:
+                        print('\n检测到已安装 AMD ROCm PyTorch，本次不更新。')
+                    else:
+                        print('\n未检测到 AMD ROCm PyTorch')
+                        print('[INFO] 手动指定了 requirements_amd.txt，但未安装 AMD PyTorch')
+                        print('[INFO] 如需安装 AMD PyTorch，请运行 步骤1-首次安装.bat')
+                else:
+                    print(f'\n✓ 使用: {requirements_file} (CPU版本)')
                 use_amd_pytorch = False
         else:
             pass  # 不是AMD，use_amd_pytorch已在开头初始化为False
@@ -1082,6 +1128,7 @@ except:
             print('AMD GPU 支持选项:')
             print('  [1] AMD ROCm GPU 版本 (实验性,需要兼容的 AMD 显卡)')
             print('  [2] CPU 版本 (推荐,兼容性好)')
+            print('  ⚠️ Windows 版 ROCm 7.2 PyTorch 需要 AMD 显卡驱动 26.1.1')
             print('')
             
             if detected_gfx and has_torch:
@@ -1089,55 +1136,40 @@ except:
             else:
                 print('建议: 选择 [2] CPU 版本')
             print('')
-            
-            while True:
-                choice = input('请选择 (1/2, 默认2): ').strip()
-                if choice == '1':
-                    # 用户选择 AMD GPU
-                    print('')
-                    print('✓ 支持 PyTorch 的 AMD gfx 版本:')
-                    print('  - gfx110X-all:  RX 7000 系列 (RDNA 3)')
-                    print('  - gfx110X-dgpu: RX 7900 XTX/XT (Navi 31)')
-                    print('  - gfx1151:      RX 7800/7700/7600 (Navi 32/33)')
-                    print('  - gfx120X-all:  RX 9000 系列 (RDNA 4)')
-                    print('  - gfx94X-dcgpu: MI200 系列 (CDNA 2)')
-                    print('  - gfx950-dcgpu: MI300 系列 (CDNA 3)')
-                    print('')
-                    print('✗ 不支持 PyTorch 的版本:')
-                    print('  - gfx101X-dgpu: RX 5000 系列 (RDNA 1)')
-                    print('  - gfx103X-dgpu: RX 6000 系列 (RDNA 2)')
-                    print('  - gfx90X-dcgpu: Vega / Radeon VII')
-                    print('')
-                    
-                    if detected_gfx and has_torch:
-                        default_gfx = detected_gfx
-                        gfx_input = input(f'请输入您的 gfx 版本 (默认 {detected_gfx}): ').strip()
-                        if not gfx_input:
-                            amd_gfx_version = default_gfx
-                        else:
-                            amd_gfx_version = gfx_input
-                    else:
-                        gfx_input = input('请输入您的 gfx 版本 (如 gfx103X-dgpu): ').strip()
-                        if gfx_input:
-                            amd_gfx_version = gfx_input
-                        else:
-                            print('未输入 gfx 版本,将使用 CPU 版本')
-                            requirements_file = 'requirements_cpu.txt'
-                            break
-                    
-                    # 使用 AMD ROCm PyTorch
-                    requirements_file = 'requirements_amd.txt'  # 使用专用的 AMD 依赖文件
+
+            # 检测到不支持时：展示支持型号并给出选择（默认 CPU）
+            if not (detected_gfx and has_torch):
+                user_action = choose_when_amd_unsupported()
+                if user_action == 'exit':
+                    print('已取消安装，请确认显卡型号和驱动版本后重试。')
+                    sys.exit(0)
+                elif user_action == 'force_amd':
+                    requirements_file = 'requirements_amd.txt'
                     use_amd_pytorch = True
-                    print(f'✓ 将使用 AMD ROCm PyTorch ({amd_gfx_version})')
-                    print(f'✓ 依赖文件: {requirements_file}')
-                    break
-                    
-                elif choice in ['', '2']:
-                    requirements_file = 'requirements_cpu.txt'
-                    print(f'✓ 使用: {requirements_file} (CPU版本)')
-                    break
+                    amd_gfx_version = detected_gfx
+                    print('⚠️  已选择强制安装 AMD 版本，兼容性无法保证。')
+                    print(f'✓ 使用: {requirements_file} (AMD 强制安装)')
                 else:
-                    print('无效输入,请输入 1 或 2')
+                    requirements_file = 'requirements_cpu.txt'
+                    use_amd_pytorch = False
+                    print(f'✓ 使用: {requirements_file} (CPU版本)')
+            else:
+                while True:
+                    choice = input('请选择 (1/2, 默认2): ').strip()
+                    if choice == '1':
+                        amd_gfx_version = detected_gfx
+                        requirements_file = 'requirements_amd.txt'  # 使用专用的 AMD 依赖文件
+                        use_amd_pytorch = True
+                        print(f'✓ 自动识别并使用: {amd_gfx_version}')
+                        print(f'✓ 将使用 AMD ROCm PyTorch ({amd_gfx_version})')
+                        print(f'✓ 依赖文件: {requirements_file}')
+                        break
+                    elif choice in ['', '2']:
+                        requirements_file = 'requirements_cpu.txt'
+                        print(f'✓ 使用: {requirements_file} (CPU版本)')
+                        break
+                    else:
+                        print('无效输入,请输入 1 或 2')
                     
         elif gpu_type == "AppleSilicon":
             # Apple Silicon Mac，使用 Metal 加速
@@ -1173,32 +1205,46 @@ except:
                     print(f'✓ 使用: {requirements_file} (NVIDIA CUDA)')
                     break
                 elif choice == '2':
-                    # AMD GPU 手动输入
+                    # AMD GPU（纯自动检测）
                     print('')
                     print('✓ 支持 PyTorch 的 AMD gfx 版本:')
-                    print('  - gfx110X-all:  RX 7000 系列 (RDNA 3)')
-                    print('  - gfx110X-dgpu: RX 7900 XTX/XT (Navi 31)')
-                    print('  - gfx1151:      RX 7800/7700/7600 (Navi 32/33)')
-                    print('  - gfx120X-all:  RX 9000 系列 (RDNA 4)')
-                    print('  - gfx94X-dcgpu: MI200 系列')
-                    print('  - gfx950-dcgpu: MI300 系列')
+                    print('  - gfx94X-dcgpu: MI300A / MI300X')
+                    print('  - gfx950-dcgpu: MI350X / MI355X')
+                    print('  - gfx110X-dgpu: RX 7900 XTX / RX 7800 XT / RX 7700S (Framework Laptop 16)')
+                    print('  - gfx1151:      AMD Strix Halo iGPU')
+                    print('  - gfx120X-all:  RX 9060 / RX 9060 XT / RX 9070 / RX 9070 XT')
                     print('')
                     print('✗ 不支持 PyTorch 的版本:')
                     print('  - gfx101X-dgpu: RX 5000 系列')
                     print('  - gfx103X-dgpu: RX 6000 系列')
                     print('  - gfx90X-dcgpu: Vega / Radeon VII')
                     print('')
-                    gfx_input = input('请输入您的 gfx 版本: ').strip()
-                    if gfx_input:
-                        amd_gfx_version = gfx_input
+
+                    detected_gfx, arch_name, has_torch = detect_amd_gfx_version(gpu_name) if gpu_name else (None, None, False)
+                    if detected_gfx and has_torch:
+                        amd_gfx_version = detected_gfx
                         requirements_file = 'requirements_amd.txt'
                         use_amd_pytorch = True
+                        print(f'✓ 自动识别架构: {arch_name}')
                         print(f'✓ 将使用 AMD ROCm PyTorch ({amd_gfx_version})')
                         print(f'✓ 依赖文件: {requirements_file}')
                         break
                     else:
-                        print('未输入 gfx 版本')
-                        continue
+                        user_action = choose_when_amd_unsupported()
+                        if user_action == 'exit':
+                            print('已取消安装，请确认显卡型号和驱动版本后重试。')
+                            sys.exit(0)
+                        elif user_action == 'force_amd':
+                            requirements_file = 'requirements_amd.txt'
+                            use_amd_pytorch = True
+                            amd_gfx_version = detected_gfx
+                            print('⚠️  已选择强制安装 AMD 版本，兼容性无法保证。')
+                            print(f'✓ 使用: {requirements_file} (AMD 强制安装)')
+                        else:
+                            requirements_file = 'requirements_cpu.txt'
+                            use_amd_pytorch = False
+                            print(f'✓ 使用: {requirements_file} (CPU版本)')
+                        break
                 elif choice in ['', '3']:
                     requirements_file = 'requirements_cpu.txt'
                     print(f'✓ 使用: {requirements_file} (CPU版本)')
@@ -1285,31 +1331,39 @@ except:
             pass
     
     # 如果用户选择了 AMD ROCm PyTorch，先安装它
-    if use_amd_pytorch and amd_gfx_version:
+    if use_amd_pytorch:
         print('\n' + '=' * 50)
         print('正在安装 AMD ROCm PyTorch')
         print('=' * 50)
-        print(f'gfx 版本: {amd_gfx_version}')
+        if amd_gfx_version:
+            print(f'gfx 版本: {amd_gfx_version}')
+        print('模式: ROCm SDK 7.2 固定 URL 安装')
+        print('⚠️  前置要求: Windows 版 ROCm 7.2 PyTorch 必须安装 AMD 显卡驱动 26.1.1')
         print('')
 
-        # AMD ROCm PyTorch 的 index URL
-        amd_index_url = f"https://d2awnip2yjpvqn.cloudfront.net/v2/{amd_gfx_version}/"
+        # 第1步：先安装 ROCm SDK 依赖
+        rocm_sdk_urls = [
+            "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm_sdk_core-7.2.0.dev0-py3-none-win_amd64.whl",
+            "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm_sdk_devel-7.2.0.dev0-py3-none-win_amd64.whl",
+            "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm_sdk_libraries_custom-7.2.0.dev0-py3-none-win_amd64.whl",
+            "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm-7.2.0.dev0.tar.gz",
+        ]
 
-        # 锁定版本到 ROCm 7.10.0（稳定版本）
-        torch_version = "torch==2.9.0+rocm7.10.0a20251031"
-        torchvision_version = "torchvision==0.24.0+rocm7.10.0a20251031"
-        torchaudio_version = "torchaudio==2.9.0+rocm7.10.0a20251031"
-        print('模式: 锁定版本 2.9.0+rocm7.10.0a20251031')
+        # 第2步：再安装 PyTorch 三件套
+        rocm_torch_urls = [
+            "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torch-2.9.1%2Brocmsdk20260116-cp312-cp312-win_amd64.whl",
+            "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torchaudio-2.9.1%2Brocmsdk20260116-cp312-cp312-win_amd64.whl",
+            "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torchvision-0.24.1%2Brocmsdk20260116-cp312-cp312-win_amd64.whl",
+        ]
 
-        # 安装 AMD ROCm PyTorch
-        print(f'正在从 AMD ROCm 源安装 PyTorch...')
-        print(f'Index URL: {amd_index_url}')
-        print('这可能需要几分钟时间...\n')
+        sdk_urls_str = " ".join([f'"{u}"' for u in rocm_sdk_urls])
+        torch_urls_str = " ".join([f'"{u}"' for u in rocm_torch_urls])
+        install_sdk_cmd = f'"{python}" -m pip install --no-cache-dir {sdk_urls_str}'
+        install_torch_cmd = f'"{python}" -m pip install --no-cache-dir {torch_urls_str}'
 
         try:
-            # 直接使用 run() 而不是 run_pip() 以完全控制参数顺序
-            amd_pytorch_cmd = f'"{python}" -m pip install "{torch_version}" "{torchvision_version}" "{torchaudio_version}" --index-url {amd_index_url} --no-cache-dir'
-            run(amd_pytorch_cmd, "正在安装 AMD ROCm PyTorch", "AMD ROCm PyTorch 安装失败", live=True)
+            run(install_sdk_cmd, "步骤 1/2: 安装 AMD ROCm SDK 依赖", "AMD ROCm SDK 依赖安装失败", live=True)
+            run(install_torch_cmd, "步骤 2/2: 安装 AMD ROCm PyTorch", "AMD ROCm PyTorch 安装失败", live=True)
             print('\n✓ AMD ROCm PyTorch 安装完成')
             print('\n⚠️  注意:')
             print('  - AMD ROCm PyTorch 是实验性功能')
@@ -1318,8 +1372,8 @@ except:
         except Exception as e:
             print(f'\n✗ AMD ROCm PyTorch 安装失败: {e}')
             print('\n建议:')
-            print('  1. 检查您的 gfx 版本是否正确')
-            print('  2. 检查网络连接')
+            print('  1. 检查网络连接')
+            print('  2. 确认 Python 版本为 3.12')
             print('  3. 如果仍有问题,请使用 CPU 版本重新安装')
             # 安装失败，返回失败状态
             return False, None

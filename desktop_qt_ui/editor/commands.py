@@ -1,6 +1,6 @@
-
 import copy
-from typing import Any, Dict, TYPE_CHECKING
+import hashlib
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import numpy as np
 from PyQt6.QtGui import QUndoCommand
@@ -8,15 +8,49 @@ from PyQt6.QtGui import QUndoCommand
 if TYPE_CHECKING:
     from desktop_qt_ui.editor.editor_model import EditorModel
 
+
+def _stable_command_id(key: str) -> int:
+    """将 merge_key 稳定映射为 QUndoCommand.id 所需的整数。"""
+    digest = hashlib.sha1(key.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], byteorder="little", signed=False) & 0x7FFFFFFF
+
+
 class UpdateRegionCommand(QUndoCommand):
     """用于更新单个区域数据的通用命令。"""
-    def __init__(self, model: "EditorModel", region_index: int, old_data: Dict[str, Any], new_data: Dict[str, Any], description: str = "Update Region"):
+
+    def __init__(
+        self,
+        model: "EditorModel",
+        region_index: int,
+        old_data: Dict[str, Any],
+        new_data: Dict[str, Any],
+        description: str = "Update Region",
+        merge_key: Optional[str] = None,
+    ):
         super().__init__(description)
         self._model = model
         self._index = region_index
+        self._merge_key = merge_key
         # 存储深拷贝以防止后续修改影响历史状态
         self._old_data = copy.deepcopy(old_data)
         self._new_data = copy.deepcopy(new_data)
+
+    def id(self) -> int:
+        if not self._merge_key:
+            return -1
+        return _stable_command_id(self._merge_key)
+
+    def mergeWith(self, other) -> bool:  # noqa: N802 - Qt API naming
+        if not isinstance(other, UpdateRegionCommand):
+            return False
+        if self.id() == -1 or other.id() != self.id():
+            return False
+        if self._index != other._index or self._merge_key != other._merge_key:
+            return False
+        # 保留第一条命令的 old_data，更新成最新 new_data。
+        self._new_data = copy.deepcopy(other._new_data)
+        self.setText(other.text())
+        return True
 
     def _apply_data(self, data_to_apply: Dict[str, Any]):
         """将给定的数据字典应用到模型中的区域。"""
@@ -25,12 +59,12 @@ class UpdateRegionCommand(QUndoCommand):
             return
 
         # 检查 center 是否改变
-        old_center = regions[self._index].get('center')
-        new_center = data_to_apply.get('center')
+        old_center = regions[self._index].get("center")
+        new_center = data_to_apply.get("center")
         center_changed = old_center != new_center
 
         # 更新区域数据
-        regions[self._index] = data_to_apply
+        regions[self._index] = copy.deepcopy(data_to_apply)
         # set_regions_silent 只同步到 resource_manager，不 emit 信号
         # 由下面的逻辑自行控制信号发射（避免双重 emit）
         self._model.set_regions_silent(regions)
@@ -38,97 +72,94 @@ class UpdateRegionCommand(QUndoCommand):
         # 如果 center 改变了,需要触发完全更新,重新创建 item
         # 否则只触发单个 item 更新
         if center_changed:
-            # 保存当前选择状态
             old_selection = self._model.get_selection()
-            # 触发完全更新
             self._model.regions_changed.emit(self._model.get_regions())
-            # 恢复选择状态(只有当选择的region还存在时)
             if old_selection:
-                # 检查选择的region是否还在有效范围内
                 current_regions = self._model.get_regions()
                 valid_selection = [idx for idx in old_selection if 0 <= idx < len(current_regions)]
                 if valid_selection:
                     self._model.set_selection(valid_selection)
         else:
-            # 发出目标性强的信号，让UI只刷新这一个区域
-            # region_style_updated 是一个理想的通用信号，因为它只传递索引
             self._model.region_style_updated.emit(self._index)
 
     def redo(self):
         """执行操作：应用新数据。"""
-        self._apply_data(copy.deepcopy(self._new_data))
+        self._apply_data(self._new_data)
 
     def undo(self):
         """撤销操作：应用旧数据。"""
-        self._apply_data(copy.deepcopy(self._old_data))
+        self._apply_data(self._old_data)
+
 
 class AddRegionCommand(QUndoCommand):
     """用于添加新区域的命令。"""
+
     def __init__(self, model: "EditorModel", region_data: Dict[str, Any], description: str = "Add Region"):
         super().__init__(description)
         self._model = model
-        # 存储新区域的数据
         self._region_data = copy.deepcopy(region_data)
-        # 记录添加的位置(索引)
-        self._index = None
+        self._index: Optional[int] = None
 
     def redo(self):
-        """执行添加操作"""
+        """执行添加操作。"""
         regions = self._model.get_regions()
-        regions.append(copy.deepcopy(self._region_data))
-        self._index = len(regions) - 1
-        # set_regions 会自动同步到 resource_manager，不需要手动调用
+        if self._index is None or self._index > len(regions):
+            self._index = len(regions)
+        regions.insert(self._index, copy.deepcopy(self._region_data))
         self._model.set_regions(regions)
 
     def undo(self):
-        """撤销添加操作:删除最后添加的区域"""
+        """撤销添加操作。"""
         regions = self._model.get_regions()
         if self._index is not None and 0 <= self._index < len(regions):
             regions.pop(self._index)
-            # set_regions 会自动同步到 resource_manager
             self._model.set_regions(regions)
-            # 清除选择
             self._model.set_selection([])
+
 
 class DeleteRegionCommand(QUndoCommand):
     """用于删除区域的命令。"""
-    def __init__(self, model: "EditorModel", region_index: int, region_data: Dict[str, Any], description: str = "Delete Region"):
+
+    def __init__(
+        self,
+        model: "EditorModel",
+        region_index: int,
+        region_data: Dict[str, Any],
+        description: str = "Delete Region",
+    ):
         super().__init__(description)
         self._model = model
         self._index = region_index
-        # 存储被删除区域的数据,用于撤销
         self._deleted_data = copy.deepcopy(region_data)
 
     def redo(self):
-        """执行删除操作"""
+        """执行删除操作。"""
         regions = self._model.get_regions()
         if 0 <= self._index < len(regions):
             regions.pop(self._index)
-            # set_regions 会自动同步到 resource_manager
             self._model.set_regions(regions)
-            # 清除选择,因为被删除的区域可能被选中
             self._model.set_selection([])
 
     def undo(self):
-        """撤销删除操作:在原位置插入回区域"""
+        """撤销删除操作。"""
         regions = self._model.get_regions()
         if 0 <= self._index <= len(regions):
             regions.insert(self._index, copy.deepcopy(self._deleted_data))
-            # set_regions 会自动同步到 resource_manager
             self._model.set_regions(regions)
-            # 恢复选择到被恢复的区域
             self._model.set_selection([self._index])
+
 
 class MaskEditCommand(QUndoCommand):
     """用于处理蒙版编辑的命令。"""
+
     def __init__(self, model: "EditorModel", old_mask: np.ndarray, new_mask: np.ndarray):
         super().__init__("Edit Mask")
         self._model = model
-        self._old_mask = old_mask
-        self._new_mask = new_mask
+        self._old_mask = None if old_mask is None else old_mask.copy()
+        self._new_mask = None if new_mask is None else new_mask.copy()
 
     def redo(self):
-        self._model.set_refined_mask(self._new_mask)
+        self._model.set_refined_mask(None if self._new_mask is None else self._new_mask.copy())
 
     def undo(self):
-        self._model.set_refined_mask(self._old_mask)
+        self._model.set_refined_mask(None if self._old_mask is None else self._old_mask.copy())

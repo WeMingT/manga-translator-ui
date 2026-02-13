@@ -467,7 +467,7 @@ class MangaTranslator:
             return False
 
     def _save_text_to_file(self, image_path: str, ctx: Context, config: Config = None):
-        """保存翻译数据到JSON文件，使用新的目录结构"""
+        """保存/回写文本区域到JSON（含translation、font_size等渲染后字段），使用新的目录结构"""
         text_output_file = self.text_output_file
         if not text_output_file:
             # 使用新的路径管理器生成JSON路径
@@ -536,6 +536,10 @@ class MangaTranslator:
             'original_width': original_width,
             'original_height': original_height
         }
+
+        # 导出原文/导出翻译模式：显式要求导入渲染时不要跳过字体缩放算法
+        if (self.template and self.save_text) or self.generate_and_export:
+            data_to_save['skip_font_scaling'] = False
         
         # 添加超分和上色配置信息
         if config:
@@ -584,6 +588,100 @@ class MangaTranslator:
             logger.info(f"JSON saved to: {text_output_file}")
         except Exception as e:
             logger.error(f"Failed to write translation file to {text_output_file}: {e}")
+
+    async def _handle_generate_and_export(
+        self,
+        ctx: Context,
+        config: Config,
+        ensure_json_with_empty_regions: bool = False
+    ) -> None:
+        """
+        Shared generate_and_export workflow:
+        1) refine mask if available
+        2) save JSON
+        3) export translated TXT via template
+        """
+        image_name = getattr(ctx, 'image_name', None)
+        if not image_name:
+            return
+
+        # 导出翻译模式：强制执行蒙版优化（跳过修复）
+        if ctx.mask is None and ctx.mask_raw is not None:
+            await self._report_progress('mask-generation')
+            try:
+                ctx.mask = await self._run_mask_refinement(config, ctx)
+            except Exception:
+                logger.error(f"Error during mask-generation in generate_and_export mode:\n{traceback.format_exc()}")
+                ctx.mask = ctx.mask_raw  # 回退到原始蒙版
+
+        has_regions = hasattr(ctx, 'text_regions') and ctx.text_regions is not None
+        should_export = has_regions and (bool(ctx.text_regions) or ensure_json_with_empty_regions)
+        if not should_export:
+            return
+
+        self._save_text_to_file(image_name, ctx, config)
+
+        try:
+            json_path = find_json_path(image_name)
+            if json_path and os.path.exists(json_path):
+                from desktop_qt_ui.services.workflow_service import generate_translated_text, get_template_path_from_config
+                template_path = get_template_path_from_config()
+                if template_path and os.path.exists(template_path):
+                    translated_result = generate_translated_text(json_path, template_path)
+                    logger.info(f"Translated text export for {os.path.basename(image_name)}: {translated_result}")
+                else:
+                    logger.warning(f"Template file not found for {os.path.basename(image_name)}: {template_path}")
+            else:
+                logger.warning(f"JSON file not found for {os.path.basename(image_name)}")
+        except Exception as e:
+            logger.error(f"Failed to export clean text for {os.path.basename(image_name)}: {e}")
+
+    async def _handle_template_and_save_text(
+        self,
+        ctx: Context,
+        config: Config,
+        ensure_json_with_empty_regions: bool = True
+    ) -> None:
+        """
+        Shared template+save_text workflow:
+        1) refine mask if available
+        2) save JSON
+        3) export original TXT via template
+        """
+        image_name = getattr(ctx, 'image_name', None)
+        if not image_name:
+            return
+
+        # 导出原文模式：强制执行蒙版优化（跳过修复）
+        if ctx.mask is None and ctx.mask_raw is not None:
+            await self._report_progress('mask-generation')
+            try:
+                ctx.mask = await self._run_mask_refinement(config, ctx)
+            except Exception:
+                logger.error(f"Error during mask-generation in template mode:\n{traceback.format_exc()}")
+                ctx.mask = ctx.mask_raw  # 回退到原始蒙版
+
+        has_regions = hasattr(ctx, 'text_regions') and ctx.text_regions is not None
+        should_export = has_regions and (bool(ctx.text_regions) or ensure_json_with_empty_regions)
+        if not should_export:
+            return
+
+        self._save_text_to_file(image_name, ctx, config)
+
+        try:
+            json_path = find_json_path(image_name)
+            if json_path and os.path.exists(json_path):
+                from desktop_qt_ui.services.workflow_service import generate_original_text, get_template_path_from_config
+                template_path = get_template_path_from_config()
+                if template_path and os.path.exists(template_path):
+                    original_result = generate_original_text(json_path, template_path)
+                    logger.info(f"Original text export for {os.path.basename(image_name)}: {original_result}")
+                else:
+                    logger.warning(f"Template file not found for {os.path.basename(image_name)}: {template_path}")
+            else:
+                logger.warning(f"JSON file not found for {os.path.basename(image_name)}")
+        except Exception as e:
+            logger.error(f"Failed to export original text for {os.path.basename(image_name)}: {e}")
 
     def _save_inpainted_image(self, image_path: str, inpainted_img: np.ndarray):
         """保存修复后的图片到inpainted目录"""
@@ -703,10 +801,10 @@ class MangaTranslator:
             logger.warning(f"Failed to get/create default template: {e}")
             return None
     
-    def _load_text_and_regions_from_file(self, image_path: str, config: Config) -> (Optional[List[TextBlock]], Optional[np.ndarray], bool):
+    def _load_text_and_regions_from_file(self, image_path: str, config: Config):
         """加载翻译数据，支持新的目录结构和向后兼容"""
         if not image_path:
-            return None, None, False
+            return None, None, False, True
 
         # 使用path_manager查找JSON文件（新位置优先）
         text_file_path = find_json_path(image_path)
@@ -719,10 +817,10 @@ class MangaTranslator:
                 # If the old format is found, load from it
                 regions = self._load_text_and_regions_from_txt_file(image_path)
                 # Since old format doesn't have mask, we return None for mask and refined status
-                return regions, None, False
+                return regions, None, False, True
             else:
                 logger.info(f"Translation file not found for: {image_path}")
-                return None, None, False
+                return None, None, False, True
 
         try:
             # Force UTF-8 encoding to handle potential file encoding issues
@@ -730,17 +828,18 @@ class MangaTranslator:
                 data = json.load(f)
         except Exception as e:
             logger.error(f"Failed to read or parse translation file {text_file_path}: {e}")
-            return None, None, False
+            return None, None, False, True
 
         # Don't check the image key. Assume the user knows what they are doing
         # and that the first entry in the JSON is the one they want to load.
         if not data or len(data.values()) == 0:
             logger.warning(f"JSON file {text_file_path} is empty or invalid.")
-            return None, None, False
+            return None, None, False, True
 
         # Get the first value from the dictionary, regardless of the key.
         image_data = next(iter(data.values()))
         mask_is_refined = False
+        skip_font_scaling = True
 
         # Handle both old and new JSON formats
         if isinstance(image_data, list):
@@ -752,9 +851,18 @@ class MangaTranslator:
             regions_data = image_data.get('regions', [])
             mask_raw_data = image_data.get('mask_raw', None)
             mask_is_refined = image_data.get('mask_is_refined', False)
+            skip_font_scaling_raw = image_data.get('skip_font_scaling', True)
+            if isinstance(skip_font_scaling_raw, bool):
+                skip_font_scaling = skip_font_scaling_raw
+            elif isinstance(skip_font_scaling_raw, str):
+                skip_font_scaling = skip_font_scaling_raw.strip().lower() in ('1', 'true', 'yes', 'on')
+            elif skip_font_scaling_raw is None:
+                skip_font_scaling = True
+            else:
+                skip_font_scaling = bool(skip_font_scaling_raw)
         else:
             logger.warning(f"Invalid data format in JSON file {text_file_path}.")
-            return None, None, False
+            return None, None, False, True
 
         regions = []
         for region_data in regions_data:
@@ -854,7 +962,7 @@ class MangaTranslator:
         if mask_raw is not None:
             logger.info(f"Loaded mask_raw from {text_file_path}")
 
-        return regions, mask_raw, mask_is_refined
+        return regions, mask_raw, mask_is_refined, skip_font_scaling
 
     def _load_text_and_regions_from_txt_file(self, image_path: str) -> Optional[List[TextBlock]]:
         """
@@ -1851,34 +1959,9 @@ class MangaTranslator:
 
         # --- NEW: Generate and Export Workflow ---
         if self.generate_and_export:
-            logger.info("'Generate and Export' mode: Halting pipeline after translation and exporting clean text.")
-
-            # 导出翻译模式：强制执行蒙版优化（跳过修复）
-            if ctx.mask is None and ctx.mask_raw is not None:
-                await self._report_progress('mask-generation')
-                try:
-                    ctx.mask = await self._run_mask_refinement(config, ctx)
-                except Exception as _e:
-                    logger.error(f"Error during mask-generation in generate_and_export mode:\n{traceback.format_exc()}")
-                    ctx.mask = ctx.mask_raw  # 回退到原始蒙版
-
-            # 即使没有文本也要导出（创建空文件）
-            if hasattr(ctx, 'image_name') and ctx.image_name:
-                try:
-                    json_path = find_json_path(ctx.image_name)
-                    if json_path and os.path.exists(json_path):
-                        from desktop_qt_ui.services.workflow_service import generate_translated_text, get_template_path_from_config
-                        template_path = get_template_path_from_config()
-                        if template_path and os.path.exists(template_path):
-                            # 导出翻译（即使没有文本也会创建空文件）
-                            translated_result = generate_translated_text(json_path, template_path)
-                            logger.info(f"Translated text export result: {translated_result}")
-                        else:
-                            logger.warning(f"Template file not found, cannot export clean text: {template_path}")
-                    else:
-                        logger.warning(f"JSON file not found, cannot export clean text: {ctx.image_name}")
-                except Exception as e:
-                    logger.error(f"Failed to export clean text in 'Generate and Export' mode: {e}")
+            logger.info("'Generate and Export' mode enabled. Skipping rendering.")
+            # 单图流程：即使没有文本也创建空JSON/TXT，保持和历史行为一致
+            await self._handle_generate_and_export(ctx, config, ensure_json_with_empty_regions=True)
             
             # ✅ 标记成功（导出翻译模式完成）
             ctx.success = True
@@ -2149,8 +2232,16 @@ class MangaTranslator:
         await asyncio.sleep(0)
         self._check_cancelled()
         
-        return await dispatch_mask_refinement(ctx.text_regions, ctx.img_rgb, ctx.mask_raw, 'fit_text',
-                                              config.mask_dilation_offset, config.ocr.ignore_bubble, self.verbose,self.kernel_size)
+        return await dispatch_mask_refinement(
+            ctx.text_regions,
+            ctx.img_rgb,
+            ctx.mask_raw,
+            method='fit_text',
+            dilation_offset=config.mask_dilation_offset,
+            verbose=self.verbose,
+            kernel_size=self.kernel_size,
+            use_model_bubble_repair_intersection=bool(getattr(config.ocr, 'use_model_bubble_repair_intersection', False)),
+        )
 
     async def _run_inpainting(self, config: Config, ctx: Context):
         # ✅ 检查停止标志
@@ -2630,7 +2721,7 @@ class MangaTranslator:
                             ctx.config = config
                             
                             # 加载翻译数据
-                            loaded_regions, loaded_mask, mask_is_refined = self._load_text_and_regions_from_file(image_name, config)
+                            loaded_regions, loaded_mask, mask_is_refined, skip_font_scaling = self._load_text_and_regions_from_file(image_name, config)
                             if loaded_regions is None:
                                 json_path = os.path.splitext(image_name)[0] + '_translations.json' if image_name else 'unknown'
                                 raise FileNotFoundError(f"Translation file not found or invalid: {json_path}")
@@ -2730,13 +2821,20 @@ class MangaTranslator:
                                 await self._report_progress('inpainting')
                                 ctx.img_inpainted = await self._run_inpainting(config, ctx)
                                 
-                                # Rendering - 加载JSON模式跳过字体缩放算法
+                                # Rendering - load_text按JSON中的skip_font_scaling控制：True=跳过字体缩放，False=执行字体缩放
                                 await self._report_progress('rendering')
-                                ctx.img_rendered = await self._run_text_rendering(config, ctx, skip_font_scaling=True)
+                                ctx.img_rendered = await self._run_text_rendering(config, ctx, skip_font_scaling=skip_font_scaling)
                                 
                                 await self._report_progress('finished', True)
                                 ctx.result = dump_image(ctx.input, ctx.img_rendered, ctx.img_alpha)
                                 ctx = await self._revert_upscale(config, ctx)
+
+                            # load_text模式：渲染后回写JSON（同步最新regions，包含translation/font_size等字段）
+                            if hasattr(ctx, 'text_regions') and ctx.text_regions is not None and hasattr(ctx, 'image_name') and ctx.image_name:
+                                try:
+                                    self._save_text_to_file(ctx.image_name, ctx, config)
+                                except Exception as save_json_err:
+                                    logger.error(f"Error updating JSON in load_text mode for {os.path.basename(ctx.image_name)}: {save_json_err}")
                             
                             preprocessed_contexts.append((ctx, config))
                             
@@ -2826,44 +2924,7 @@ class MangaTranslator:
                 if is_template_save_mode:
                     logger.info("Template+SaveText mode: Skipping rendering, exporting original text only.")
                     for ctx, config in translated_contexts:
-                        if hasattr(ctx, 'text_regions') and ctx.text_regions is not None and hasattr(ctx, 'image_name') and ctx.image_name:
-                            # 导出原文模式：强制执行蒙版优化（跳过修复）
-                            if ctx.mask is None and ctx.mask_raw is not None:
-                                await self._report_progress('mask-generation')
-                                try:
-                                    ctx.mask = await self._run_mask_refinement(config, ctx)
-                                except Exception as _e:
-                                    logger.error(f"Error during mask-generation in template mode:\n{traceback.format_exc()}")
-                                    ctx.mask = ctx.mask_raw  # 回退到原始蒙版
-
-                            # 调用智能缩放算法计算最终字体大小（保存到region.font_size）
-                            if ctx.text_regions and len(ctx.text_regions) > 0:
-                                try:
-                                    from manga_translator.rendering import resize_regions_to_font_size
-                                    img_for_calc = ctx.img_rgb if hasattr(ctx, 'img_rgb') and ctx.img_rgb is not None else ctx.input
-                                    if img_for_calc is not None:
-                                        resize_regions_to_font_size(img_for_calc, ctx.text_regions, config, img_for_calc)
-                                        logger.debug("Calculated final font sizes for export")
-                                except Exception as e:
-                                    logger.warning(f"Failed to calculate font sizes for export: {e}")
-
-                            # 保存JSON文件
-                            self._save_text_to_file(ctx.image_name, ctx, config)
-                            try:
-                                json_path = find_json_path(ctx.image_name)
-                                if json_path and os.path.exists(json_path):
-                                    from desktop_qt_ui.services.workflow_service import generate_original_text, get_template_path_from_config
-                                    template_path = get_template_path_from_config()
-                                    if template_path and os.path.exists(template_path):
-                                        # 导出原文
-                                        original_result = generate_original_text(json_path, template_path)
-                                        logger.info(f"Original text export for {os.path.basename(ctx.image_name)}: {original_result}")
-                                    else:
-                                        logger.warning(f"Template file not found for {os.path.basename(ctx.image_name)}: {template_path}")
-                                else:
-                                    logger.warning(f"JSON file not found for {os.path.basename(ctx.image_name)}")
-                            except Exception as e:
-                                logger.error(f"Failed to export original text for {os.path.basename(ctx.image_name)}: {e}")
+                        await self._handle_template_and_save_text(ctx, config)
                         # ✅ 标记成功（导出原文完成）
                         ctx.success = True
                         results.append(ctx)
@@ -2884,45 +2945,9 @@ class MangaTranslator:
                 
                 # 特殊情况：生成并导出模式（跳过渲染）
                 if self.generate_and_export:
-                    logger.info("'Generate and Export' mode enabled for standard batch. Skipping rendering.")
+                    logger.info("'Generate and Export' mode enabled. Skipping rendering.")
                     for ctx, config in translated_contexts:
-                        if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
-                            # 导出翻译模式：强制执行蒙版优化（跳过修复）
-                            if ctx.mask is None and ctx.mask_raw is not None:
-                                await self._report_progress('mask-generation')
-                                try:
-                                    ctx.mask = await self._run_mask_refinement(config, ctx)
-                                except Exception as _e:
-                                    logger.error(f"Error during mask-generation in generate_and_export mode:\n{traceback.format_exc()}")
-                                    ctx.mask = ctx.mask_raw  # 回退到原始蒙版
-
-                            # 调用智能缩放算法计算最终字体大小（保存到region.font_size）
-                            if ctx.text_regions and len(ctx.text_regions) > 0:
-                                try:
-                                    from manga_translator.rendering import resize_regions_to_font_size
-                                    img_for_calc = ctx.img_rgb if hasattr(ctx, 'img_rgb') and ctx.img_rgb is not None else ctx.input
-                                    if img_for_calc is not None:
-                                        resize_regions_to_font_size(img_for_calc, ctx.text_regions, config, img_for_calc)
-                                        logger.debug("Calculated final font sizes for export")
-                                except Exception as e:
-                                    logger.warning(f"Failed to calculate font sizes for export: {e}")
-
-                            self._save_text_to_file(ctx.image_name, ctx, config)
-                            try:
-                                json_path = find_json_path(ctx.image_name)
-                                if json_path and os.path.exists(json_path):
-                                    from desktop_qt_ui.services.workflow_service import generate_translated_text, get_template_path_from_config
-                                    template_path = get_template_path_from_config()
-                                    if template_path and os.path.exists(template_path):
-                                        # 导出翻译
-                                        translated_result = generate_translated_text(json_path, template_path)
-                                        logger.info(f"Translated text export for {os.path.basename(ctx.image_name)}: {translated_result}")
-                                    else:
-                                        logger.warning(f"Template file not found for {os.path.basename(ctx.image_name)}: {template_path}")
-                                else:
-                                    logger.warning(f"JSON file not found for {os.path.basename(ctx.image_name)}")
-                            except Exception as e:
-                                logger.error(f"Failed to export clean text for {os.path.basename(ctx.image_name)}: {e}")
+                        await self._handle_generate_and_export(ctx, config)
                         # ✅ 标记成功（导出翻译完成）
                         ctx.success = True
                         results.append(ctx)
@@ -4709,28 +4734,9 @@ class MangaTranslator:
                     raise
             # --- NEW: Handle Generate and Export for High-Quality Mode ---
             if self.generate_and_export:
-                logger.info("'Generate and Export' mode enabled for high-quality translation. Skipping rendering.")
+                logger.info("'Generate and Export' mode enabled. Skipping rendering.")
                 for ctx, config in preprocessed_contexts:
-                    # Ensure JSON is saved first
-                    if ctx.text_regions and hasattr(ctx, 'image_name') and ctx.image_name:
-                        self._save_text_to_file(ctx.image_name, ctx, config)
-
-                        # Export the clean text using the template
-                        try:
-                            json_path = find_json_path(ctx.image_name)
-                            if json_path and os.path.exists(json_path):
-                                from desktop_qt_ui.services.workflow_service import generate_translated_text, get_template_path_from_config
-                                template_path = get_template_path_from_config()
-                                if template_path and os.path.exists(template_path):
-                                    # 导出翻译
-                                    translated_result = generate_translated_text(json_path, template_path)
-                                    logger.info(f"Translated text export for {os.path.basename(ctx.image_name)}: {translated_result}")
-                                else:
-                                    logger.warning(f"Template file not found, cannot export clean text for {os.path.basename(ctx.image_name)}: {template_path}")
-                            else:
-                                logger.warning(f"JSON file not found, cannot export clean text for {os.path.basename(ctx.image_name)}")
-                        except Exception as e:
-                            logger.error(f"Failed to export clean text for {os.path.basename(ctx.image_name)} in HQ mode: {e}")
+                    await self._handle_generate_and_export(ctx, config)
 
                     # ✅ 标记成功（导出翻译完成）
                     ctx.success = True

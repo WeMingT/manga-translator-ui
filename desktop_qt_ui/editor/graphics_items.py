@@ -34,7 +34,6 @@ from PyQt6.QtWidgets import (
 )
 
 from editor.desktop_ui_geometry import (
-    DesktopUIGeometry,
     calculate_new_edge_on_drag,
     calculate_new_vertices_on_drag,
     rotate_point,
@@ -77,22 +76,21 @@ class RegionTextItem(QGraphicsItemGroup):
 
     def __init__(self, region_data, region_index, geometry_callback, parent=None):
         super().__init__(parent)
-        self.region_data = region_data
+        self.region_data = copy.deepcopy(region_data)
         self.region_index = region_index
         self.geometry_callback = geometry_callback
 
         self._image_item = None          # 图像项引用，用于坐标转换
         self._in_callback = False        # 防止回调重入
 
-        # 几何管理器
-        self.desktop_geometry = DesktopUIGeometry(region_data)
-        self.geo = RegionGeometryState.from_region_data(region_data)
+        # 单一几何状态源：geo
+        self.geo = RegionGeometryState.from_region_data(self.region_data)
 
         # Qt 坐标：pos = 源区域中心，rotation = angle
-        self.rotation_angle = self.desktop_geometry.angle
+        self.rotation_angle = float(self.geo.angle)
         self.visual_center = QPointF(
-            self.desktop_geometry.center[0],
-            self.desktop_geometry.center[1],
+            float(self.geo.center[0]),
+            float(self.geo.center[1]),
         )
         self.setPos(self.visual_center)
         self.setRotation(self.rotation_angle)
@@ -177,6 +175,25 @@ class RegionTextItem(QGraphicsItemGroup):
     # 数据更新
     # ------------------------------------------------------------------
 
+    def _apply_region_state(self, region_data: dict):
+        """将完整 region_data 同步到 item 本地状态。"""
+        self.region_data = copy.deepcopy(region_data)
+        self.geo = RegionGeometryState.from_region_data(self.region_data)
+
+        self.rotation_angle = float(self.geo.angle)
+        self.visual_center = QPointF(
+            float(self.geo.center[0]),
+            float(self.geo.center[1]),
+        )
+
+        self.prepareGeometryChange()
+        self._shape_path = None
+
+        self.setPos(self.visual_center)
+        self.setRotation(self.rotation_angle)
+        self.setTransformOriginPoint(QPointF(0, 0))
+        self._rebuild_qt_polygons()
+
     def update_from_data(self, region_data: dict):
         """从新的 region_data 更新整个 item 状态。"""
         try:
@@ -188,41 +205,8 @@ class RegionTextItem(QGraphicsItemGroup):
             old_rect = self.sceneBoundingRect() if self.scene() else None
             was_selected = self.isSelected()
 
-            # 合并旧数据和新数据
-            if self.region_data:
-                merged = self.region_data.copy()
-                merged.update(region_data)
-                self.region_data = merged
-            else:
-                self.region_data = region_data
-
-            self.desktop_geometry = DesktopUIGeometry(self.region_data)
-            self.rotation_angle = self.desktop_geometry.angle
-            self.visual_center = QPointF(
-                self.desktop_geometry.center[0],
-                self.desktop_geometry.center[1],
-            )
-
-            self.prepareGeometryChange()
-            self._shape_path = None
-
-            self.setPos(self.visual_center)
-            self.setRotation(self.rotation_angle)
-            self.setTransformOriginPoint(QPointF(0, 0))
-
-            # 重建局部多边形
-            self.polygons = []
-            for line in self.desktop_geometry.lines:
-                poly = QPolygonF()
-                for x, y in line:
-                    poly.append(QPointF(x - self.visual_center.x(),
-                                        y - self.visual_center.y()))
-                self.polygons.append(poly)
-
-            # 用 RegionGeometryState 重建几何状态，保留已有的自定义白框
-            self.geo = RegionGeometryState.from_region_data(
-                self.region_data, prev_state=self.geo
-            )
+            # 模型数据是唯一事实来源，避免旧 item 残留状态污染
+            self._apply_region_state(region_data)
 
             if was_selected != self.isSelected():
                 self.setSelected(was_selected)
@@ -678,6 +662,7 @@ class RegionTextItem(QGraphicsItemGroup):
 
     def _save_drag_start_state(self, event, local_pos, handle, indices):
         """保存拖动开始时的所有状态。"""
+        self._is_dragging = bool(handle)
         self._drag_start_pos = local_pos
         self._drag_start_scene_pos = event.scenePos()
         self._drag_start_polygons = [QPolygonF(p) for p in self.polygons]
@@ -692,13 +677,10 @@ class RegionTextItem(QGraphicsItemGroup):
             self._drag_handle_indices = indices
 
             if handle in ("white_corner", "white_edge"):
-                self._drag_start_geometry = DesktopUIGeometry(self.region_data)
-                self._drag_start_white_frame_model = self.geo.get_white_frame_model_for_drag_start()
                 self._drag_start_white_frame_local = (
                     list(self.geo.white_frame_local) if self.geo.white_frame_local else None
                 )
                 self._drag_start_white_handle_world = self._white_handle_world_at_start()
-                self._white_frame_scale_ratio = None
             elif handle == "white_move":
                 self._drag_start_white_frame_local = (
                     list(self.geo.white_frame_local) if self.geo.white_frame_local else None
@@ -711,8 +693,10 @@ class RegionTextItem(QGraphicsItemGroup):
                 self._drag_start_angle_rad = np.arctan2(vec.y(), vec.x())
             else:
                 self._interaction_mode = "none"
+                self._is_dragging = False
         else:
             self._interaction_mode = "none"
+            self._is_dragging = False
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         try:
@@ -735,6 +719,7 @@ class RegionTextItem(QGraphicsItemGroup):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         try:
             if self._interaction_mode == "none":
+                self._is_dragging = False
                 super().mouseReleaseEvent(event)
                 return
 
@@ -747,6 +732,7 @@ class RegionTextItem(QGraphicsItemGroup):
                 self._commit_white_frame(event)
             else:
                 super().mouseReleaseEvent(event)
+            self._is_dragging = False
         except Exception as e:
             self._interaction_mode = "none"
             self._is_dragging = False
@@ -776,10 +762,9 @@ class RegionTextItem(QGraphicsItemGroup):
 
     def _commit_rotation(self, event):
         new_angle = self.rotation()
-        self.rotation_angle = new_angle
-        self.desktop_geometry.angle = new_angle
+        self.rotation_angle = float(new_angle)
 
-        old_center = self.desktop_geometry.center
+        old_center = self.geo.center
         if not (isinstance(old_center, (list, tuple)) and len(old_center) >= 2):
             old_center = [self.visual_center.x(), self.visual_center.y()]
         delta_x = float(self.pos().x()) - float(old_center[0])
@@ -796,13 +781,10 @@ class RegionTextItem(QGraphicsItemGroup):
 
         new_cx, new_cy = float(self.pos().x()), float(self.pos().y())
         self.visual_center = QPointF(new_cx, new_cy)
-        self.desktop_geometry.center = [new_cx, new_cy]
-        if new_lines:
-            self.desktop_geometry.lines = new_lines
 
         # 同步 geo 状态：更新 center、lines、angle，并重建 polygons_local 和白框
         self.geo.center = [new_cx, new_cy]
-        self.geo.angle = new_angle
+        self.geo.angle = float(new_angle)
         if new_lines:
             self.geo.lines = new_lines
         self.geo._rebuild_polygons_local()

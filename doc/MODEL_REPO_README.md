@@ -15,6 +15,7 @@ license: CC-BY-NC-4.0
 [![OCR](https://img.shields.io/badge/OCR-PaddleOCR-blue)](https://github.com/PaddlePaddle/PaddleOCR)
 [![OCR](https://img.shields.io/badge/OCR-MangaOCR-blue)](https://github.com/kha-white/manga-ocr)
 [![OCR](https://img.shields.io/badge/OCR-PaddleOCR--VL--For--Manga-blue)](https://github.com/jzhang533/PaddleOCR-VL-For-Manga)
+[![Hugging Face](https://img.shields.io/badge/HuggingFace-manga109--segmentation--bubble-yellow?logo=huggingface)](https://huggingface.co/huyvux3005/manga109-segmentation-bubble)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-CC--BY--NC--4.0-red)](LICENSE)
 
 </div>
@@ -36,13 +37,16 @@ license: CC-BY-NC-4.0
 
 当你运行 Manga Translator UI 软件时，程序会**自动检测缺失的模型**并从本仓库下载所需文件。
 
-## 📋 模型列表
+#
 
 ### 文字检测模型 (Detection)
 - `detect-20241225.ckpt` - 默认文字检测器
 - `comictextdetector.pt` / `comictextdetector.pt.onnx` - 漫画文字检测器
 - `craft_mlt_25k.pth` / `craft_refiner_CTW1500.pth` - CRAFT 检测器
 - `ysgyolo_1.2_OS1.0.onnx` - YOLO OBB 检测器
+
+### 气泡检测模型 (Bubble Detection)
+- `mangalens.onnx` - 漫画气泡检测模型
 
 ### OCR 识别模型
 - `ocr.zip` - 32px OCR 模型
@@ -103,10 +107,26 @@ license: CC-BY-NC-4.0
 - [manga-ocr](https://github.com/kha-white/manga-ocr) - 日文 OCR 模型
 - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) - 多语言 OCR 模型
 - [PaddleOCR-VL-For-Manga](https://github.com/jzhang533/PaddleOCR-VL-For-Manga) - 日文漫画 OCR 模型
+- [manga109-segmentation-bubble](https://huggingface.co/huyvux3005/manga109-segmentation-bubble) - 漫画气泡检测模型
 - [Real-CUGAN](https://github.com/bilibili/ailab) - B站 AI Lab 超分模型
 - [MangaJaNai](https://github.com/the-database/MangaJaNai) - 漫画专用超分模型 **(CC BY-NC 4.0，仅限非商业用途)**
 - [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) - 通用超分模型
 - [waifu2x](https://github.com/nihui/waifu2x-ncnn-vulkan) - 动漫图像超分模型
+
+## ⚠️ 免责声明与使用限制
+
+本仓库仅用于模型文件分发与技术学习交流，不构成任何法律、商业或合规建议。  
+使用者在下载、部署、调用、再分发本仓库模型文件时，应自行确认并持续遵守所在地法律法规、平台规则、数据来源许可及第三方模型协议。
+
+### 免责与责任限制
+
+- 模型文件的实际授权范围、商用限制、署名要求、衍生分发要求，以各上游项目/模型发布页的原始协议为准。
+- 使用者应自行确保输入数据、处理流程与输出内容具备合法授权，不得用于侵犯著作权、隐私权、肖像权、商标权等合法权益的场景。
+- 严禁将本仓库模型用于任何违法违规用途，包括但不限于盗版传播、未授权批量抓取、绕过平台限制、诈骗、诽谤等行为。
+- 对于因使用或无法使用本仓库模型文件导致的任何直接或间接损失（含数据损失、业务中断、收益损失、第三方索赔等），仓库维护者与贡献者在适用法律允许范围内不承担责任。
+- 若你将模型用于团队或组织环境，应自行完成权限控制、日志审计、内容审核与合规评估，并建立必要的人审流程。
+
+继续使用本仓库即视为你已阅读、理解并同意上述条款。
 
 ## 🙏 致谢
 
@@ -123,4 +143,4 @@ license: CC-BY-NC-4.0
 
 ---
 
-**最后更新时间**：2025-01-08
+**最后更新时间**：2026-02-13

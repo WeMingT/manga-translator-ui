@@ -7,6 +7,7 @@
 [![模型](https://img.shields.io/badge/%E6%A8%A1%E5%9E%8B-Real--CUGAN-orange)](https://github.com/bilibili/ailab)
 [![模型](https://img.shields.io/badge/%E6%A8%A1%E5%9E%8B-MangaJaNai-orange)](https://github.com/the-database/MangaJaNai)
 [![模型](https://img.shields.io/badge/%E6%A8%A1%E5%9E%8B-YSG-orange)](https://github.com/lhj5426/YSG)
+[![模型](https://img.shields.io/badge/Model-MangaLens%20Bubble%20Segmentation-orange?logo=huggingface)](https://huggingface.co/huyvux3005/manga109-segmentation-bubble)
 [![OCR](https://img.shields.io/badge/OCR-PaddleOCR-blue)](https://github.com/PaddlePaddle/PaddleOCR)
 [![OCR](https://img.shields.io/badge/OCR-MangaOCR-blue)](https://github.com/kha-white/manga-ocr)
 [![OCR](https://img.shields.io/badge/OCR-PaddleOCR--VL-blue)](https://github.com/jzhang533/PaddleOCR-VL-For-Manga)
@@ -411,4 +412,23 @@ python -m manga_translator --help
 
 ## ⚠️ 特别声明
 
-该款 AI 翻译工具仅供个人合法用途，任何使用该工具进行直接或者间接非法盈利活动的行为，均不属于授权范围，也不受到任何支持和认可。
+本项目仅提供技术演示与个人学习交流用途，不构成任何法律、商业或合规建议。  
+你在安装、配置、调用和分发本项目相关功能时，应自行确认并持续遵守所在地法律法规、平台规则、内容来源许可及第三方服务条款。
+
+### 免责与责任限制
+
+- 使用本项目产生的一切行为与后果（包括但不限于内容处理、发布、传播、二次分发、商业化使用），均由使用者独立承担责任。
+- 你应自行确保输入内容、输出内容及数据来源具备合法授权，不得用于侵犯著作权、商标权、隐私权、肖像权等合法权益的场景。
+- 严禁将本项目用于任何违法违规用途，包括但不限于盗版传播、未授权批量抓取与搬运、绕过平台限制、诈骗、诽谤、侵害他人合法权益等行为。
+- 本项目依赖第三方模型、API、数据与库（含 OCR、翻译、超分模型等）；相关可用性、准确性、稳定性、费用、风控与合规要求由对应服务方负责，使用者需自行承担相应风险与成本。
+- 对于因使用或无法使用本项目导致的任何直接或间接损失（包括但不限于数据损失、业务中断、收益损失、账户风险、第三方索赔等），项目作者与贡献者在适用法律允许范围内不承担责任。
+- 若你将本项目用于团队或组织环境，应自行完成权限管理、日志审计、内容审核与合规评估，并建立必要的人工复核流程。
+
+请在使用前审慎评估风险；继续使用即视为你已阅读、理解并同意上述声明。
+
+---
+
+## 🙏 最后致谢
+
+- [huyvux3005/manga109-segmentation-bubble](https://huggingface.co/huyvux3005/manga109-segmentation-bubble) - MangaLens 漫画气泡分割检测模型
+- 感谢所有开源作者、贡献者和用户的持续反馈与支持

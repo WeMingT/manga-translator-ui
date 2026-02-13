@@ -1,52 +1,41 @@
 # AMD ROCm GPU 依赖文件
 # ===================================================================================
-# AMD ROCm PyTorch 不在 requirements 文件中，需要通过特殊源安装
-# 
-# 安装命令格式:
-#   python -m pip install torch torchvision torchaudio \
-#     --index-url https://d2awnip2yjpvqn.cloudfront.net/v2/{gfx_version}/
+# 说明:
+# - AMD ROCm PyTorch 不在本 requirements 文件中，由 packaging/launch.py 单独安装
+# - Windows 上使用 ROCm 7.2 固定 URL 两阶段安装:
+#   1) 先安装 ROCm SDK 依赖:
+#      rocm_sdk_core / rocm_sdk_devel / rocm_sdk_libraries_custom / rocm
+#   2) 再安装 PyTorch 三件套:
+#      torch / torchaudio / torchvision
+#   下载地址（ROCm SDK）:
+#      https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm_sdk_core-7.2.0.dev0-py3-none-win_amd64.whl
+#      https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm_sdk_devel-7.2.0.dev0-py3-none-win_amd64.whl
+#      https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm_sdk_libraries_custom-7.2.0.dev0-py3-none-win_amd64.whl
+#      https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm-7.2.0.dev0.tar.gz
+#   下载地址（PyTorch）:
+#      https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torch-2.9.1%2Brocmsdk20260116-cp312-cp312-win_amd64.whl
+#      https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torchaudio-2.9.1%2Brocmsdk20260116-cp312-cp312-win_amd64.whl
+#      https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torchvision-0.24.1%2Brocmsdk20260116-cp312-cp312-win_amd64.whl
 #
-# AMD 显卡 gfx 版本对应表:
-# ===================================================================================
-# 
-# RDNA 3 架构 (RX 7000 系列):
-#   - gfx1150:      RX 7900 XTX, RX 7900 XT, RX 7950 (Navi 31)
-#   - gfx1151:      RX 7800 XT, RX 7700 XT, RX 7600 (Navi 32/33)
-#   - gfx110X-all:  通用 RX 7000 系列支持
+# 前置要求:
+# - Windows 版 ROCm 7.2 PyTorch 必须安装 AMD 显卡驱动 26.1.1
+# - Python 版本必须为 3.12
 #
-# RDNA 2 架构 (RX 6000 系列): ⚠️ 不支持，请使用 CPU 版本
-#   - gfx103X-dgpu: RX 6900 XT, RX 6800 XT, RX 6800, RX 6700 XT, 
-#                   RX 6600 XT, RX 6600, RX 6500 XT, RX 6400
-#   注意：这些显卡不支持 AMD ROCm PyTorch，请使用 requirements_cpu.txt
+# 当前支持的 AMD 显卡（仅以下型号）:
+# - MI300A / MI300X                     -> gfx94X-dcgpu
+# - MI350X / MI355X                     -> gfx950-dcgpu
+# - AMD RX 7900 XTX                     -> gfx110X-dgpu
+# - AMD RX 7800 XT                      -> gfx110X-dgpu
+# - AMD RX 7700S / Framework Laptop 16  -> gfx110X-dgpu
+# - AMD Strix Halo iGPU                 -> gfx1151
+# - AMD RX 9060 / RX 9060 XT            -> gfx120X-all
+# - AMD RX 9070 / RX 9070 XT            -> gfx120X-all
 #
-# RDNA 1 架构 (RX 5000 系列): ⚠️ 不支持，请使用 CPU 版本
-#   - gfx101X-dgpu: RX 5700 XT, RX 5700, RX 5600 XT, RX 5600, RX 5500 XT
-#   注意：这些显卡不支持 AMD ROCm PyTorch，请使用 requirements_cpu.txt
+# 常见不支持:
+# - RX 5000 系列 (gfx101X-dgpu)
+# - RX 6000 系列 (gfx103X-dgpu)
+# - Vega / Radeon VII (gfx90X-dcgpu)
 #
-# Vega 架构:
-#   - gfx90X-dcgpu: Radeon VII, Radeon Vega 64/56, MI25, MI50, MI60
-#
-# CDNA 数据中心系列:
-#   - gfx94X-dcgpu: MI200, MI210, MI250, MI260 (CDNA 2)
-#   - gfx950-dcgpu: MI300 系列 (CDNA 3)
-#
-# RDNA 4 架构 (RX 9000 系列):
-#   - gfx120X-all:  RX 9070 XT, RX 9070, RX 9060 XT, RX 9060, RX 9050
-#
-# ===================================================================================
-# 示例安装命令:
-#
-# RX 7900 XTX (RDNA 3):
-#   python -m pip install torch torchvision torchaudio \
-#     --index-url https://d2awnip2yjpvqn.cloudfront.net/v2/gfx1150/
-#
-# RX 7800 XT (RDNA 3):
-#   python -m pip install torch torchvision torchaudio \
-#     --index-url https://d2awnip2yjpvqn.cloudfront.net/v2/gfx1151/
-#
-# ⚠️ RX 6000/5000 系列不支持，请使用 requirements_cpu.txt
-#
-# ===================================================================================
 # 注意事项:
 # - AMD ROCm PyTorch 是实验性功能，稳定性可能不如 NVIDIA CUDA 版本
 # - 首次运行可能需要编译某些操作，请耐心等待
