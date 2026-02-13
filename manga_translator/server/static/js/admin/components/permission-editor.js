@@ -429,6 +429,9 @@ class PermissionEditor {
                 ${this.createFormRow(this.t('label_use_mocr_merge', '合并 MangaOCR 结果'), this.createCheckbox('ocr', 'use_mocr_merge'), '使用Manga OCR的边界框合并', 'ocr', 'use_mocr_merge')}
                 ${this.createFormRow(this.t('label_min_text_length', '最小文本长度'), this.createInput('ocr', 'min_text_length', 'number'), '', 'ocr', 'min_text_length')}
                 ${this.createFormRow(this.t('label_ignore_bubble', '忽略非气泡文本'), this.createInput('ocr', 'ignore_bubble', 'number', '0', '1', '0.01'), '忽略非气泡区域文本的阈值(0-1)，0=禁用，0.01-0.3=宽松，0.3-0.7=中等，0.7-1.0=严格', 'ocr', 'ignore_bubble')}
+                ${this.createFormRow(this.t('label_use_model_bubble_filter', '启用模型气泡过滤'), this.createCheckbox('ocr', 'use_model_bubble_filter'), '启用后仅保留与模型检测气泡有重叠的文本区域', 'ocr', 'use_model_bubble_filter')}
+                ${this.createFormRow(this.t('label_model_bubble_overlap_threshold', '模型气泡重叠阈值'), this.createInput('ocr', 'model_bubble_overlap_threshold', 'number', '0', '1', '0.01'), '文本框与模型气泡框的最小重叠比例(0-1)，值越小越宽松，默认0.1', 'ocr', 'model_bubble_overlap_threshold')}
+                ${this.createFormRow(this.t('label_use_model_bubble_repair_intersection', '扩大气泡修复范围'), this.createCheckbox('ocr', 'use_model_bubble_repair_intersection'), '仅保留与优化蒙版有交集的气泡连通域，并与优化蒙版合并', 'ocr', 'use_model_bubble_repair_intersection')}
                 ${this.createFormRow(this.t('label_prob', '文本区域最低概率 (prob)'), this.createInput('ocr', 'prob', 'number'), '文本区域的最小概率阈值', 'ocr', 'prob')}
                 ${this.createFormRow(this.t('label_merge_gamma', '合并-距离容忍度'), this.createInput('ocr', 'merge_gamma', 'number'), '值越高越宽容，默认0.8', 'ocr', 'merge_gamma')}
                 ${this.createFormRow(this.t('label_merge_sigma', '合并-离群容忍度'), this.createInput('ocr', 'merge_sigma', 'number'), '值越高越宽容，默认2.5', 'ocr', 'merge_sigma')}
