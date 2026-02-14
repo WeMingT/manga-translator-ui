@@ -626,13 +626,41 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             dst_points_list.append(region.min_rect)
             continue
 
-        # skip_font_scaling模式：使用region.font_size作为目标字体，跳过字体缩放算法
-        # 但仍然走正常的文本框计算流程（因为字体大小一样，结果也一样）
+        # skip_font_scaling模式：使用region.font_size作为最终字体，完全跳过排版缩放
+        # 编辑器导出时用户设多少字号就渲染多少，不做任何缩放
         if skip_font_scaling:
-            target_font_size = region.font_size if region.font_size > 0 else round((img.shape[0] + img.shape[1]) / 200)
-            min_font_size = 1
-            # 不改变target_font_size，直接进入下面的排版模式计算文本框
-            logger.debug(f"[RESIZE] skip_font_scaling: 区域 {region_idx} 使用JSON字体大小 {target_font_size}")
+            fixed_font_size = region.font_size if region.font_size > 0 else round((img.shape[0] + img.shape[1]) / 200)
+            logger.debug(f"[RESIZE] skip_font_scaling: 区域 {region_idx} 使用固定字体大小 {fixed_font_size}")
+
+            # 如果用户关闭了AI断句，清除BR标记
+            if not config.render.disable_auto_wrap:
+                region.translation = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '', region.translation, flags=re.IGNORECASE)
+
+            # 直接用固定字体大小计算文本框
+            # 需要考虑 direction 强制覆盖（和 render() 中的判断逻辑一致）
+            forced_direction = region._direction if hasattr(region, '_direction') else region.direction
+            if forced_direction != 'auto':
+                if forced_direction in ['horizontal', 'h']:
+                    actual_horizontal = True
+                elif forced_direction in ['vertical', 'v']:
+                    actual_horizontal = False
+                else:
+                    actual_horizontal = region.horizontal
+            else:
+                actual_horizontal = region.horizontal
+
+            line_spacing_multiplier = config.render.line_spacing or 1.0
+            dst_points = calc_box_from_font(
+                fixed_font_size, region.translation, actual_horizontal,
+                line_spacing_multiplier, config, region.target_lang,
+                center=tuple(region.center), angle=region.angle
+            )
+            if dst_points is None:
+                dst_points = region.min_rect
+
+            region.font_size = fixed_font_size
+            dst_points_list.append(dst_points)
+            continue
         else:
             original_region_font_size = region.font_size if region.font_size > 0 else round((img.shape[0] + img.shape[1]) / 200)
 

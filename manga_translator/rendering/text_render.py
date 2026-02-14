@@ -1575,14 +1575,11 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
     # 简化逻辑：统一处理BR标记，有BR就按它换行，没有就不换行
     text = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text, flags=re.IGNORECASE)
 
+    # 统一使用无限宽度：换行完全由BR/\n决定，不自动断行
+    # 有BR时按BR换行，无BR时不换行（都是单行or多行由BR控制）
+    width = 99999
     has_newline = '\n' in text
-    if has_newline:
-        # 有换行符，使用传入的宽度
-        logger.debug(f"[HORIZONTAL DEBUG] 有换行符，width={width}")
-    else:
-        # 无换行符，使用无限宽度（不自动换行）
-        width = 99999
-        logger.debug(f"[HORIZONTAL DEBUG] 无换行符，width=99999")
+    logger.debug(f"[HORIZONTAL DEBUG] width=99999, has_newline={has_newline}")
 
     bg_size = int(max(font_size * stroke_ratio, 1)) if bg is not None else 0
     # line_spacing 是基本间距的倍率

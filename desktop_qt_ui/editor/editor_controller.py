@@ -1877,7 +1877,6 @@ class EditorController(QObject):
                 from services import get_render_parameter_service
                 render_service = get_render_parameter_service()
                 render_params = render_service.export_parameters_for_backend(i, enhanced_region)
-                
                 enhanced_region.update(render_params)
 
                 enhanced_regions.append(enhanced_region)
