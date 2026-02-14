@@ -8,6 +8,26 @@ from ..utils.log import get_logger
 
 logger = get_logger('mask_refinement')
 
+# 气泡 mask 向内收缩比例和范围，避免气泡边框被修复模型擦除
+BUBBLE_MASK_ERODE_RATIO = 0.01   # 按图像短边的 1% 计算腐蚀半径
+BUBBLE_MASK_ERODE_MIN_PX = 3     # 最小腐蚀像素（低分辨率保底）
+BUBBLE_MASK_ERODE_MAX_PX = 30    # 最大腐蚀像素（超高分辨率封顶）
+
+
+def _erode_bubble_mask(bubble_mask: np.ndarray) -> np.ndarray:
+    """Erode the bubble mask inward to preserve bubble borders during inpainting.
+    Erosion amount is dynamic based on image resolution (1% of shorter side, clamped 3-30px).
+    """
+    if np.count_nonzero(bubble_mask) == 0:
+        return bubble_mask
+    h, w = bubble_mask.shape[:2]
+    erode_px = int(min(h, w) * BUBBLE_MASK_ERODE_RATIO)
+    erode_px = max(BUBBLE_MASK_ERODE_MIN_PX, min(BUBBLE_MASK_ERODE_MAX_PX, erode_px))
+    kernel_size = 2 * erode_px + 1
+    erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    logger.info(f"Bubble mask erosion: image={w}x{h}, erode_px={erode_px}")
+    return cv2.erode(bubble_mask, erode_kernel, iterations=1)
+
 
 def _build_model_bubble_mask(image_shape: Tuple[int, int], result: Any) -> Tuple[np.ndarray, str]:
     h, w = image_shape
@@ -28,7 +48,7 @@ def _build_model_bubble_mask(image_shape: Tuple[int, int], result: Any) -> Tuple
                 pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
                 cv2.fillPoly(bubble_mask, [pts], 255)
             if np.count_nonzero(bubble_mask) > 0:
-                return bubble_mask, 'mask'
+                return _erode_bubble_mask(bubble_mask), 'mask'
 
         mask_data = getattr(raw_masks, 'data', None)
         if mask_data is not None:
@@ -46,7 +66,7 @@ def _build_model_bubble_mask(image_shape: Tuple[int, int], result: Any) -> Tuple
                         )
                     bubble_mask = np.maximum(bubble_mask, merged_mask)
                     if np.count_nonzero(bubble_mask) > 0:
-                        return bubble_mask, 'mask'
+                        return _erode_bubble_mask(bubble_mask), 'mask'
             except Exception:
                 pass
 
@@ -68,7 +88,7 @@ def _build_model_bubble_mask(image_shape: Tuple[int, int], result: Any) -> Tuple
         cv2.rectangle(bubble_mask, (ix1, iy1), (ix2, iy2), 255, -1)
 
     if np.count_nonzero(bubble_mask) > 0:
-        return bubble_mask, 'box'
+        return _erode_bubble_mask(bubble_mask), 'box'
     return bubble_mask, 'none'
 
 
