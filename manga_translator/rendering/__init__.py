@@ -626,13 +626,24 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             dst_points_list.append(region.min_rect)
             continue
 
-        # skip_font_scaling模式：使用region.font_size作为目标字体，跳过字体缩放算法
-        # 但仍然走正常的文本框计算流程（因为字体大小一样，结果也一样）
+        # skip_font_scaling模式：使用region.font_size作为目标字体，完全跳过排版模式的字体缩放
+        # 直接根据font_size计算文本框，确保导出结果和编辑器预览一致
         if skip_font_scaling:
             target_font_size = region.font_size if region.font_size > 0 else round((img.shape[0] + img.shape[1]) / 200)
-            min_font_size = 1
-            # 不改变target_font_size，直接进入下面的排版模式计算文本框
             logger.debug(f"[RESIZE] skip_font_scaling: 区域 {region_idx} 使用JSON字体大小 {target_font_size}")
+
+            # 直接使用font_size计算文本框，不进入排版模式（不应用font_scale_ratio/max_font_size）
+            region.font_size = target_font_size
+            line_spacing_multiplier = getattr(region, 'line_spacing', 1.0) or 1.0
+            dst_points = calc_box_from_font(
+                target_font_size, region.translation, region.horizontal,
+                line_spacing_multiplier, config, region.target_lang,
+                center=tuple(region.center), angle=region.angle
+            )
+            if dst_points is None:
+                dst_points = region.min_rect
+            dst_points_list.append(dst_points)
+            continue
         else:
             original_region_font_size = region.font_size if region.font_size > 0 else round((img.shape[0] + img.shape[1]) / 200)
 
