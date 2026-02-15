@@ -9,14 +9,14 @@ from ..utils.log import get_logger
 logger = get_logger('mask_refinement')
 
 # 气泡 mask 向内收缩比例和范围，避免气泡边框被修复模型擦除
-BUBBLE_MASK_ERODE_RATIO = 0.01   # 按图像短边的 1% 计算腐蚀半径
-BUBBLE_MASK_ERODE_MIN_PX = 3     # 最小腐蚀像素（低分辨率保底）
-BUBBLE_MASK_ERODE_MAX_PX = 30    # 最大腐蚀像素（超高分辨率封顶）
+BUBBLE_MASK_ERODE_RATIO = 0.015  # 按图像短边的 1.5% 计算腐蚀半径
+BUBBLE_MASK_ERODE_MIN_PX = 4     # 最小腐蚀像素（低分辨率保底）
+BUBBLE_MASK_ERODE_MAX_PX = 36    # 最大腐蚀像素（超高分辨率封顶）
 
 
 def _erode_bubble_mask(bubble_mask: np.ndarray) -> np.ndarray:
     """Erode the bubble mask inward to preserve bubble borders during inpainting.
-    Erosion amount is dynamic based on image resolution (1% of shorter side, clamped 3-30px).
+    Erosion amount is dynamic based on image resolution (1.5% of shorter side, clamped 4-36px).
     """
     if np.count_nonzero(bubble_mask) == 0:
         return bubble_mask

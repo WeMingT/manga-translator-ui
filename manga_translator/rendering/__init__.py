@@ -986,6 +986,9 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     )
                     region.translation = optimized_text
 
+                # n 表示行/列数量，后续溢出重算会统一使用；默认 1 防止未赋值。
+                n = 1
+
                 # 根据有没有BR选择不同的计算方式
                 if has_br:
                     logger.debug(f"[SMART_SCALING] Region {region_idx}: 有BR分支")
@@ -995,10 +998,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 
                     if region.horizontal:
                         lines, widths = text_render.calc_horizontal(target_font_size, region.translation, max_width=99999, max_height=99999, language=region.target_lang)
+                        n = max(1, len(lines))
                         if widths:
                             spacing_y = int(target_font_size * (config.render.line_spacing or 0.01))
                             required_width = max(widths)
-                            required_height = target_font_size * len(lines) + spacing_y * max(0, len(lines) - 1)
+                            required_height = target_font_size * n + spacing_y * max(0, n - 1)
                     else: # Vertical
                         # Convert [BR] tags to \n for vertical text
                         text_for_calc = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', region.translation, flags=re.IGNORECASE)
@@ -1008,10 +1012,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             text_for_calc = text_render.auto_add_horizontal_tags(text_for_calc)
 
                         lines, heights = text_render.calc_vertical(target_font_size, text_for_calc, max_height=99999)
+                        n = max(1, len(lines))
                         if heights:
                             spacing_x = int(target_font_size * (config.render.line_spacing or 0.2))
                             required_height = max(heights)
-                            required_width = target_font_size * len(lines) + spacing_x * max(0, len(lines) - 1)
+                            required_width = target_font_size * n + spacing_x * max(0, n - 1)
                 else:
                     logger.debug(f"[SMART_SCALING] Region {region_idx}: 无BR分支，开始反推断句")
                     # 无BR：用精确像素反推最优行数/列数

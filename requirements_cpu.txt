@@ -71,13 +71,13 @@ websockets==14.2
 anyio>=4.8.0
 # xformers==0.0.32.post2  # CPU版本不需要,仅GPU使用
 google-genai==1.57.0
-# pydensecrf - 预编译 wheel 文件 (Python 3.12 Windows)
-# 使用官方 GitHub 源
-pydensecrf @ https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl
-# 如果下载失败,可尝试镜像站:
-# pydensecrf @ https://gh-proxy.com/https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl
-# 或从源码安装(需要 C++ 编译工具):
-# pydensecrf @ git+https://github.com/lucasb-eyer/pydensecrf.git
+# pydensecrf - 按平台选择安装来源
+# Windows: 使用预编译 wheel（避免本地编译失败）
+pydensecrf @ https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'
+# Linux/macOS: 从源码安装（需要 C++ 编译工具）
+pydensecrf @ git+https://github.com/lucasb-eyer/pydensecrf.git ; sys_platform != 'win32'
+# 如果 Windows 下载失败，可尝试镜像站：
+# pydensecrf @ https://gh-proxy.com/https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'
 torchsummary
 open_clip_torch==3.1.0
 python-bidi==0.6.6
