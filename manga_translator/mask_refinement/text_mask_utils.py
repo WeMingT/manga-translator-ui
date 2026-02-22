@@ -131,8 +131,6 @@ def refine_mask(rgbimg, rawmask):
     # 直接转换，避免额外复制
     return (res * 255).astype(np.uint8)
 
-# 内存阈值：当 M * mask_size 超过此值时启用切割 (约 100MB)
-MEMORY_THRESHOLD = 100 * 1024 * 1024  
 MASK_REARRANGE_TARGET_SIZE = 1280
 
 def _copy_quadrilateral_with_pts(src: Quadrilateral, pts: np.ndarray) -> Quadrilateral:
@@ -374,35 +372,28 @@ def _complete_mask_core(img: np.ndarray, mask: np.ndarray, textlines: List[Quadr
 
 def complete_mask(img: np.ndarray, mask: np.ndarray, textlines: List[Quadrilateral], keep_threshold = 1e-2, dilation_offset = 0, kernel_size=3):
     """
-    完成 mask 精修。对于大图会自动切割处理以避免内存溢出。
+    完成 mask 精修。是否切割仅由 detector rearrange 条件决定。
     """
     import logging
     logger = logging.getLogger(__name__)
-    
-    M = len(textlines)
-    mask_size = mask.shape[0] * mask.shape[1]
-    estimated_memory = M * mask_size  # 每个 textline 需要一个同样大小的数组
-    
-    # 检查是否需要切割处理
-    if estimated_memory > MEMORY_THRESHOLD and M > 0:
-        logger.info(f"Large image detected ({mask.shape[0]}x{mask.shape[1]}, {M} textlines). Using chunked processing.")
 
-        # 仅使用与检测器统一的重排切割/回拼逻辑（不再兜底到旧分块策略）
-        rearranged_mask = _complete_mask_with_det_rearrange(
-            img,
-            mask,
-            textlines,
-            keep_threshold,
-            dilation_offset,
-            kernel_size,
+    # 仅使用与检测器统一的重排切割/回拼逻辑；是否切割由 build_det_rearrange_plan 条件决定。
+    rearranged_mask = _complete_mask_with_det_rearrange(
+        img,
+        mask,
+        textlines,
+        keep_threshold,
+        dilation_offset,
+        kernel_size,
+    )
+    if rearranged_mask is not None:
+        logger.info(
+            f"Mask refinement chunking uses detector rearrange pipeline "
+            f"({mask.shape[0]}x{mask.shape[1]}, {len(textlines)} textlines)."
         )
-        if rearranged_mask is not None:
-            logger.info("Mask refinement chunking uses detector rearrange pipeline.")
-        else:
-            logger.warning("Detector rearrange is not applicable in chunked mode; no fallback split will be used.")
         return rearranged_mask
-    
-    # 正常处理（不需要切割）
+
+    # 不满足重排条件时，走常规路径
     return _complete_mask_core(img, mask, textlines, keep_threshold, dilation_offset, kernel_size)
 
 
