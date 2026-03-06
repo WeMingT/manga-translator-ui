@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
-from editor.commands import UpdateRegionCommand
+from editor.commands import MaskEditCommand, UpdateRegionCommand
 from services import (
     get_async_service,
     get_config_service,
@@ -929,7 +929,7 @@ class EditorController(QObject):
                 return
 
             # 计算变化区域的边界框
-            coords = np.where(all_changed_areas > 128)
+            coords = np.where(all_changed_areas > 0)
             if len(coords[0]) == 0:
                 return
 
@@ -1106,6 +1106,38 @@ class EditorController(QObject):
     def set_brush_size(self, size: int):
         """Sets the brush size in the model."""
         self.model.set_brush_size(size)
+
+    @pyqtSlot()
+    def clear_all_masks(self):
+        """清除当前图片的所有可编辑蒙版（refined mask），支持撤销/重做。"""
+        try:
+            source_mask = self.model.get_refined_mask()
+            if source_mask is None:
+                source_mask = self.model.get_raw_mask()
+
+            old_mask = None
+            if source_mask is not None:
+                old_mask = np.array(source_mask)
+                if old_mask.ndim == 3:
+                    old_mask = old_mask[:, :, 0]
+                old_mask = np.where(old_mask > 0, 255, 0).astype(np.uint8)
+
+            if old_mask is None:
+                image = self._get_current_image()
+                if image is None:
+                    self.logger.warning("Clear all masks skipped: no active image.")
+                    return
+                old_mask = np.zeros((int(image.height), int(image.width)), dtype=np.uint8)
+
+            new_mask = np.zeros_like(old_mask, dtype=np.uint8)
+            if np.array_equal(old_mask, new_mask):
+                self.logger.debug("Clear all masks skipped: mask is already empty.")
+                return
+
+            self.execute_command(MaskEditCommand(self.model, old_mask, new_mask))
+            self.logger.info("Cleared all masks for current image.")
+        except Exception as e:
+            self.logger.error(f"Failed to clear all masks: {e}", exc_info=True)
 
     @pyqtSlot(dict)
     def update_mask_config(self, new_settings: dict):
@@ -2251,7 +2283,6 @@ class EditorController(QObject):
                     ocr_enum = Ocr(selected_ocr) if selected_ocr else current_ocr_config.ocr
                     ocr_config = OcrConfig(
                         ocr=ocr_enum,
-                        use_mocr_merge=current_ocr_config.use_mocr_merge,
                         use_hybrid_ocr=current_ocr_config.use_hybrid_ocr,
                         secondary_ocr=current_ocr_config.secondary_ocr,
                         min_text_length=current_ocr_config.min_text_length,

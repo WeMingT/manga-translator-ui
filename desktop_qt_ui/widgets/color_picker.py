@@ -1,7 +1,8 @@
 
-from PyQt6.QtCore import pyqtSignal, QTimer
-from PyQt6.QtGui import QColor, QPixmap, QPainter, QIcon, QAction
+from PyQt6.QtCore import pyqtSignal, QTimer, Qt, QRect
+from PyQt6.QtGui import QColor, QPixmap, QPainter, QIcon, QAction, QPen, QFont, QCursor
 from PyQt6.QtWidgets import (
+    QApplication,
     QColorDialog,
     QHBoxLayout,
     QLabel,
@@ -15,6 +16,175 @@ import logging
 
 logger = logging.getLogger('manga_translator')
 
+
+# ═══════════════════════════════════════════════════════════════
+#  ScreenColorPicker — 全屏自定义屏幕取色器
+# ═══════════════════════════════════════════════════════════════
+
+class ScreenColorPicker(QWidget):
+    """全屏屏幕取色器：稳定十字光标 + 像素放大镜 + 实时颜色/RGB 预览。
+
+    - 左键点击拾取颜色
+    - 右键 / ESC 取消
+    """
+
+    color_picked = pyqtSignal(QColor)
+    canceled = pyqtSignal()
+
+    MAG_N = 11        # 放大区域边长(像素，奇数)
+    MAG_S = 10        # 每像素放大倍数
+    OFFSET = 25       # 预览框离光标偏移
+
+    def __init__(self):
+        super().__init__(None)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.BlankCursor)
+
+        self._color = QColor(0, 0, 0)
+        self._mpos = QCursor.pos()
+        self._shot: QPixmap | None = None
+        self._img = None
+        self._dpr = 1.0
+
+    # ── 公开接口 ──────────────────────────────────────────────
+
+    def start(self):
+        screen = QApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.virtualGeometry()
+        self._shot = screen.grabWindow(0, geo.x(), geo.y(), geo.width(), geo.height())
+        self._img = self._shot.toImage()
+        self._dpr = self._shot.devicePixelRatio()
+        self.setGeometry(geo)
+        self.show()
+        self.activateWindow()
+        self.raise_()
+
+    # ── 内部 ──────────────────────────────────────────────────
+
+    def _px_color(self, lx, ly):
+        if self._img is None:
+            return QColor(0, 0, 0)
+        px, py = int(lx * self._dpr), int(ly * self._dpr)
+        if 0 <= px < self._img.width() and 0 <= py < self._img.height():
+            return self._img.pixelColor(px, py)
+        return QColor(0, 0, 0)
+
+    # ── 绘制 ──────────────────────────────────────────────────
+
+    def paintEvent(self, _event):
+        if self._shot is None:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.drawPixmap(self.rect(), self._shot)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 15))
+
+        loc = self.mapFromGlobal(self._mpos)
+        cx, cy = loc.x(), loc.y()
+        self._draw_cross(p, cx, cy)
+        self._draw_panel(p, cx, cy)
+        p.end()
+
+    def _draw_cross(self, p, x, y):
+        gap, ln = 6, 22
+        for c, w in [(QColor(0, 0, 0, 160), 3), (QColor(255, 255, 255, 220), 1)]:
+            p.setPen(QPen(c, w))
+            p.drawLine(x - ln, y, x - gap, y)
+            p.drawLine(x + gap, y, x + ln, y)
+            p.drawLine(x, y - ln, x, y - gap)
+            p.drawLine(x, y + gap, x, y + ln)
+
+    def _draw_panel(self, p, cx, cy):
+        n, s = self.MAG_N, self.MAG_S
+        mag = n * s
+        pad = 12
+        pw = mag + pad * 2
+        ph = pad + mag + 8 + 50 + pad
+
+        # 位置（避免出屏）
+        off = self.OFFSET
+        bx = cx + off if cx + off + pw <= self.width() else cx - off - pw
+        by = cy + off if cy + off + ph <= self.height() else cy - off - ph
+        bx, by = max(bx, 0), max(by, 0)
+
+        # 背景
+        p.setBrush(QColor(24, 24, 28, 235))
+        p.setPen(QPen(QColor(70, 70, 70), 1))
+        p.drawRoundedRect(bx, by, pw, ph, 8, 8)
+
+        # 放大镜
+        mx, my = bx + pad, by + pad
+        half = n // 2
+        for dy in range(n):
+            for dx in range(n):
+                p.fillRect(mx + dx * s, my + dy * s, s, s,
+                           self._px_color(cx - half + dx, cy - half + dy))
+
+        # 网格
+        p.setPen(QPen(QColor(50, 50, 50, 80), 1))
+        for i in range(1, n):
+            p.drawLine(mx + i * s, my, mx + i * s, my + mag)
+            p.drawLine(mx, my + i * s, mx + mag, my + i * s)
+        p.setPen(QPen(QColor(100, 100, 100), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(mx, my, mag, mag)
+        # 中心高亮
+        p.setPen(QPen(QColor(255, 255, 255), 2))
+        p.drawRect(mx + half * s, my + half * s, s, s)
+
+        # 颜色信息
+        iy = my + mag + 10
+        sw = 26
+        p.setBrush(self._color)
+        p.setPen(QPen(QColor(180, 180, 180), 1))
+        p.drawRoundedRect(mx, iy, sw, sw, 3, 3)
+
+        tx = mx + sw + 8
+        f = QFont("Consolas", 10)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(240, 240, 240))
+        p.drawText(tx, iy + 12, self._color.name().upper())
+        f.setBold(False)
+        f.setPointSize(9)
+        p.setFont(f)
+        p.setPen(QColor(180, 180, 180))
+        r, g, b = self._color.red(), self._color.green(), self._color.blue()
+        p.drawText(tx, iy + 26, f"R:{r} G:{g} B:{b}")
+
+    # ── 事件 ──────────────────────────────────────────────────
+
+    def mouseMoveEvent(self, ev):
+        self._mpos = ev.globalPosition().toPoint()
+        loc = self.mapFromGlobal(self._mpos)
+        self._color = self._px_color(loc.x(), loc.y())
+        self.update()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self.color_picked.emit(self._color)
+            self.close()
+        elif ev.button() == Qt.MouseButton.RightButton:
+            self.canceled.emit()
+            self.close()
+
+    def keyPressEvent(self, ev):
+        if ev.key() == Qt.Key.Key_Escape:
+            self.canceled.emit()
+            self.close()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ColorPickerWidget
+# ═══════════════════════════════════════════════════════════════
 
 class ColorPickerWidget(QWidget):
     """可复用的颜色选择器组件，包含颜色按钮、RGB标签、复制/粘贴、常用颜色菜单。"""
@@ -127,6 +297,9 @@ class ColorPickerWidget(QWidget):
         for i, color_hex in enumerate(self._saved_colors[:16]):
             dialog.setCustomColor(i, QColor(color_hex))
 
+        # 替换内置的屏幕取色按钮
+        self._hook_screen_picker(dialog)
+
         if dialog.exec() == QColorDialog.DialogCode.Accepted:
             hex_color = dialog.currentColor().name()
             self._apply_color(hex_color)
@@ -138,6 +311,43 @@ class ColorPickerWidget(QWidget):
                     self._saved_colors = self._saved_colors[:20]
                 self._persist_saved_colors()
                 self._rebuild_saved_colors_menu()
+
+    def _hook_screen_picker(self, dialog):
+        """查找并替换 QColorDialog 内置的 '拾取屏幕颜色' 按钮行为。"""
+        for btn in dialog.findChildren(QPushButton):
+            text = btn.text()
+            if '拾取' in text or 'pick' in text.lower() or 'screen' in text.lower():
+                try:
+                    btn.clicked.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                btn.clicked.connect(
+                    lambda _checked=False, d=dialog: self._launch_screen_pick(d)
+                )
+                break
+
+    def _launch_screen_pick(self, dialog):
+        """隐藏对话框 → 截屏 → 启动自定义取色器。"""
+        dialog.hide()
+        QTimer.singleShot(150, lambda: self._do_screen_pick(dialog))
+
+    def _do_screen_pick(self, dialog):
+        picker = ScreenColorPicker()
+
+        def on_picked(color):
+            dialog.setCurrentColor(color)
+            dialog.show()
+            dialog.activateWindow()
+
+        def on_cancel():
+            dialog.show()
+            dialog.activateWindow()
+
+        picker.color_picked.connect(on_picked)
+        picker.canceled.connect(on_cancel)
+        # 保持引用防止被 GC
+        self._screen_picker = picker
+        picker.start()
 
     def _apply_color(self, hex_color: str):
         """应用颜色并发射信号。"""

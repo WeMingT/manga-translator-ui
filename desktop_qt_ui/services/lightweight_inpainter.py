@@ -91,7 +91,7 @@ class LightweightInpainter:
     def _inpaint_none(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """无擦除：填充白色"""
         result = image.copy()
-        result[mask > 127] = [255, 255, 255]
+        result[mask > 0] = [255, 255, 255]
         return result
     
     def _inpaint_original(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -103,10 +103,10 @@ class LightweightInpainter:
         result = image.copy()
         
         # 将蒙版区域设为白色
-        result[mask > 127] = [255, 255, 255]
+        result[mask > 0] = [255, 255, 255]
         
         # 对蒙版边缘进行轻微模糊以减少硬边
-        if np.any(mask > 127):
+        if np.any(mask > 0):
             # 创建边缘蒙版
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
             mask_dilated = cv2.dilate(mask, kernel, iterations=1)
@@ -124,7 +124,7 @@ class LightweightInpainter:
         result = image.copy()
         
         # 使用OpenCV的inpaint函数进行快速修复
-        mask_binary = (mask > 127).astype(np.uint8) * 255
+        mask_binary = (mask > 0).astype(np.uint8) * 255
         
         try:
             # 使用快速修复算法
@@ -187,6 +187,7 @@ class LightweightInpainter:
             preview_mask = cv2.resize(mask, 
                                     (preview_image.shape[1], preview_image.shape[0]), 
                                     interpolation=cv2.INTER_NEAREST)
+            preview_mask = np.where(preview_mask > 0, 255, 0).astype(np.uint8)
             
             # 选择算法处理
             handler = self.algorithm_handlers.get(algorithm, self._inpaint_simple_blur)

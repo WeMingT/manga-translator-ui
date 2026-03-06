@@ -260,3 +260,6 @@ X-AnyLabeling-main/
 # External projects (外部项目源码)
 PaddleOCR-main/
 Saber-Translator-main/
+
+# Antigravity config
+.antigravityignore

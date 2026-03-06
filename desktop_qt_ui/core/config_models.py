@@ -16,7 +16,6 @@ class TranslatorSettings(BaseModel):
     use_custom_api_params: bool = False  # 是否使用自定义API参数配置文件
 
 class OcrSettings(BaseModel):
-    use_mocr_merge: bool = False
     ocr: str = "48px"
     use_hybrid_ocr: bool = True
     secondary_ocr: str = "mocr"

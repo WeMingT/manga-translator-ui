@@ -1,0 +1,468 @@
+import os
+from functools import partial
+
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import QFileDialog, QLabel, QLineEdit
+
+from utils.wheel_filter import NoWheelComboBox as QComboBox
+
+
+def on_translator_changed(self, display_name: str):
+    """当翻译器下拉菜单变化时，动态更新所需的.env输入字段。"""
+    if not hasattr(self, "env_layout") or not hasattr(self, "env_group_box") or self.env_group_box is None:
+        return
+
+    reverse_map = {v: k for k, v in self.controller.get_display_mapping("translator").items()}
+    translator_key = reverse_map.get(display_name, display_name.lower())
+
+    from PyQt6.QtWidgets import QGridLayout
+
+    if isinstance(self.env_layout, QGridLayout):
+        while self.env_layout.count():
+            item = self.env_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+    else:
+        while self.env_layout.rowCount() > 0:
+            self.env_layout.removeRow(0)
+    self.env_widgets.clear()
+
+    if not translator_key:
+        self.env_group_box.setVisible(False)
+        return
+
+    all_vars = self.config_service.get_all_env_vars(translator_key)
+    if not all_vars:
+        self.env_group_box.setVisible(False)
+        return
+
+    self.env_group_box.setVisible(True)
+    current_env_values = self.config_service.load_env_vars()
+    self._create_env_widgets(all_vars, current_env_values)
+
+
+def create_env_widgets(self, keys: list, current_values: dict):
+    """为给定的键创建标签和输入框。"""
+    from PyQt6.QtWidgets import QGridLayout, QPushButton
+
+    row = 0
+    for key in keys:
+        value = current_values.get(key, "")
+        
+        display_key = key
+        for prefix in ["OCR_", "COLOR_", "RENDER_"]:
+            if key.startswith(prefix):
+                display_key = key[len(prefix):]
+                break
+                
+        label_text = self.controller.get_display_mapping("labels").get(display_key, display_key)
+        label = QLabel(f"{label_text}:")
+        widget = QLineEdit(str(value) if value else "")
+        widget.setPlaceholderText(self._get_env_default_placeholder(key))
+        widget.textChanged.connect(partial(self._debounced_save_env_var, key))
+
+        if isinstance(self.env_layout, QGridLayout):
+            self.env_layout.addWidget(label, row, 0, Qt.AlignmentFlag.AlignLeft)
+            self.env_layout.addWidget(widget, row, 1)
+
+            if "API_KEY" in key or "AUTH_KEY" in key or "TOKEN" in key:
+                test_button = QPushButton(self._t("Test"))
+                test_button.setFixedWidth(60)
+                test_button.clicked.connect(partial(self._on_test_api_clicked, key))
+                self.env_layout.addWidget(test_button, row, 2)
+            elif "MODEL" in key:
+                get_models_button = QPushButton(self._t("Get Models"))
+                get_models_button.setFixedWidth(100)
+                get_models_button.clicked.connect(partial(self._on_get_models_clicked, key))
+                self.env_layout.addWidget(get_models_button, row, 2)
+
+            row += 1
+        else:
+            self.env_layout.addRow(label, widget)
+        self.env_widgets[key] = (label, widget)
+
+
+def get_env_default_placeholder(self, key: str) -> str:
+    """返回环境变量输入框应显示的默认占位符。"""
+    key_placeholder = self._t("placeholder_paste_key")
+    token_placeholder = self._t("placeholder_paste_token")
+    default_placeholders = {
+        "OPENAI_API_BASE": "https://api.openai.com/v1",
+        "CUSTOM_OPENAI_API_BASE": "https://api.openai.com/v1",
+        "GEMINI_API_BASE": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "SAKURA_API_BASE": "http://127.0.0.1:8080/v1",
+        "OPENAI_MODEL": "gpt-4o",
+        "CUSTOM_OPENAI_MODEL": "qwen2.5:7b",
+        "GEMINI_MODEL": "gemini-1.5-flash-002",
+        "GROQ_MODEL": "mixtral-8x7b-32768",
+        "DEEPSEEK_MODEL": "deepseek-chat",
+        "OPENAI_API_KEY": key_placeholder,
+        "CUSTOM_OPENAI_API_KEY": key_placeholder,
+        "GEMINI_API_KEY": key_placeholder,
+        "GROQ_API_KEY": key_placeholder,
+        "DEEPSEEK_API_KEY": key_placeholder,
+        "DEEPL_AUTH_KEY": key_placeholder,
+        "CAIYUN_TOKEN": token_placeholder,
+    }
+    return default_placeholders.get(key.upper(), "")
+
+
+def debounced_save_env_var(self, key: str, text: str):
+    """防抖保存.env变量。"""
+    self._env_debounce_timer.stop()
+    try:
+        self._env_debounce_timer.timeout.disconnect()
+    except TypeError:
+        pass
+    self._env_debounce_timer.timeout.connect(lambda: self.env_var_changed.emit(key, text))
+    self._env_debounce_timer.start()
+
+
+def on_open_custom_api_params_file(self):
+    """打开自定义API参数配置文件。"""
+    import subprocess
+    import sys
+
+    if getattr(sys, "frozen", False):
+        if hasattr(sys, "_MEIPASS"):
+            config_path = os.path.join(sys._MEIPASS, "examples", "custom_api_params.json")
+        else:
+            config_path = os.path.join(os.path.dirname(sys.executable), "examples", "custom_api_params.json")
+    else:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        config_path = os.path.join(project_root, "examples", "custom_api_params.json")
+
+    if not os.path.exists(config_path):
+        try:
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                import json
+
+                json.dump({}, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, self._t("Error"), f"创建配置文件失败: {e}")
+            return
+
+    try:
+        if sys.platform == "win32":
+            os.startfile(config_path)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", config_path])
+        else:
+            subprocess.run(["xdg-open", config_path])
+    except Exception as e:
+        from PyQt6.QtWidgets import QMessageBox
+
+        QMessageBox.warning(self, self._t("Error"), f"打开文件失败: {e}")
+
+
+def on_test_api_clicked(self, key: str):
+    """测试API连接。"""
+    import asyncio
+
+    from PyQt6.QtCore import QThread, Qt
+    from PyQt6.QtWidgets import QMessageBox, QProgressDialog
+
+    if key not in self.env_widgets:
+        return
+
+    _, widget = self.env_widgets[key]
+    api_key = widget.text().strip()
+
+    translator_combo = self.findChild(QComboBox, "translator.translator")
+    if not translator_combo:
+        return
+
+    translator_display = translator_combo.currentText()
+    reverse_map = {v: k for k, v in self.controller.get_display_mapping("translator").items()}
+    translator_key = reverse_map.get(translator_display, translator_display.lower())
+
+    api_base = None
+    for env_key in self.env_widgets.keys():
+        if "API_BASE" in env_key or "BASE" in env_key:
+            _, base_widget = self.env_widgets[env_key]
+            api_base = base_widget.text().strip() or None
+            break
+
+    model = None
+    for env_key in self.env_widgets.keys():
+        if "MODEL" in env_key:
+            _, model_widget = self.env_widgets[env_key]
+            model = model_widget.text().strip() or None
+            break
+
+    progress = QProgressDialog(self._t("Testing API connection, please wait..."), None, 0, 0, self)
+    progress.setWindowTitle(self._t("Testing"))
+    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    progress.setCancelButton(None)
+    progress.show()
+
+    def run_test():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            self.controller.test_api_connection_async(translator_key, api_key, api_base, model)
+        )
+        loop.close()
+        return result
+
+    class TestThread(QThread):
+        finished_signal = pyqtSignal(bool, str)
+
+        def run(self):
+            try:
+                success, message = run_test()
+                self.finished_signal.emit(success, message)
+            except Exception as e:
+                self.finished_signal.emit(False, str(e))
+
+    def on_test_finished(success, message):
+        progress.close()
+        if success:
+            QMessageBox.information(self, self._t("Success"), self._t("API connection test successful!"))
+        else:
+            friendly_message = self._t("Please check your API key and address.")
+            friendly_message += f"\n\n{self._t('Address format example')}: https://api.openai.com/v1"
+            if message and str(message).strip():
+                friendly_message += f"\n\n{str(message).strip()}"
+            QMessageBox.critical(
+                self,
+                self._t("Error"),
+                f"{self._t('API connection test failed')}\n\n{friendly_message}",
+            )
+
+    test_thread = TestThread()
+    test_thread.finished_signal.connect(on_test_finished)
+    test_thread.start()
+    self._test_thread = test_thread
+
+
+def on_get_models_clicked(self, key: str):
+    """获取可用模型列表。"""
+    import asyncio
+
+    from PyQt6.QtCore import QThread, Qt
+    from PyQt6.QtWidgets import QMessageBox, QProgressDialog
+
+    from desktop_qt_ui.widgets.model_selector_dialog import ModelSelectorDialog
+
+    translator_combo = self.findChild(QComboBox, "translator.translator")
+    if not translator_combo:
+        return
+
+    translator_display = translator_combo.currentText()
+    reverse_map = {v: k for k, v in self.controller.get_display_mapping("translator").items()}
+    translator_key = reverse_map.get(translator_display, translator_display.lower())
+
+    api_key = None
+    for env_key in self.env_widgets.keys():
+        if "API_KEY" in env_key or "AUTH_KEY" in env_key:
+            _, api_widget = self.env_widgets[env_key]
+            api_key = api_widget.text().strip()
+            break
+
+    api_base = None
+    for env_key in self.env_widgets.keys():
+        if "API_BASE" in env_key or "BASE" in env_key:
+            _, base_widget = self.env_widgets[env_key]
+            api_base = base_widget.text().strip() or None
+            break
+
+    progress = QProgressDialog(self._t("Fetching models, please wait..."), None, 0, 0, self)
+    progress.setWindowTitle(self._t("Get Models"))
+    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    progress.setCancelButton(None)
+    progress.show()
+
+    def run_get_models():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            self.controller.get_available_models_async(translator_key, api_key, api_base)
+        )
+        loop.close()
+        return result
+
+    class GetModelsThread(QThread):
+        finished_signal = pyqtSignal(bool, list, str)
+
+        def run(self):
+            try:
+                success, models, message = run_get_models()
+                self.finished_signal.emit(success, models, message)
+            except Exception as e:
+                self.finished_signal.emit(False, [], str(e))
+
+    def on_get_models_finished(success, models, message):
+        progress.close()
+        if success:
+            if models:
+                selected_model, ok = ModelSelectorDialog.get_model(
+                    models,
+                    self._t("Select Model"),
+                    self._t("Available models:"),
+                    self,
+                )
+                if ok and selected_model and key in self.env_widgets:
+                    _, widget = self.env_widgets[key]
+                    widget.setText(selected_model)
+                    self.env_var_changed.emit(key, selected_model)
+            else:
+                QMessageBox.warning(self, self._t("Warning"), self._t("No models available"))
+        else:
+            QMessageBox.critical(self, self._t("Error"), f"{self._t('Failed to get models')}: {message}")
+
+    get_models_thread = GetModelsThread()
+    get_models_thread.finished_signal.connect(on_get_models_finished)
+    get_models_thread.start()
+    self._get_models_thread = get_models_thread
+
+
+def refresh_preset_list(self, deleted_preset_name: str = None):
+    """刷新预设列表。"""
+    if not hasattr(self, "preset_combo"):
+        return
+
+    current_text = self.preset_combo.currentText()
+    current_index = self.preset_combo.currentIndex()
+
+    self.preset_combo.blockSignals(True)
+    self.preset_combo.clear()
+
+    presets = self.controller.get_presets_list()
+    if not presets:
+        self.controller.save_preset("默认", copy_current=False)
+        presets = self.controller.get_presets_list()
+
+    if presets:
+        self.preset_combo.addItems(presets)
+
+        if current_text and current_text in presets:
+            self.preset_combo.setCurrentText(current_text)
+            self.preset_combo.blockSignals(False)
+        else:
+            new_index = min(current_index, len(presets) - 1)
+            self.preset_combo.setCurrentIndex(new_index)
+            new_preset = self.preset_combo.currentText()
+            self.preset_combo.blockSignals(False)
+            self._on_preset_changed(new_preset)
+            return
+
+    self.preset_combo.blockSignals(False)
+
+
+def on_add_preset_clicked(self):
+    """添加新预设。"""
+    from PyQt6.QtWidgets import QInputDialog, QMessageBox
+
+    preset_name, ok = QInputDialog.getText(self, self._t("Add Preset"), self._t("Enter preset name:"))
+
+    if ok and preset_name:
+        preset_name = preset_name.strip()
+        if not preset_name:
+            QMessageBox.warning(self, self._t("Warning"), self._t("Preset name cannot be empty"))
+            return
+
+        existing_presets = self.controller.get_presets_list()
+        if preset_name in existing_presets:
+            reply = QMessageBox.question(
+                self,
+                self._t("Confirm"),
+                self._t("Preset '{name}' already exists. Overwrite?", name=preset_name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        success = self.controller.save_preset(preset_name, copy_current=False)
+        if success:
+            self._refresh_preset_list()
+            self.preset_combo.setCurrentText(preset_name)
+        else:
+            QMessageBox.critical(self, self._t("Error"), self._t("Failed to create preset"))
+
+
+def on_delete_preset_clicked(self):
+    """删除选中的预设。"""
+    from PyQt6.QtWidgets import QMessageBox
+
+    preset_name = self.preset_combo.currentText()
+    if not preset_name:
+        QMessageBox.warning(self, self._t("Warning"), self._t("Please select a preset to delete"))
+        return
+
+    reply = QMessageBox.question(
+        self,
+        self._t("Confirm"),
+        self._t("Are you sure you want to delete preset '{name}'?", name=preset_name),
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+    )
+
+    if reply == QMessageBox.StandardButton.Yes:
+        success = self.controller.delete_preset(preset_name)
+        if success:
+            self._refresh_preset_list(deleted_preset_name=preset_name)
+            QMessageBox.information(self, self._t("Success"), self._t("Preset deleted successfully"))
+        else:
+            QMessageBox.critical(self, self._t("Error"), self._t("Failed to delete preset"))
+
+
+def on_preset_changed(self, new_preset_name: str):
+    """切换预设时加载新预设。"""
+    if not new_preset_name:
+        return
+
+    old_preset_name = getattr(self, "_current_preset_name", "")
+    if old_preset_name == new_preset_name:
+        return
+
+    if self._env_debounce_timer.isActive():
+        self._env_debounce_timer.stop()
+        for key, (label, widget) in self.env_widgets.items():
+            current_value = widget.text()
+            self.controller.save_env_var(key, current_value)
+
+    if old_preset_name:
+        existing_presets = self.controller.get_presets_list()
+        if old_preset_name in existing_presets:
+            current_env_values = self.config_service.load_env_vars()
+            self.controller.preset_service.save_preset(old_preset_name, current_env_values)
+
+    success = self.controller.load_preset(new_preset_name)
+    if success:
+        self._current_preset_name = new_preset_name
+        self.controller.config_service.set_current_preset(new_preset_name)
+
+        current_env_values = self.config_service.load_env_vars()
+        for key, (label, widget) in self.env_widgets.items():
+            new_value = current_env_values.get(key, "")
+            widget.blockSignals(True)
+            widget.setText(str(new_value) if new_value else "")
+            widget.setPlaceholderText(self._get_env_default_placeholder(key))
+            widget.blockSignals(False)
+
+
+def update_output_path_display(self, path: str):
+    """更新输出目录输入框显示。"""
+    self.output_folder_input.setText(path)
+
+
+def trigger_add_files(self):
+    """触发添加文件对话框。"""
+    last_dir = self.controller.get_last_open_dir()
+    file_paths, _ = QFileDialog.getOpenFileNames(
+        self,
+        self._t("Add Files"),
+        last_dir,
+        "All Supported Files (*.png *.jpg *.jpeg *.bmp *.webp *.avif *.heic *.heif *.pdf *.epub *.cbz *.cbr *.zip);;"
+        "Image Files (*.png *.jpg *.jpeg *.bmp *.webp *.avif *.heic *.heif);;"
+        "PDF Files (*.pdf);;"
+        "EPUB Files (*.epub);;"
+        "Comic Book Archives (*.cbz *.cbr *.zip)",
+    )
+    if file_paths:
+        self.controller.add_files(file_paths)
+        new_dir = os.path.dirname(file_paths[0])
+        self.controller.set_last_open_dir(new_dir)

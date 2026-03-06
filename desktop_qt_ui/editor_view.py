@@ -264,6 +264,7 @@ class EditorView(QWidget):
         self.property_panel.copy_region_requested.connect(self._handle_copy_from_panel)
         self.property_panel.paste_region_requested.connect(self._handle_paste_from_panel)
         self.property_panel.delete_region_requested.connect(self._handle_delete_from_panel)
+        self.property_panel.clear_all_masks_requested.connect(self.controller.clear_all_masks)
         # --- Connect Mask Editing Tools ---
         self.property_panel.mask_tool_changed.connect(self.controller.set_active_tool)
         self.property_panel.brush_size_changed.connect(self.controller.set_brush_size)

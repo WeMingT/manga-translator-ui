@@ -80,14 +80,22 @@ class EditorModel(QObject):
         resources = self.resource_manager.get_all_regions()
         return [r.data for r in resources]
 
+    @staticmethod
+    def _normalize_binary_mask(mask: Any):
+        import numpy as np
+
+        if mask is None:
+            return None
+        if not isinstance(mask, np.ndarray):
+            mask = np.array(mask)
+        if mask.ndim == 3:
+            mask = mask[:, :, 0]
+        return np.where(mask > 0, 255, 0).astype(np.uint8)
+
     def set_raw_mask(self, mask: Any):
         from desktop_qt_ui.editor.core.types import MaskType
-        import numpy as np
         if mask is not None:
-             # Ensure mask is numpy array
-            if not isinstance(mask, np.ndarray):
-                 # Try to convert if it's not (though it should be)
-                 mask = np.array(mask)
+            mask = self._normalize_binary_mask(mask)
             self.resource_manager.set_mask(MaskType.RAW, mask)
         else:
             # How to unset? ResourceManager doesn't have unset_mask specific, 
@@ -105,11 +113,9 @@ class EditorModel(QObject):
 
     def set_refined_mask(self, mask: Any):
         from desktop_qt_ui.editor.core.types import MaskType
-        import numpy as np
         if mask is not None:
-             if not isinstance(mask, np.ndarray):
-                 mask = np.array(mask)
-             self.resource_manager.set_mask(MaskType.REFINED, mask)
+            mask = self._normalize_binary_mask(mask)
+            self.resource_manager.set_mask(MaskType.REFINED, mask)
         
         self.refined_mask_changed.emit(mask)
         # Force immediate display update if this is the current display type

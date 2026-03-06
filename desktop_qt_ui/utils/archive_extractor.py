@@ -140,35 +140,50 @@ def get_temp_extract_dir(archive_path: str) -> str:
 
 
 def extract_images_from_pdf(pdf_path: str, output_dir: str) -> List[str]:
-    """从 PDF 文件中提取图片"""
+    """从 PDF 文件中提取图片（优先提取嵌入原图，无嵌入图时回退渲染）"""
     try:
         import fitz  # PyMuPDF
     except ImportError:
         raise ImportError("需要安装 PyMuPDF: pip install PyMuPDF")
-    
+
     os.makedirs(output_dir, exist_ok=True)
     extracted_images = []
-    
+    img_count = 0
+
     doc = None
     try:
         doc = fitz.open(pdf_path)
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            # 将页面渲染为图片
-            # 使用较高的分辨率以保证质量
-            mat = fitz.Matrix(2.0, 2.0)  # 2x 缩放
-            pix = page.get_pixmap(matrix=mat)
-            
-            image_path = os.path.join(output_dir, f"page_{page_num + 1:04d}.png")
-            pix.save(image_path)
-            extracted_images.append(image_path)
-            
-            # 释放 pixmap 内存
-            pix = None
+        for page in doc:
+            imgs = page.get_images(full=True)
+            if imgs:
+                # 提取页面内所有嵌入图片
+                for img in imgs:
+                    xref = img[0]
+                    try:
+                        base = doc.extract_image(xref)
+                        img_count += 1
+                        image_path = os.path.join(output_dir, f"page_{img_count:04d}.{base['ext']}")
+                        with open(image_path, 'wb') as f:
+                            f.write(base['image'])
+                        extracted_images.append(image_path)
+                    except Exception:
+                        pass
+            else:
+                # 无嵌入图（纯文字/矢量页），回退渲染为 PNG
+                try:
+                    mat = fitz.Matrix(2.0, 2.0)
+                    pix = page.get_pixmap(matrix=mat)
+                    img_count += 1
+                    image_path = os.path.join(output_dir, f"page_{img_count:04d}.png")
+                    pix.save(image_path)
+                    extracted_images.append(image_path)
+                    pix = None
+                except Exception:
+                    pass
     finally:
         if doc is not None:
             doc.close()
-    
+
     return sorted(extracted_images)
 
 

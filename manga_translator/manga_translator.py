@@ -1668,13 +1668,28 @@ class MangaTranslator:
                 del os.environ['MANGA_OCR_RESULT_DIR']
 
         new_textlines = []
+        filtered_count = 0
         for textline in textlines:
-            if textline.text.strip():
-                if config.render.font_color_fg:
-                    textline.fg_r, textline.fg_g, textline.fg_b = config.render.font_color_fg
-                if config.render.font_color_bg:
-                    textline.bg_r, textline.bg_g, textline.bg_b = config.render.font_color_bg
-                new_textlines.append(textline)
+            text = str(getattr(textline, 'text', '') or '')
+            if not text.strip():
+                continue
+
+            if self.filter_text_enabled:
+                match_result = match_filter(text)
+                if match_result:
+                    matched_word, match_type = match_result
+                    filtered_count += 1
+                    logger.info(f'OCR过滤文本行 ({match_type}匹配): "{text}" -> 匹配: "{matched_word}"')
+                    continue
+
+            if config.render.font_color_fg:
+                textline.fg_r, textline.fg_g, textline.fg_b = config.render.font_color_fg
+            if config.render.font_color_bg:
+                textline.bg_r, textline.bg_g, textline.bg_b = config.render.font_color_bg
+            new_textlines.append(textline)
+
+        if filtered_count > 0:
+            logger.info(f'OCR过滤列表: 过滤了 {filtered_count} 个文本行')
         return new_textlines
 
     async def _run_textline_merge(self, config: Config, ctx: Context):
@@ -2213,14 +2228,7 @@ class MangaTranslator:
             ["】", ")", "）", "」", "』", "]"],
         ]
 
-        replace_items = [
-            ["「", """],
-            ["「", "'"],
-            ["」", """],
-            ["」", "'"],
-            ["【", "["],  
-            ["】", "]"],
-        ]
+        # 统一渲染：不在翻译后阶段强制替换引号/括号，交由渲染层处理。
         
         # 全角句点替换（必须先替换长的，再替换短的，避免部分替换）
         full_width_period_replace = [
@@ -2274,10 +2282,7 @@ class MangaTranslator:
                 for v in full_width_period_replace:
                     region.translation = region.translation.replace(v[1], v[0])
                 
-                # 强制替换规则
-                # Forced replacement rules
-                for v in replace_items:
-                    region.translation = region.translation.replace(v[1], v[0])
+                # 统一渲染：这里不做强制替换。
 
         # Apply post dictionary after translating
         post_dict = load_dictionary(self.post_dict)
@@ -2504,7 +2509,8 @@ class MangaTranslator:
                 if debug_img is not None:
                     try:
                         debug_path = self._result_path('balloon_fill_boxes.png')
-                        imwrite_unicode(debug_path, cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR), logger)
+                        # debug_img 在 rendering 阶段已统一为 BGR，这里直接保存
+                        imwrite_unicode(debug_path, debug_img, logger)
                         logger.info(f"📸 Balloon fill debug image saved: {debug_path}")
                     except Exception as e:
                         logger.error(f"Failed to save balloon_fill debug image: {e}")
@@ -3614,20 +3620,6 @@ class MangaTranslator:
                 raise 
             ctx.text_regions = []
 
-        # -- 过滤列表：根据 OCR 识别的原文过滤
-        if ctx.text_regions and self.filter_text_enabled:
-            filtered_regions = []
-            for region in ctx.text_regions:
-                match_result = match_filter(region.text)
-                if match_result:
-                    matched_word, match_type = match_result
-                    logger.info(f'过滤文本区域 ({match_type}匹配): "{region.text}" -> 匹配: "{matched_word}"')
-                else:
-                    filtered_regions.append(region)
-            if len(filtered_regions) < len(ctx.text_regions):
-                logger.info(f'过滤列表: 过滤了 {len(ctx.text_regions) - len(filtered_regions)} 个文本区域')
-            ctx.text_regions = filtered_regions
-
         if self.verbose and ctx.text_regions:
             show_panels = not config.force_simple_sort  # 当不使用简单排序时显示panel
             bboxes = visualize_textblocks(cv2.cvtColor(ctx.img_rgb, cv2.COLOR_BGR2RGB), ctx.text_regions, 
@@ -4345,14 +4337,7 @@ class MangaTranslator:
             ["】", ")", "）", "」", "』", "]"],
         ]
 
-        replace_items = [
-            ["「", "“"],
-            ["「", "‘"],
-            ["」", "”"],
-            ["」", "”"],
-            ["【", "["],  
-            ["】", "]"],  
-        ]
+        # 统一渲染：不在翻译后阶段强制替换引号/括号，交由渲染层处理。
 
         for region in ctx.text_regions:
             if region.text and region.translation:
@@ -4395,10 +4380,7 @@ class MangaTranslator:
                         for t in v[1:]:
                             region.translation = region.translation.replace(t, v[0])
 
-                # 强制替换规则
-                # Forced replacement rules
-                for v in replace_items:
-                    region.translation = region.translation.replace(v[1], v[0])
+                # 统一渲染：这里不做强制替换。
 
         # 注意：翻译结果的保存移动到了translate方法的最后，确保保存的是最终结果
 

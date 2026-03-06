@@ -233,6 +233,8 @@ class GeminiHighQualityTranslator(CommonTranslator):
         """高质量批量翻译方法"""
         if not texts:
             return []
+        if batch_data is None:
+            batch_data = []
         
         # 保存参数供重试时使用
         _source_lang = source_lang
@@ -249,14 +251,22 @@ class GeminiHighQualityTranslator(CommonTranslator):
         # 打印图片信息
         self.logger.info("--- Image Info ---")
         for i, data in enumerate(batch_data):
-            image = data['image']
-            self.logger.info(f"Image {i+1}: size={image.size}, mode={image.mode}")
+            image = data.get('image')
+            if image is None:
+                self.logger.info(f"Image {i+1}: missing image data (None), skip upload")
+                continue
+            image_size = getattr(image, "size", None)
+            image_mode = getattr(image, "mode", None)
+            self.logger.info(f"Image {i+1}: size={image_size}, mode={image_mode}")
         self.logger.info("--------------------")
 
         # 准备图片列表（放在最后）- 使用新版 SDK 的 Part 格式
         image_parts = []
-        for data in batch_data:
-            image = data['image']
+        for i, data in enumerate(batch_data):
+            image = data.get('image')
+            if image is None:
+                self.logger.debug(f"图片[{i + 1}] 缺少图像数据，跳过图片上传")
+                continue
             
             # 在图片上绘制带编号的文本框
             text_regions = data.get('text_regions', [])
@@ -274,8 +284,12 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 self.logger.debug(f"已在图片上绘制 {len(text_regions)} 个带编号的文本框")
             
             # 使用新版 SDK 的格式
-            image_bytes, mime_type = encode_image_for_gemini(image)
-            image_parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+            try:
+                image_bytes, mime_type = encode_image_for_gemini(image)
+                image_parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+            except Exception as image_error:
+                self.logger.warning(f"图片[{i + 1}] 处理失败，跳过上传: {image_error}")
+                continue
         
         # 初始化重试信息
         retry_attempt = 0
@@ -292,7 +306,9 @@ class GeminiHighQualityTranslator(CommonTranslator):
         should_retry_without_safety = False
         
         # 标记是否发送图片（降级机制）
-        send_images = True
+        send_images = len(image_parts) > 0
+        if not send_images:
+            self.logger.info("未提供可用图片，Gemini HQ将使用纯文本请求模式")
 
         while is_infinite or attempt < max_retries:
             # 检查是否被取消

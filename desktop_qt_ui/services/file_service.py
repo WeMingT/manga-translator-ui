@@ -148,7 +148,7 @@ class FileService:
                     if upscale_ratio > 0 and raw_mask is not None:
                         new_height = int(raw_mask.shape[0] / upscale_ratio)
                         new_width = int(raw_mask.shape[1] / upscale_ratio)
-                        raw_mask = cv2.resize(raw_mask, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                        raw_mask = cv2.resize(raw_mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
                         self.logger.info(f"蒙版已缩小到原图比例: {raw_mask.shape}")
                 except Exception as e:
                     self.logger.error(f"Failed to decode base64 mask in {os.path.basename(json_path)}: {e}")
@@ -159,7 +159,7 @@ class FileService:
                 if upscale_ratio > 0 and raw_mask is not None:
                     new_height = int(raw_mask.shape[0] / upscale_ratio)
                     new_width = int(raw_mask.shape[1] / upscale_ratio)
-                    raw_mask = cv2.resize(raw_mask, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                    raw_mask = cv2.resize(raw_mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
                     self.logger.info(f"蒙版已缩小到原图比例: {raw_mask.shape}")
             
             original_size = (image_data.get('original_width'), image_data.get('original_height'))

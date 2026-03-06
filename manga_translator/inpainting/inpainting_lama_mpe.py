@@ -66,7 +66,7 @@ def load_masked_position_encoding(mask: np.ndarray) -> Tuple[np.ndarray, np.ndar
     pos_num = 128
     
     # Normalize original mask
-    ori_mask = (mask > 127).astype(np.float32)
+    ori_mask = (mask > 0).astype(np.float32)
     
     # Resize mask to fixed size for computation
     mask_resized = cv2.resize(mask, (str_size, str_size), interpolation=cv2.INTER_AREA)
@@ -226,8 +226,7 @@ class LamaMPEInpainter(OfflineInpainter):
         # ✅ PyTorch推理（原有逻辑）
         img_original = np.copy(image)
         mask_original = np.copy(mask)
-        mask_original[mask_original < 127] = 0
-        mask_original[mask_original >= 127] = 1
+        mask_original = np.where(mask_original > 0, 1, 0).astype(np.uint8)
         mask_original = mask_original[:, :, None]
 
         height, width, c = image.shape
@@ -246,7 +245,8 @@ class LamaMPEInpainter(OfflineInpainter):
             new_w = w
         if new_h != h or new_w != w:
             image = cv2.resize(image, (new_w, new_h), interpolation = cv2.INTER_LINEAR)
-            mask = cv2.resize(mask, (new_w, new_h), interpolation = cv2.INTER_LINEAR)
+            mask = cv2.resize(mask, (new_w, new_h), interpolation = cv2.INTER_NEAREST)
+        mask = np.where(mask > 0, 255, 0).astype(np.uint8)
         self.logger.info(f'Inpainting resolution: {new_w}x{new_h}')
         if isinstance(self.model, LamaFourier):
             img_torch = torch.from_numpy(image).permute(2, 0, 1).unsqueeze_(0).float() / 255.
@@ -291,8 +291,9 @@ class LamaMPEInpainter(OfflineInpainter):
         # 如果mask_original尺寸不匹配，resize它
         if mask_original.shape[:2] != img_inpainted.shape[:2]:
             self.logger.warning(f"Resizing mask_original from {mask_original.shape} to match img_inpainted {img_inpainted.shape[:2]}")
-            mask_original = cv2.resize(mask_original, (img_inpainted.shape[1], img_inpainted.shape[0]), interpolation = cv2.INTER_LINEAR)
+            mask_original = cv2.resize(mask_original, (img_inpainted.shape[1], img_inpainted.shape[0]), interpolation = cv2.INTER_NEAREST)
             mask_original = mask_original[:, :, None] if len(mask_original.shape) == 2 else mask_original
+            mask_original = np.where(mask_original > 0, 1, 0).astype(np.uint8)
         
         ans = img_inpainted * mask_original + img_original * (1 - mask_original)
         
@@ -302,8 +303,7 @@ class LamaMPEInpainter(OfflineInpainter):
         """ONNX推理方法（包含MPE计算）- 采用Rust策略：padding而非resize"""
         img_original = np.copy(image)
         mask_original = np.copy(mask)
-        mask_original[mask_original < 127] = 0
-        mask_original[mask_original >= 127] = 1
+        mask_original = np.where(mask_original > 0, 1, 0).astype(np.uint8)
         mask_original = mask_original[:, :, None]
         
         height, width, c = image.shape
@@ -316,6 +316,8 @@ class LamaMPEInpainter(OfflineInpainter):
         else:
             mask_resized = mask
             mask_original_resized = mask_original
+        mask_resized = np.where(mask_resized > 0, 255, 0).astype(np.uint8)
+        mask_original_resized = np.where(mask_original_resized > 0, 1, 0).astype(np.uint8)
         
         # 步骤2: Padding到64的倍数（Lama FFT架构需要更大对齐值避免维度不匹配）
         # 原先 pad_size=8 在某些尺寸下会导致 FFT 中间层维度不匹配（如 168 vs 169）
@@ -370,9 +372,10 @@ class LamaMPEInpainter(OfflineInpainter):
         # 还原到原始尺寸（使用双三次插值，与Rust一致）
         if max(height, width) > inpainting_size:
             img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_CUBIC)
-            mask_original_resized = cv2.resize(mask_original_resized, (width, height), interpolation=cv2.INTER_LINEAR)
+            mask_original_resized = cv2.resize(mask_original_resized, (width, height), interpolation=cv2.INTER_NEAREST)
             if len(mask_original_resized.shape) == 2:
                 mask_original_resized = mask_original_resized[:, :, None]
+            mask_original_resized = np.where(mask_original_resized > 0, 1, 0).astype(np.uint8)
         
         ans = img_inpainted * mask_original_resized + img_original * (1 - mask_original_resized)
         
@@ -382,8 +385,7 @@ class LamaMPEInpainter(OfflineInpainter):
         """ONNX专用推理方法（MPE版本）"""
         img_original = np.copy(image)
         mask_original = np.copy(mask)
-        mask_original[mask_original < 127] = 0
-        mask_original[mask_original >= 127] = 1
+        mask_original = np.where(mask_original > 0, 1, 0).astype(np.uint8)
         mask_original = mask_original[:, :, None]
         
         height, width, c = image.shape
@@ -394,6 +396,8 @@ class LamaMPEInpainter(OfflineInpainter):
         else:
             mask_resized = mask
             mask_original_resized = mask_original
+        mask_resized = np.where(mask_resized > 0, 255, 0).astype(np.uint8)
+        mask_original_resized = np.where(mask_original_resized > 0, 1, 0).astype(np.uint8)
         
         # Padding到64的倍数（Lama FFT架构需要更大对齐值）
         pad_size = 64
@@ -444,9 +448,10 @@ class LamaMPEInpainter(OfflineInpainter):
         # Resize back
         if max(height, width) > inpainting_size:
             img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_LINEAR)
-            mask_original_resized = cv2.resize(mask_original_resized, (width, height), interpolation=cv2.INTER_LINEAR)
+            mask_original_resized = cv2.resize(mask_original_resized, (width, height), interpolation=cv2.INTER_NEAREST)
             if len(mask_original_resized.shape) == 2:
                 mask_original_resized = mask_original_resized[:, :, None]
+            mask_original_resized = np.where(mask_original_resized > 0, 1, 0).astype(np.uint8)
         
         ans = img_inpainted * mask_original_resized + img_original * (1 - mask_original_resized)
         
@@ -608,8 +613,7 @@ class LamaLargeInpainter(LamaMPEInpainter):
         try:
             img_original = np.copy(image)
             mask_original = np.copy(mask)
-            mask_original[mask_original < 127] = 0
-            mask_original[mask_original >= 127] = 1
+            mask_original = np.where(mask_original > 0, 1, 0).astype(np.uint8)
             mask_original = mask_original[:, :, None]
             
             height, width, c = image.shape
@@ -620,6 +624,7 @@ class LamaLargeInpainter(LamaMPEInpainter):
                 mask_resized = resize_keep_aspect(mask_original, inpainting_size)
             else:
                 mask_resized = mask_original
+            mask_resized = np.where(mask_resized > 0, 1, 0).astype(np.uint8)
             
             # 步骤2: Padding到64的倍数（Lama FFT架构需要更大对齐值避免维度不匹配）
             pad_size = 64
@@ -669,9 +674,10 @@ class LamaLargeInpainter(LamaMPEInpainter):
             # 还原到原始尺寸（使用双三次插值，与Rust一致）
             if max(height, width) > inpainting_size:
                 img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_CUBIC)
-                mask_resized = cv2.resize(mask_resized, (width, height), interpolation=cv2.INTER_LINEAR)
+                mask_resized = cv2.resize(mask_resized, (width, height), interpolation=cv2.INTER_NEAREST)
                 if len(mask_resized.shape) == 2:
                     mask_resized = mask_resized[:, :, None]
+                mask_resized = np.where(mask_resized > 0, 1, 0).astype(np.uint8)
             
             ans = img_inpainted * mask_resized + img_original * (1 - mask_resized)
             return ans

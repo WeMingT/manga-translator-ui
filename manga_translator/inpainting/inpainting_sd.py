@@ -82,8 +82,7 @@ class StableDiffusionInpainter(OfflineInpainter):
     async def _infer(self, image: np.ndarray, mask: np.ndarray, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
         img_original = np.copy(image)
         mask_original = np.copy(mask)
-        mask_original[mask_original < 127] = 0
-        mask_original[mask_original >= 127] = 1
+        mask_original = np.where(mask_original > 0, 1, 0).astype(np.uint8)
         mask_original = mask_original[:, :, None]
 
         height, width, c = image.shape
@@ -102,7 +101,8 @@ class StableDiffusionInpainter(OfflineInpainter):
             new_w = w
         if new_h != h or new_w != w:
             image = cv2.resize(image, (new_w, new_h), interpolation = cv2.INTER_LINEAR)
-            mask = cv2.resize(mask, (new_w, new_h), interpolation = cv2.INTER_LINEAR)
+            mask = cv2.resize(mask, (new_w, new_h), interpolation = cv2.INTER_NEAREST)
+        mask = np.where(mask > 0, 255, 0).astype(np.uint8)
         self.logger.info(f'Inpainting resolution: {new_w}x{new_h}')
         tags = self.tagger.label_cv2_bgr(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
         self.logger.info(f'tags={list(tags.keys())}')

@@ -426,7 +426,6 @@ class PermissionEditor {
                 ${this.createFormRow(this.t('label_ocr', 'OCR模型'), this.createSelect('ocr', 'ocr', opts.ocr), '', 'ocr', 'ocr')}
                 ${this.createFormRow(this.t('label_secondary_ocr', '备用OCR'), this.createSelect('ocr', 'secondary_ocr', opts.secondary_ocr), '', 'ocr', 'secondary_ocr')}
                 ${this.createFormRow(this.t('label_use_hybrid_ocr', '启用混合OCR'), this.createCheckbox('ocr', 'use_hybrid_ocr'), '', 'ocr', 'use_hybrid_ocr')}
-                ${this.createFormRow(this.t('label_use_mocr_merge', '合并 MangaOCR 结果'), this.createCheckbox('ocr', 'use_mocr_merge'), '使用Manga OCR的边界框合并', 'ocr', 'use_mocr_merge')}
                 ${this.createFormRow(this.t('label_min_text_length', '最小文本长度'), this.createInput('ocr', 'min_text_length', 'number'), '', 'ocr', 'min_text_length')}
                 ${this.createFormRow(this.t('label_ignore_bubble', '忽略非气泡文本'), this.createInput('ocr', 'ignore_bubble', 'number', '0', '1', '0.01'), '忽略非气泡区域文本的阈值(0-1)，0=禁用，0.01-0.3=宽松，0.3-0.7=中等，0.7-1.0=严格', 'ocr', 'ignore_bubble')}
                 ${this.createFormRow(this.t('label_use_model_bubble_filter', '启用模型气泡过滤'), this.createCheckbox('ocr', 'use_model_bubble_filter'), '启用后仅保留与模型检测气泡有重叠的文本区域', 'ocr', 'use_model_bubble_filter')}

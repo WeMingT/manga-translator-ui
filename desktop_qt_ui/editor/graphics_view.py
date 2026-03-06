@@ -4,18 +4,17 @@ import cv2
 import numpy as np
 from manga_translator.utils import TextBlock, rotate_polygons
 from PIL.ImageQt import ImageQt
-from PyQt6.QtCore import QPointF, Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import (
     QColor,
     QCursor,
     QImage,
     QPainter,
-    QPainterPath,
     QPen,
     QPixmap,
     QTransform,
 )
-from PyQt6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QMenu
+from PyQt6.QtWidgets import QApplication, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QMenu, QToolTip
 
 # --- 新增Imports for Refactoring ---
 from editor import text_renderer_backend
@@ -46,6 +45,8 @@ class GraphicsView(QGraphicsView):
     """
     region_geometry_changed = pyqtSignal(int, dict)
     _layout_result_ready = pyqtSignal(list)  # 布局计算结果信号
+    color_picked = pyqtSignal(str, str)  # target, hex_color
+    color_pick_cancelled = pyqtSignal()
 
     def __init__(self, model: EditorModel, parent=None):
         super().__init__(parent)
@@ -69,10 +70,12 @@ class GraphicsView(QGraphicsView):
         # --- Mask Editing State ---
         self._active_tool = 'select'
         self._brush_size = 30
+        self._color_pick_target: str | None = None
+        self._color_pick_cursor_override = False
         self._is_drawing = False
-        self._mask_image: QImage = None # Holds the mask for painting
-        self._last_pos = None
-        self._current_draw_path: QPainterPath = None
+        self._current_draw_scene_points: list[QPointF] = []
+        self._current_draw_mask_points: list[tuple[int, int]] = []
+        self._current_draw_mask_shape: tuple[int, int] | None = None
 
         # 拖动相关状态
         self._potential_drag = False  # 是否可能开始拖动
@@ -167,8 +170,14 @@ class GraphicsView(QGraphicsView):
 
     def clear_all_state(self):
         """清空所有状态,包括items、缓存、计时器"""
+        if self._color_pick_target is not None:
+            self._color_pick_target = None
+            self._clear_color_pick_preview()
+            self.color_pick_cancelled.emit()
+        self._clear_color_pick_cursor_override()
         self.selection_manager.suppress_forward_sync(True)  # 防止 removeItem 触发选择同步
         try:
+            self._reset_drawing_state()
             # 停止防抖计时器
             if hasattr(self, 'render_debounce_timer') and self.render_debounce_timer.isActive():
                 self.render_debounce_timer.stop()
@@ -306,7 +315,7 @@ class GraphicsView(QGraphicsView):
 
         h, w = mask_array.shape[:2]
         color_mask = np.zeros((h, w, 4), dtype=np.uint8)
-        color_mask[mask_array > 128] = [255, 0, 0, 128]
+        color_mask[mask_array > 0] = [255, 0, 0, 128]
         # 【关键修复】使用.copy()确保QImage拥有自己的内存，防止numpy数组被回收后崩溃
         q_image = QImage(color_mask.data, w, h, w * 4, QImage.Format.Format_ARGB32).copy()
         pixmap = QPixmap.fromImage(q_image)
@@ -954,6 +963,83 @@ class GraphicsView(QGraphicsView):
 
         self._update_cursor() # Update cursor size on zoom
 
+    @pyqtSlot(str)
+    def start_color_pick(self, target: str):
+        if target not in ("font", "stroke"):
+            return
+        if self._image_item is None or self._image_np is None:
+            self.color_pick_cancelled.emit()
+            return
+        self._color_pick_target = target
+        self._ensure_color_pick_cursor_override()
+        self._update_cursor()
+        self._update_color_pick_preview_at_global(QCursor.pos())
+
+    @pyqtSlot()
+    def cancel_color_pick(self):
+        if self._color_pick_target is None:
+            return
+        self._color_pick_target = None
+        self._clear_color_pick_preview()
+        self._clear_color_pick_cursor_override()
+        self._update_cursor()
+        self.color_pick_cancelled.emit()
+
+    def _sample_color_info_from_view_pos(self, pos) -> tuple[str, int, int, int] | None:
+        if self._image_item is None or self._image_np is None:
+            return None
+
+        scene_point = self.mapToScene(pos)
+        image_point = self._image_item.mapFromScene(scene_point)
+
+        x = float(image_point.x())
+        y = float(image_point.y())
+        h, w = self._image_np.shape[:2]
+        if x < 0.0 or y < 0.0 or x >= float(w) or y >= float(h):
+            return None
+
+        xi = min(max(int(round(x)), 0), w - 1)
+        yi = min(max(int(round(y)), 0), h - 1)
+        r, g, b = self._image_np[yi, xi][:3]
+        return f"#{int(r):02x}{int(g):02x}{int(b):02x}", int(r), int(g), int(b)
+
+    def _sample_color_from_view_pos(self, pos) -> str | None:
+        info = self._sample_color_info_from_view_pos(pos)
+        if info is None:
+            return None
+        return info[0]
+
+    def _update_color_pick_preview_at_view_pos(self, view_pos):
+        info = self._sample_color_info_from_view_pos(view_pos)
+        if info is None:
+            QToolTip.hideText()
+            return
+        hex_color, r, g, b = info
+        tip = (
+            f"<span style='display:inline-block;width:10px;height:10px;"
+            f"background:{hex_color};border:1px solid #fff;'></span> "
+            f"{hex_color.upper()}  RGB({r}, {g}, {b})"
+        )
+        global_pos = self.mapToGlobal(view_pos + QPoint(16, 18))
+        QToolTip.showText(global_pos, tip, self.viewport())
+
+    def _update_color_pick_preview_at_global(self, global_pos: QPoint):
+        self._update_color_pick_preview_at_view_pos(self.mapFromGlobal(global_pos))
+
+    def _clear_color_pick_preview(self):
+        QToolTip.hideText()
+
+    def _ensure_color_pick_cursor_override(self):
+        if not self._color_pick_cursor_override:
+            QApplication.setOverrideCursor(QCursor(Qt.CursorShape.CrossCursor))
+            self._color_pick_cursor_override = True
+
+    def _clear_color_pick_cursor_override(self):
+        if self._color_pick_cursor_override:
+            if QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
+            self._color_pick_cursor_override = False
+
     def mousePressEvent(self, event):
         """处理鼠标按下事件以实现平移、选择和开始绘图"""
         # 确保点击画布时，保存文本框的编辑内容
@@ -963,6 +1049,23 @@ class GraphicsView(QGraphicsView):
         
         # 让画布获取焦点
         self.setFocus()
+
+        if self._color_pick_target is not None:
+            if event.button() == Qt.MouseButton.LeftButton:
+                color_hex = self._sample_color_from_view_pos(event.pos())
+                if color_hex:
+                    target = self._color_pick_target
+                    self._color_pick_target = None
+                    self._clear_color_pick_preview()
+                    self._clear_color_pick_cursor_override()
+                    self._update_cursor()
+                    self.color_picked.emit(target, color_hex)
+                event.accept()
+                return
+            if event.button() == Qt.MouseButton.RightButton:
+                self.cancel_color_pick()
+                event.accept()
+                return
         
         if self._active_tool == 'draw_textbox' and event.button() == Qt.MouseButton.LeftButton:
             self._start_drawing_textbox(event.pos())
@@ -1033,6 +1136,11 @@ class GraphicsView(QGraphicsView):
 
     def mouseMoveEvent(self, event):
         """Handle mouse move for drawing."""
+        if self._color_pick_target is not None:
+            self._update_color_pick_preview_at_view_pos(event.pos())
+            event.accept()
+            return
+
         # 处理框选
         if self.selection_manager.is_box_selecting:
             current_pos = self.mapToScene(event.pos())
@@ -1053,6 +1161,11 @@ class GraphicsView(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         """处理鼠标释放事件"""
+        if self._color_pick_target is not None:
+            if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
+                event.accept()
+                return
+
         # 处理框选完成
         if self.selection_manager.is_box_selecting and event.button() == Qt.MouseButton.LeftButton:
             ctrl_pressed = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
@@ -1079,9 +1192,16 @@ class GraphicsView(QGraphicsView):
     def _start_drawing(self, pos):
         if self._image_item is None:
             return
+        mask_shape = self._get_edit_mask_shape()
+        if mask_shape is None:
+            return
         self._is_drawing = True
-        self._current_draw_path = QPainterPath()
-        self._current_draw_path.moveTo(self.mapToScene(pos))
+        self._current_draw_scene_points = []
+        self._current_draw_mask_points = []
+        self._current_draw_mask_shape = mask_shape
+
+        scene_point = self.mapToScene(pos)
+        self._append_draw_point(scene_point)
 
         # Ensure the preview item exists and is ready
         if self._preview_item is None:
@@ -1091,89 +1211,174 @@ class GraphicsView(QGraphicsView):
             self._preview_item.setZValue(150) # Ensure preview is on top of everything
             self._scale_mask_item(self._preview_item)
         self._preview_item.setVisible(True)
+        self._redraw_preview_drawing()
 
     def _update_preview_drawing(self, pos):
         if not self._is_drawing:
             return
-        self._current_draw_path.lineTo(self.mapToScene(pos))
+        self._append_draw_point(self.mapToScene(pos))
+        self._redraw_preview_drawing()
 
-        # Draw the path on the temporary preview item
+    def _redraw_preview_drawing(self):
+        if self._preview_item is None:
+            return
+
         pixmap = self._preview_item.pixmap()
         pixmap.fill(Qt.GlobalColor.transparent) # Clear previous preview
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._current_draw_scene_points:
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Different preview for different tools
-        if self._active_tool in ['pen', 'brush']:
-            # Pen preview: semi-transparent red for addition
-            preview_pen = QPen(QColor(255, 0, 0, 128), self._brush_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            if self._active_tool in ['pen', 'brush']:
+                preview_pen = QPen(QColor(255, 0, 0, 128), self._brush_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            else:
+                preview_pen = QPen(QColor(0, 150, 255, 100), self._brush_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
             painter.setPen(preview_pen)
-            painter.drawPath(self._current_draw_path)
-        elif self._active_tool == 'eraser':
-            # Eraser preview: semi-transparent blue/gray for removal indication
-            preview_pen = QPen(QColor(0, 150, 255, 100), self._brush_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(preview_pen)
-            painter.drawPath(self._current_draw_path)
 
-        painter.end()
+            draw_points = [self._scene_to_image_point(point) for point in self._current_draw_scene_points]
+            if len(draw_points) == 1:
+                radius = max(1.0, self._brush_size / 2.0)
+                painter.drawEllipse(draw_points[0], radius, radius)
+            else:
+                for idx in range(1, len(draw_points)):
+                    painter.drawLine(draw_points[idx - 1], draw_points[idx])
+
+            painter.end()
 
         self._preview_item.setPixmap(pixmap)
         # Force immediate scene update for real-time feedback
         self.scene.update()
         self.viewport().update()
 
+    def _get_edit_mask_shape(self):
+        current_mask = self.model.get_refined_mask()
+        if current_mask is not None:
+            mask = np.array(current_mask)
+            if mask.ndim == 3:
+                mask = mask[:, :, 0]
+            if mask.ndim == 2 and mask.size > 0:
+                return mask.shape[0], mask.shape[1]
+        if self._image_item is None:
+            return None
+        return self._image_item.pixmap().height(), self._image_item.pixmap().width()
+
+    def _scene_to_image_point(self, scene_point: QPointF) -> QPointF:
+        if self._image_item is None:
+            return scene_point
+        image_point = self._image_item.mapFromScene(scene_point)
+        image_w = self._image_item.pixmap().width()
+        image_h = self._image_item.pixmap().height()
+        if image_w <= 0 or image_h <= 0:
+            return QPointF(0.0, 0.0)
+        x = min(max(float(image_point.x()), 0.0), float(image_w - 1))
+        y = min(max(float(image_point.y()), 0.0), float(image_h - 1))
+        return QPointF(x, y)
+
+    def _scene_to_mask_point(self, scene_point: QPointF, mask_shape: tuple[int, int]):
+        if self._image_item is None:
+            return None
+        mask_h, mask_w = mask_shape
+        if mask_h <= 0 or mask_w <= 0:
+            return None
+
+        image_point = self._scene_to_image_point(scene_point)
+        image_w = self._image_item.pixmap().width()
+        image_h = self._image_item.pixmap().height()
+        if image_w <= 0 or image_h <= 0:
+            return None
+
+        x_ratio = float(image_point.x()) / float(max(image_w - 1, 1))
+        y_ratio = float(image_point.y()) / float(max(image_h - 1, 1))
+        x_mask = int(round(x_ratio * float(max(mask_w - 1, 0))))
+        y_mask = int(round(y_ratio * float(max(mask_h - 1, 0))))
+        x_mask = min(max(x_mask, 0), mask_w - 1)
+        y_mask = min(max(y_mask, 0), mask_h - 1)
+        return x_mask, y_mask
+
+    def _append_draw_point(self, scene_point: QPointF):
+        if not self._is_drawing or self._current_draw_mask_shape is None:
+            return
+        self._current_draw_scene_points.append(scene_point)
+        mask_point = self._scene_to_mask_point(scene_point, self._current_draw_mask_shape)
+        if mask_point is None:
+            return
+        if not self._current_draw_mask_points or self._current_draw_mask_points[-1] != mask_point:
+            self._current_draw_mask_points.append(mask_point)
+
+    def _build_stroke_mask(self, points: list[tuple[int, int]], mask_shape: tuple[int, int]) -> np.ndarray:
+        mask_h, mask_w = mask_shape
+        stroke_mask = np.zeros((mask_h, mask_w), dtype=np.uint8)
+        if not points:
+            return stroke_mask
+
+        image_w = self._image_item.pixmap().width() if self._image_item else mask_w
+        image_h = self._image_item.pixmap().height() if self._image_item else mask_h
+        scale_x = float(mask_w) / float(max(image_w, 1))
+        scale_y = float(mask_h) / float(max(image_h, 1))
+        stroke_size = max(1, int(round(self._brush_size * (scale_x + scale_y) * 0.5)))
+        radius = max(1, stroke_size // 2)
+
+        if len(points) == 1:
+            cv2.circle(stroke_mask, points[0], radius, 255, thickness=-1, lineType=cv2.LINE_8)
+            return stroke_mask
+
+        for idx in range(1, len(points)):
+            cv2.line(
+                stroke_mask,
+                points[idx - 1],
+                points[idx],
+                255,
+                thickness=stroke_size,
+                lineType=cv2.LINE_8,
+            )
+        for point in points:
+            cv2.circle(stroke_mask, point, radius, 255, thickness=-1, lineType=cv2.LINE_8)
+        return stroke_mask
+
+    def _normalize_binary_mask_array(self, mask: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
+        if mask is None:
+            return np.zeros(target_shape, dtype=np.uint8)
+        mask_np = np.array(mask)
+        if mask_np.ndim == 3:
+            mask_np = mask_np[:, :, 0]
+        mask_np = np.where(mask_np > 0, 255, 0).astype(np.uint8)
+        if mask_np.shape[:2] != target_shape:
+            mask_np = cv2.resize(mask_np, (target_shape[1], target_shape[0]), interpolation=cv2.INTER_NEAREST)
+            mask_np = np.where(mask_np > 0, 255, 0).astype(np.uint8)
+        return mask_np
+
     def _finish_drawing(self):
-        if not self._is_drawing or self._current_draw_path is None or self._current_draw_path.isEmpty():
-            self._is_drawing = False
+        if not self._is_drawing or not self._current_draw_mask_points or self._current_draw_mask_shape is None:
+            self._reset_drawing_state()
             # Clear preview even if no valid path was drawn
             self._clear_preview()
             return
-        self._is_drawing = False
 
-        # Get the current mask or create a new one
         current_mask = self.model.get_refined_mask()
-        if current_mask is None:
-            old_mask_np = None
-            h, w = self._image_item.pixmap().height(), self._image_item.pixmap().width()
-            mask_image = QImage(w, h, QImage.Format.Format_Grayscale8)
-            mask_image.fill(Qt.GlobalColor.black)
-        else:
-            # 重要：创建原始蒙版的副本，避免引用问题
-            old_mask_np = current_mask.copy() if current_mask is not None else None
-            h, w = old_mask_np.shape
-            mask_image = QImage(old_mask_np.data, w, h, w, QImage.Format.Format_Grayscale8).copy()
+        old_mask_np = self._normalize_binary_mask_array(current_mask, self._current_draw_mask_shape) if current_mask is not None else None
+        base_mask = self._normalize_binary_mask_array(current_mask, self._current_draw_mask_shape)
+        stroke_mask = self._build_stroke_mask(self._current_draw_mask_points, self._current_draw_mask_shape)
 
-        # Paint the recorded path onto the actual mask image
-        painter = QPainter(mask_image)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
+        new_mask_np = base_mask.copy()
         if self._active_tool in ['pen', 'brush']:
-            final_pen = QPen(Qt.GlobalColor.white, self._brush_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            new_mask_np[stroke_mask > 0] = 255
         elif self._active_tool == 'eraser':
-            final_pen = QPen(Qt.GlobalColor.black, self._brush_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source) # Draw black to erase
+            new_mask_np[stroke_mask > 0] = 0
         else:
-            painter.end()
-            self._current_draw_path = None # Clean up path
+            self._reset_drawing_state()
             self._clear_preview()
             return
-
-        painter.setPen(final_pen)
-        painter.drawPath(self._current_draw_path)
-        painter.end()
 
         # Clear the preview immediately
         self._clear_preview()
 
-        # Convert final mask to numpy and update model
-        ptr = mask_image.constBits()
-        ptr.setsize(mask_image.sizeInBytes())
-        # Use bytesPerLine to handle row padding correctly
-        bytes_per_line = mask_image.bytesPerLine()
-        new_mask_np = np.array(ptr).reshape(mask_image.height(), bytes_per_line)
-        # Crop to actual width if there's padding
-        new_mask_np = new_mask_np[:, :mask_image.width()].copy()
+        # 没有实际变化时不写入历史
+        if old_mask_np is not None and np.array_equal(old_mask_np, new_mask_np):
+            self._reset_drawing_state()
+            return
+        if old_mask_np is None and not np.any(new_mask_np):
+            self._reset_drawing_state()
+            return
 
         # --- Refactored to Command Pattern ---
         from .commands import MaskEditCommand
@@ -1202,7 +1407,13 @@ class GraphicsView(QGraphicsView):
                 import logging
                 logging.warning("Could not find controller, updated mask directly without undo support")
 
-        self._current_draw_path = None
+        self._reset_drawing_state()
+
+    def _reset_drawing_state(self):
+        self._is_drawing = False
+        self._current_draw_scene_points = []
+        self._current_draw_mask_points = []
+        self._current_draw_mask_shape = None
 
     def _clear_preview(self):
         """Clear the preview item immediately."""
@@ -1234,12 +1445,14 @@ class GraphicsView(QGraphicsView):
 
     def _update_cursor(self):
         """Updates the cursor to match the selected tool and brush size."""
-        from PyQt6.QtWidgets import QApplication
-        
-        # 先清除所有应用级别的光标覆盖
-        while QApplication.overrideCursor():
-            QApplication.restoreOverrideCursor()
-        
+        if self._color_pick_target is not None:
+            self._ensure_color_pick_cursor_override()
+            cursor = QCursor(Qt.CursorShape.CrossCursor)
+            self.setCursor(cursor)
+            self.viewport().setCursor(cursor)
+            return
+        self._clear_color_pick_cursor_override()
+
         if self._active_tool in ['pen', 'eraser', 'brush']:
             size = max(10, int(self._brush_size * self.transform().m11()))
 
@@ -1287,10 +1500,16 @@ class GraphicsView(QGraphicsView):
     def enterEvent(self, event):
         """Handle mouse enter event."""
         self._update_cursor()
+        if self._color_pick_target is not None:
+            self._update_color_pick_preview_at_global(QCursor.pos())
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         """Handle mouse leave event."""
+        if self._color_pick_target is not None:
+            self._clear_color_pick_preview()
+            super().leaveEvent(event)
+            return
         # Reset cursor when leaving the view
         self.unsetCursor()
         self.viewport().unsetCursor()

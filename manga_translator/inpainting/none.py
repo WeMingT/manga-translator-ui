@@ -14,8 +14,8 @@ class NoneInpainter(CommonInpainter):
         if len(mask.shape) == 3:
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         
-        # 二值化蒙版，避免灰色区域导致不完全覆盖
-        _, mask_binary = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
+        # 二值化蒙版，统一按 >0 处理
+        mask_binary = np.where(mask > 0, 255, 0).astype(np.uint8)
         
         # 将蒙版区域涂成纯白色
         img_inpainted[mask_binary > 0] = np.array([255, 255, 255], np.uint8)

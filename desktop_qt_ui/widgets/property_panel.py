@@ -106,6 +106,7 @@ class PropertyPanel(QWidget):
     mask_tool_changed = pyqtSignal(str)
     brush_size_changed = pyqtSignal(int)
     toggle_mask_visibility = pyqtSignal(bool)
+    clear_all_masks_requested = pyqtSignal()
 
     def __init__(self, model, app_logic, parent=None):
         super().__init__(parent)
@@ -225,6 +226,9 @@ class PropertyPanel(QWidget):
         self.show_refined_mask_checkbox = QCheckBox(self._t("Show Refined Mask"))
         self.show_refined_mask_checkbox.setChecked(False)  # 默认关闭
         mask_layout.addWidget(self.show_refined_mask_checkbox)
+
+        self.clear_all_masks_button = QPushButton(self._t("Clear All Masks"))
+        mask_layout.addWidget(self.clear_all_masks_button)
         layout.addWidget(self.mask_edit_frame)
 
     def _create_text_section(self, layout):
@@ -453,6 +457,7 @@ class PropertyPanel(QWidget):
         self.mask_tool_group.buttonClicked.connect(self._on_mask_tool_changed)
         self.brush_size_slider.valueChanged.connect(self._on_brush_size_changed)
         self.show_refined_mask_checkbox.stateChanged.connect(lambda state: self.toggle_mask_visibility.emit(bool(state)))
+        self.clear_all_masks_button.clicked.connect(self.clear_all_masks_requested.emit)
 
         # Style
         self.font_family_combo.currentIndexChanged.connect(self._on_font_family_changed)
@@ -664,6 +669,8 @@ class PropertyPanel(QWidget):
         # 刷新复选框
         if hasattr(self, 'show_refined_mask_checkbox'):
             self.show_refined_mask_checkbox.setText(self._t("Show Refined Mask"))
+        if hasattr(self, 'clear_all_masks_button'):
+            self.clear_all_masks_button.setText(self._t("Clear All Masks"))
         
         # 刷新下拉菜单（重新填充以使用新的翻译）
         self._refresh_combo_boxes()

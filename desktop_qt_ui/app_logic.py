@@ -93,7 +93,7 @@ class MainAppLogic(QObject):
     output_path_updated = pyqtSignal(str)
     task_completed = pyqtSignal(list)
     task_file_completed = pyqtSignal(dict)
-    log_message = pyqtSignal(str)
+    error_dialog_requested = pyqtSignal(str)
     render_setting_changed = pyqtSignal()
 
     def __init__(self):
@@ -130,14 +130,9 @@ class MainAppLogic(QObject):
     
     def _ui_log(self, message: str, level: str = "INFO"):
         """
-        输出到UI日志列表和日志文件
+        输出到日志文件
         使用 root logger 确保写入 main.py 配置的日志文件
         """
-        from datetime import datetime, timezone
-        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        formatted_msg = f"{timestamp} - {level} - {message}"
-        
-        # 使用 root logger 输出到日志文件和控制台
         try:
             root_logger = logging.getLogger()
             if level == "ERROR":
@@ -149,14 +144,7 @@ class MainAppLogic(QObject):
             else:
                 root_logger.info(message)
         except Exception:
-            # 如果logging失败，使用print作为备用
-            print(formatted_msg)
-        
-        # 输出到UI日志列表
-        try:
-            self.log_message.emit(formatted_msg)
-        except Exception:
-            pass  # UI可能已崩溃，忽略错误
+            print(f"{level} - {message}")
 
 
     @pyqtSlot(dict)
@@ -362,7 +350,7 @@ class MainAppLogic(QObject):
 
     @pyqtSlot(str)
     def on_worker_log(self, message):
-        self.log_message.emit(message)
+        self.logger.info(message)
 
     @pyqtSlot()
     def select_output_folder(self):
@@ -943,7 +931,6 @@ class MainAppLogic(QObject):
                     "high_quality_prompt_path": self._t("label_high_quality_prompt_path"),
                     "extract_glossary": self._t("label_extract_glossary"),
                     "use_custom_api_params": self._t("label_use_custom_api_params"),
-                    "use_mocr_merge": self._t("label_use_mocr_merge"),
                     "ocr": self._t("label_ocr"),
                     "use_hybrid_ocr": self._t("label_use_hybrid_ocr"),
                     "secondary_ocr": self._t("label_secondary_ocr"),
@@ -1834,15 +1821,17 @@ class MainAppLogic(QObject):
         if task_id != self.current_task_id:
             return
         
-        # 错误信息已在 worker 中通过详细错误提示框显示，这里不再重复输出
         self.state_manager.set_translating(False)
-        self.state_manager.set_status_message(f"任务失败: {error_message}")
+        self.state_manager.set_status_message(f"任务失败")
         
         # 重置主视图的进度条
         if hasattr(self, 'main_view') and self.main_view:
             self.main_view.reset_progress()
         
-        # ✅ 清理worker引用
+        # 弹出错误提示框
+        self.error_dialog_requested.emit(error_message)
+        
+        # 清理worker引用
         self.current_worker = None
 
     def on_task_progress(self, current, total, message):
@@ -2321,7 +2310,7 @@ class TranslationWorker(QObject):
             friendly_msg += "🔍 错误原因：AI断句检查失败\n\n"
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   AI翻译时未能正确添加断句标记 [BR]，导致多次重试后仍然失败。\n\n"
-            friendly_msg += "💡 解决方案（选择其一）：\n"
+            friendly_msg += "解决方案（选择其一）：\n"
             friendly_msg += "   1. ⭐ 关闭「AI断句检查」选项（推荐）\n"
             friendly_msg += "      - 位置：高级设置 → 渲染设置 → AI断句检查\n"
             friendly_msg += "      - 说明：允许AI在少数情况下不添加断句标记\n\n"
@@ -2345,7 +2334,7 @@ class TranslationWorker(QObject):
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   AI返回的翻译条数与原文条数不一致。\n"
             friendly_msg += "   这通常是因为AI将多条文本合并翻译，或漏掉了某些文本。\n\n"
-            friendly_msg += "💡 解决方案（选择其一）：\n"
+            friendly_msg += "解决方案（选择其一）：\n"
             friendly_msg += "   1. ⭐ 增加「重试次数」（推荐）\n"
             friendly_msg += "      - 位置：通用设置 → 重试次数\n"
             friendly_msg += "      - 建议：设置为 10 或更高（-1 表示无限重试）\n"
@@ -2363,7 +2352,7 @@ class TranslationWorker(QObject):
             friendly_msg += "🔍 错误原因：翻译质量检查失败\n\n"
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   AI返回的翻译存在质量问题，如空翻译、合并翻译或可疑符号。\n\n"
-            friendly_msg += "💡 解决方案（选择其一）：\n"
+            friendly_msg += "解决方案（选择其一）：\n"
             friendly_msg += "   1. ⭐ 增加「重试次数」（推荐）\n"
             friendly_msg += "      - 位置：通用设置 → 重试次数\n"
             friendly_msg += "      - 建议：设置为 10 或更高（-1 表示无限重试）\n\n"
@@ -2387,7 +2376,7 @@ class TranslationWorker(QObject):
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   当前请求没有返回可解析的文本内容（OpenAI/Gemini 都可能出现）。\n"
             friendly_msg += "   可能是触发了内容审核，或者服务器繁忙导致临时空回。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. ⭐ 更换模型（推荐）\n"
             friendly_msg += "      - OpenAI：gpt-5.2、gpt-5.2-mini\n"
             friendly_msg += "      - Gemini：gemini-3-pro、gemini-3-flash\n\n"
@@ -2410,7 +2399,7 @@ class TranslationWorker(QObject):
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   当前使用的是「高质量翻译器」（OpenAI高质量翻译 或 Gemini高质量翻译），\n"
             friendly_msg += "   这些翻译器需要发送图片给AI进行分析，但当前模型不支持图片输入。\n\n"
-            friendly_msg += "💡 解决方案（选择其一）：\n"
+            friendly_msg += "解决方案（选择其一）：\n"
             friendly_msg += "   1. ⭐ 切换到普通翻译器（推荐）\n"
             friendly_msg += "      - 位置：翻译设置 → 翻译器\n"
             friendly_msg += "      - 将「OpenAI高质量翻译」改为「OpenAI」\n"
@@ -2428,7 +2417,7 @@ class TranslationWorker(QObject):
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   API返回了HTML格式的404错误页面，而不是正常的JSON响应。\n"
             friendly_msg += "   这通常意味着API地址错误或模型名称不存在。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. ⭐ 检查API地址配置（最常见）\n"
             friendly_msg += "      - 位置：翻译设置 → 环境变量 → OPENAI_API_BASE\n"
             friendly_msg += "      - 正确格式：https://api.openai.com/v1\n"
@@ -2448,7 +2437,7 @@ class TranslationWorker(QObject):
             friendly_msg += "🔍 错误原因：API密钥验证失败\n\n"
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   API密钥无效、过期或未正确配置。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. 检查API密钥是否正确\n"
             friendly_msg += "      - 位置：翻译设置 → 环境变量配置区域\n"
             friendly_msg += "      - 确认密钥没有多余的空格或换行\n\n"
@@ -2463,7 +2452,7 @@ class TranslationWorker(QObject):
             friendly_msg += "🔍 错误原因：网络连接失败\n\n"
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   无法连接到API服务器，可能是网络问题或需要代理。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. 检查网络连接\n"
             friendly_msg += "      - 确认电脑可以正常访问互联网\n\n"
             friendly_msg += "   2. 检查API地址是否正确\n"
@@ -2479,7 +2468,7 @@ class TranslationWorker(QObject):
             friendly_msg += "   • 账户余额不足或欠费\n"
             friendly_msg += "   • 请求速率超过限制（RPM/TPM）\n"
             friendly_msg += "   • 当前账户级别不支持该模型\n\n"
-            friendly_msg += "💡 解决方案（按顺序检查）：\n"
+            friendly_msg += "解决方案（按顺序检查）：\n"
             friendly_msg += "   1. ⭐ 检查API密钥是否正确（最常见）\n"
             friendly_msg += "      - 位置：翻译设置 → 环境变量配置区域\n"
             friendly_msg += "      - 确认密钥没有多余的空格或换行\n"
@@ -2507,7 +2496,7 @@ class TranslationWorker(QObject):
             friendly_msg += "🔍 错误原因：访问被拒绝 (HTTP 403)\n\n"
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   服务器拒绝访问，可能是权限不足或地区限制。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. 检查API密钥权限\n"
             friendly_msg += "      - 确认API密钥有访问该服务的权限\n\n"
             friendly_msg += "   2. 检查账户状态\n"
@@ -2520,7 +2509,7 @@ class TranslationWorker(QObject):
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   请求的API端点不存在或模型名称错误。\n"
             friendly_msg += "   也可能是翻译器类型与API地址不匹配。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. ⭐ 检查翻译器类型是否匹配API地址（最常见）\n"
             friendly_msg += "      - 如果API地址是 xxxx/v1 格式（OpenAI兼容接口）\n"
             friendly_msg += "        → 应选择「OpenAI」或「OpenAI高质量」翻译器\n"
@@ -2545,7 +2534,7 @@ class TranslationWorker(QObject):
             friendly_msg += "🔍 错误原因：服务器内部错误 (HTTP 500)\n\n"
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   API服务器遇到内部错误，这通常是临时问题。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. ⭐ 增加重试次数（推荐）\n"
             friendly_msg += "      - 位置：通用设置 → 重试次数\n"
             friendly_msg += "      - 建议：设置为 10 或更高\n"
@@ -2571,7 +2560,7 @@ class TranslationWorker(QObject):
             friendly_msg += "   - 502: 网关接收到无效响应\n"
             friendly_msg += "   - 503: 服务暂时不可用（通常是维护或过载）\n"
             friendly_msg += "   - 504: 网关超时\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. ⭐ 等待后重试（推荐）\n"
             friendly_msg += "      - 这些错误通常是临时的\n"
             friendly_msg += "      - 等待5-10分钟后重新翻译\n\n"
@@ -2589,7 +2578,7 @@ class TranslationWorker(QObject):
             friendly_msg += "🔍 错误原因：内容被安全策略拦截\n\n"
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   AI检测到内容可能违反使用政策。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. 检查图片内容\n"
             friendly_msg += "      - 某些敏感内容可能被API拒绝处理\n\n"
             friendly_msg += "   2. 更换翻译器\n"
@@ -2601,7 +2590,7 @@ class TranslationWorker(QObject):
         # 检查是否是语言不支持错误
         elif "language not supported" in real_error.lower() or "LanguageUnsupportedException" in error_traceback:
             friendly_msg += "🔍 错误原因：翻译器不支持当前语言\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. 更换翻译器\n"
             friendly_msg += "      - 位置：翻译设置 → 翻译器\n"
             friendly_msg += "      - 建议：使用支持更多语言的翻译器（如 OpenAI、Gemini）\n\n"
@@ -2615,7 +2604,7 @@ class TranslationWorker(QObject):
             friendly_msg += "📝 详细说明：\n"
             friendly_msg += "   API服务商（可能是第三方中转）拦截了你的请求。\n"
             friendly_msg += "   这通常是中转服务的反滥用机制或内容审核导致的。\n\n"
-            friendly_msg += "💡 解决方案：\n"
+            friendly_msg += "解决方案：\n"
             friendly_msg += "   1. ⭐ 更换API服务商（推荐）\n"
             friendly_msg += "      - 如果使用第三方中转API，尝试更换其他服务商\n"
             friendly_msg += "      - 或者使用官方API（如 api.openai.com）\n\n"
@@ -2631,7 +2620,7 @@ class TranslationWorker(QObject):
         else:
             friendly_msg += "🔍 错误原因：\n"
             friendly_msg += f"   {error_message}\n\n"
-            friendly_msg += "💡 通用解决方案：\n"
+            friendly_msg += "通用解决方案：\n"
             friendly_msg += "   1. 检查配置是否正确\n"
             friendly_msg += "      - 翻译器、API密钥、模型名称等\n\n"
             friendly_msg += "   2. 增加重试次数\n"
@@ -2889,19 +2878,19 @@ class TranslationWorker(QObject):
             cli_config = self.config_dict.get('cli', {})
             if cli_config.get('upscale_only', False):
                 workflow_mode = self._t("Upscale Only")
-                workflow_tip = self._t("💡 Tip: Only upscale images, no detection, OCR, translation or rendering")
+                workflow_tip = self._t("Tip: Only upscale images, no detection, OCR, translation or rendering")
             elif cli_config.get('colorize_only', False):
                 workflow_mode = self._t("Colorize Only")
-                workflow_tip = self._t("💡 Tip: Only colorize images, no detection, OCR, translation or rendering")
+                workflow_tip = self._t("Tip: Only colorize images, no detection, OCR, translation or rendering")
             elif cli_config.get('generate_and_export', False):
                 workflow_mode = self._t("Export Translation")
-                workflow_tip = self._t("💡 Tip: After exporting, check manga_translator_work/translations/ for imagename_translated.txt files")
+                workflow_tip = self._t("Tip: After exporting, check manga_translator_work/translations/ for imagename_translated.txt files")
             elif cli_config.get('template', False):
                 workflow_mode = self._t("Export Original Text")
-                workflow_tip = self._t("💡 Tip: After exporting, manually translate imagename_original.txt in manga_translator_work/originals/, then use 'Import Translation and Render' mode")
+                workflow_tip = self._t("Tip: After exporting, manually translate imagename_original.txt in manga_translator_work/originals/, then use 'Import Translation and Render' mode")
             elif cli_config.get('load_text', False):
                 workflow_mode = self._t("Import Translation and Render")
-                workflow_tip = self._t("💡 Tip: Will read TXT files from manga_translator_work/originals/ or translations/ and render (prioritize _original.txt)")
+                workflow_tip = self._t("Tip: Will read TXT files from manga_translator_work/originals/ or translations/ and render (prioritize _original.txt)")
                 
                 # TXT导入JSON的预处理已经统一到翻译器入口（manga_translator.py），这里不再需要
 
@@ -3589,6 +3578,7 @@ class TranslationRunnable(QRunnable):
             worker.log_received.connect(lambda msg: self._emit_log(msg))
             worker.progress.connect(lambda c, t, m: self._emit_progress(c, t, m))
             worker.file_processed.connect(lambda d: self._emit_file_processed(d))
+            worker.error.connect(lambda msg: self._emit_error(msg))
             worker.finished.connect(on_worker_finished)
             
             self._current_task = loop.create_task(worker._do_processing())

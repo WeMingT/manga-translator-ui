@@ -881,7 +881,8 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
     # Prepare debug image for balloon_fill mode (only when requested)
     debug_img = None
     if mode == 'balloon_fill' and original_img is not None and return_debug_img:
-        debug_img = original_img.copy()
+        # OpenCV 绘制 API 使用 BGR 颜色；调试图统一转为 BGR，避免颜色对不上
+        debug_img = cv2.cvtColor(original_img, cv2.COLOR_RGB2BGR)
         logger.debug("Created debug image for balloon_fill visualization")
 
     balloon_fill_mask = None
@@ -895,15 +896,25 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             logger.debug(
                 f"balloon_fill model mask prepared: detections={detected}, mask_pixels={mask_pixels}"
             )
+            if mask_pixels == 0 and debug_img is not None:
+                logger.warning("balloon_fill global bubble mask is empty (mask_pixels=0), blue overlay will not be visible")
             if mask_pixels > 0:
                 _, balloon_fill_label_map = cv2.connectedComponents(
                     np.where(balloon_fill_mask > 0, 1, 0).astype(np.uint8),
                     connectivity=8,
                 )
                 if debug_img is not None:
-                    contours, _ = cv2.findContours(balloon_fill_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    # 在调试图上渲染“蓝色蒙版区域”（半透明填充）+ 蓝色边界，提升可见性
+                    mask_u8 = np.where(balloon_fill_mask > 0, 255, 0).astype(np.uint8)
+                    mask_pixels_idx = mask_u8 > 0
+                    if np.any(mask_pixels_idx):
+                        overlay = debug_img.copy()
+                        overlay[mask_pixels_idx] = (255, 0, 0)  # BGR 蓝色
+                        cv2.addWeighted(overlay, 0.22, debug_img, 0.78, 0, dst=debug_img)
+
+                    contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                     if contours:
-                        cv2.drawContours(debug_img, contours, -1, (255, 0, 0), 1)
+                        cv2.drawContours(debug_img, contours, -1, (255, 0, 0), 2)
         except Exception as exc:
             logger.warning(f"balloon_fill model mask failed, fallback to existing behavior: {exc}")
             balloon_fill_mask = np.zeros(original_img.shape[:2], dtype=np.uint8)
@@ -1017,6 +1028,8 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 used_smart_scaling_fallback = False
                 chosen_dst_points = None
                 chosen_font_size = int(max(target_font_size, min_font_size))
+                overflow_candidate_dst_points = None
+                preferred_font_size_for_debug = None
 
                 if not lines_fully_enclosed:
                     used_smart_scaling_fallback = True
@@ -1048,6 +1061,24 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         bubble_height = float(max(region.xywh[3], 1))
 
                     layout_target_font_size = int(target_font_size)
+                    # 对所有 balloon_fill(enclosed) 场景先做一次“框->字体”估算：
+                    # 若估算字号更大，则提升目标字号上限，避免被输入字号卡死。
+                    estimated_font_from_box = calc_font_from_box(
+                        width=float(bubble_width),
+                        height=float(bubble_height),
+                        text=region.translation,
+                        is_horizontal=render_horizontally,
+                        line_spacing=line_spacing_multiplier,
+                        config=config,
+                        target_lang=region.target_lang,
+                    )
+                    if estimated_font_from_box > layout_target_font_size:
+                        logger.debug(
+                            f"balloon_fill region {region_idx}: boost layout_target_font_size "
+                            f"{layout_target_font_size}->{estimated_font_from_box} (calc_font_from_box)"
+                        )
+                        layout_target_font_size = int(estimated_font_from_box)
+
                     if not has_br:
                         no_br_max_font_size = int(layout_target_font_size)
                         if render_horizontally:
@@ -1148,6 +1179,20 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     preferred_font_size = max(preferred_font_size, 1)
                     if config.render.max_font_size > 0:
                         preferred_font_size = min(preferred_font_size, config.render.max_font_size)
+                    preferred_font_size_for_debug = preferred_font_size
+
+                    # 调试用途：记录“超出范围候选框”（较大字号候选但不满足蒙版约束）
+                    preferred_dst_points = _calc_region_dst_points_for_font(
+                        region=region,
+                        font_size=preferred_font_size,
+                        render_horizontally=render_horizontally,
+                        line_spacing_multiplier=line_spacing_multiplier,
+                        config=config,
+                    )
+                    if preferred_dst_points is not None and preferred_dst_points.size > 0:
+                        preferred_fits = _polygon_fully_inside_mask(np.asarray(preferred_dst_points[0]), region_bubble_mask)
+                        if not preferred_fits:
+                            overflow_candidate_dst_points = preferred_dst_points
 
                     best_font_size, best_dst_points = _binary_search_font_for_bubble_mask(
                         region=region,
@@ -1204,9 +1249,12 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         cv2.polylines(debug_img, [render_poly], True, (0, 255, 0), 2)
                         label = f'B{region_idx}:{region.font_size}'
                         if used_smart_scaling_fallback:
-                            label += ':SS'
+                            label += ':SSF'
                         elif lines_fully_enclosed:
-                            label += ':S'
+                            if preferred_font_size_for_debug is not None:
+                                label += f':ENC({preferred_font_size_for_debug}->{chosen_font_size})'
+                            else:
+                                label += f':ENC({chosen_font_size})'
                         cv2.putText(
                             debug_img,
                             label,
@@ -1216,6 +1264,21 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             (0, 255, 0),
                             1,
                         )
+
+                    if overflow_candidate_dst_points is not None:
+                        overflow_poly = np.asarray(overflow_candidate_dst_points).reshape(-1, 2).astype(np.int32)
+                        if overflow_poly.shape[0] >= 4:
+                            # BGR 橙色：表示候选框超出蒙版范围，最终被收缩/放弃
+                            cv2.polylines(debug_img, [overflow_poly], True, (0, 165, 255), 2)
+                            cv2.putText(
+                                debug_img,
+                                f'B{region_idx}:OVR',
+                                tuple(overflow_poly[0]),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.45,
+                                (0, 165, 255),
+                                1,
+                            )
             except Exception as e:
                 logger.error(f"Error in balloon_fill mode: {e}")
                 import traceback
@@ -1679,6 +1742,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
         cv2.putText(debug_img, 'Yellow = Region Bubble Component', (10, legend_y + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
         cv2.putText(debug_img, 'Blue = Global Bubble Mask', (10, legend_y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
         cv2.putText(debug_img, 'Green = Render Box', (10, legend_y + 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(debug_img, 'Orange = Overflow Candidate Box', (10, legend_y + 130), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
         return dst_points_list, debug_img
     
     return dst_points_list

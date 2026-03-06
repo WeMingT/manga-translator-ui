@@ -375,8 +375,6 @@ class CliConfig(BaseModel):
     """Replace translation mode: apply translation from one image to another raw image"""
 
 class OcrConfig(BaseModel):
-    use_mocr_merge: bool = False
-    """Use bbox merge when Manga OCR inference."""
     ocr: Ocr = Ocr.ocr48px
     """Optical character recognition (OCR) model to use"""
     use_hybrid_ocr: bool = False

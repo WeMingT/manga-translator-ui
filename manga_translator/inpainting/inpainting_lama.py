@@ -119,8 +119,7 @@ class LamaInpainter(LamaMPEInpainter):
         import cv2
         img_original = np.copy(image)
         mask_original = np.copy(mask)
-        mask_original[mask_original < 127] = 0
-        mask_original[mask_original >= 127] = 1
+        mask_original = np.where(mask_original > 0, 1, 0).astype(np.uint8)
         mask_original = mask_original[:, :, None]
         
         height, width, c = image.shape
@@ -171,9 +170,10 @@ class LamaInpainter(LamaMPEInpainter):
         # Resize back
         if max(height, width) > inpainting_size:
             img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_LINEAR)
-            mask_original_resized = cv2.resize(mask_original_resized, (width, height), interpolation=cv2.INTER_LINEAR)
+            mask_original_resized = cv2.resize(mask_original_resized, (width, height), interpolation=cv2.INTER_NEAREST)
             if len(mask_original_resized.shape) == 2:
                 mask_original_resized = mask_original_resized[:, :, None]
+            mask_original_resized = np.where(mask_original_resized > 0, 1, 0).astype(np.uint8)
         
         ans = img_inpainted * mask_original_resized + img_original * (1 - mask_original_resized)
         return ans

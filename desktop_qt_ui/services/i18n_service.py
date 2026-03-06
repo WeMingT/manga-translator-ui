@@ -316,9 +316,8 @@ class I18nManager:
         old_locale = self.current_locale
         self.current_locale = locale_code
         
-        # 如果翻译未加载，尝试加载
-        if locale_code not in self.translations:
-            self._load_locale_translation(locale_code)
+        # 每次切换语言都重载翻译，确保运行中更新的词条能立即生效
+        self._load_locale_translation(locale_code)
         
         self.logger.info(f"切换语言: {old_locale} -> {locale_code}")
         return True

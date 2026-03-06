@@ -274,7 +274,7 @@ class MangaTranslatorWS(MangaTranslator):
             return result
 
     async def _run_text_rendering(self, config: Config, ctx: Context):
-        render_mask = (ctx.mask >= 127).astype(np.uint8)[:, :, None]
+        render_mask = (ctx.mask > 0).astype(np.uint8)[:, :, None]
 
         output = await super()._run_text_rendering(config, ctx)
         render_mask[np.sum(ctx.img_rgb != output, axis=2) > 0] = 1

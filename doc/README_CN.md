@@ -598,11 +598,6 @@ shared              以 API 模式运行
     },
     "OcrConfig": {
       "properties": {
-        "use_mocr_merge": {
-          "default": false,
-          "title": "Use Mocr Merge",
-          "type": "boolean"
-        },
         "ocr": {
           "$ref": "#/$defs/Ocr",
           "default": "48px"
@@ -938,7 +933,6 @@ shared              以 API 模式运行
     "ocr": {
       "$ref": "#/$defs/OcrConfig",
       "default": {
-        "use_mocr_merge": false,
         "ocr": "48px",
         "min_text_length": 0,
         "ignore_bubble": 0
@@ -1046,7 +1040,6 @@ colorizer         使用的上色模型
 
 #### OCR参数
 ```
-use_mocr_merge    在Manga OCR推理时使用边界框合并
 ocr               使用的光学字符识别(OCR)模型
 min_text_length   文本区域的最小文本长度
 ignore_bubble     忽略非气泡区域文本的阈值，有效值范围1-50。建议5到10。如果太低，正常气泡区域可能被忽略，如果太大，非气泡区域可能被视为正常气泡

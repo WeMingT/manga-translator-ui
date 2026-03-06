@@ -46,7 +46,6 @@ class OcrService:
             min_text_length=0,
             ignore_bubble=0,
             prob=0.3,  # 最小置信度阈值
-            use_mocr_merge=False
         )
         
         # 配置服务依赖
@@ -80,7 +79,6 @@ class OcrService:
                 min_text_length=0,
                 ignore_bubble=0,
                 prob=0.3,
-                use_mocr_merge=False
             )
         
         try:
@@ -105,7 +103,6 @@ class OcrService:
             ocr_config.min_text_length = ocr_config_dict.get('min_text_length', 0)
             ocr_config.ignore_bubble = ocr_config_dict.get('ignore_bubble', 0)
             ocr_config.prob = ocr_config_dict.get('prob', 0.3)
-            ocr_config.use_mocr_merge = ocr_config_dict.get('use_mocr_merge', False)
             
             # GPU设置从CLI配置获取
             if cli_config_dict.get('use_gpu', False) and self._check_gpu_available():
@@ -122,7 +119,6 @@ class OcrService:
                 min_text_length=0,
                 ignore_bubble=0,
                 prob=0.3,
-                use_mocr_merge=False
             )
         
     def _check_gpu_available(self) -> bool:
@@ -523,7 +519,6 @@ class OcrService:
             'min_text_length': self.default_config.min_text_length,
             'ignore_bubble': self.default_config.ignore_bubble,
             'prob': self.default_config.prob,
-            'use_mocr_merge': self.default_config.use_mocr_merge,
             'device': self.device
         }
     
