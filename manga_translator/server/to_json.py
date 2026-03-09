@@ -41,6 +41,7 @@ class Translation(BaseModel):
     target_lang: str
     source_lang: str
     line_spacing: float
+    letter_spacing: float
     default_stroke_width: float
     adjust_bg_color: bool
     prob: float

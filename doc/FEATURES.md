@@ -99,10 +99,13 @@
 
 | 模型 | 说明 |
 |------|------|
-| **48px** | 默认模型，推荐使用 |
-| **48px_ctc** | CTC 模型，识别准确率更高 |
-| **mocr** | Manga OCR 专用模型 |
-| **paddleocr** | PaddleOCR 引擎 |
+| **48px** | 默认模型，日漫推荐 |
+| **48px_ctc** | CTC 变体模型，可作为备选对比 |
+| **mocr** | Manga OCR 专用模型，日漫推荐 |
+| **paddleocr** | PaddleOCR 引擎，英肉推荐 |
+| **paddleocr_korean** | 韩漫推荐 |
+
+推荐组合：日漫混合 OCR 建议使用 `48px + mocr`。
 
 ---
 

@@ -47,5 +47,12 @@ def _calc_font_size(region_data: dict, wf_local: Optional[list]) -> Optional[int
     is_h = direction in ("h", "horizontal", "hr")
     if not (text and str(text).strip() and w > 0 and h > 0):
         return None
-    fs = calc_font_from_box(w, h, text, is_h, region_data.get("line_spacing", 1.0) or 1.0)
+    fs = calc_font_from_box(
+        w,
+        h,
+        text,
+        is_h,
+        region_data.get("line_spacing", 1.0) or 1.0,
+        letter_spacing=region_data.get("letter_spacing", 1.0) or 1.0,
+    )
     return int(max(8, fs))

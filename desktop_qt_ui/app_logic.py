@@ -6,8 +6,8 @@
 import asyncio
 import logging
 import os
-import queue
 import threading
+import textwrap
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -351,6 +351,9 @@ class MainAppLogic(QObject):
 
     @pyqtSlot(str)
     def on_worker_log(self, message):
+        message = str(message).rstrip()
+        if not message:
+            return
         self.logger.info(message)
 
     @pyqtSlot()
@@ -421,6 +424,7 @@ class MainAppLogic(QObject):
             # 系统提示词文件的 stem（不含扩展名），排除这些文件
             system_prompt_stems = {
                 'system_prompt_hq',
+                'system_prompt_hq_format',
                 'system_prompt_line_break',
                 'glossary_extraction_prompt'
             }
@@ -1018,6 +1022,7 @@ class MainAppLogic(QObject):
                     "psd_font": self._t("label_psd_font"),
                     "psd_script_only": self._t("label_psd_script_only"),
                     "line_spacing": self._t("label_line_spacing"),
+                    "letter_spacing": self._t("label_letter_spacing"),
                     "font_size": self._t("label_font_size"),
                     "OPENAI_API_KEY": self._t("label_OPENAI_API_KEY"),
                     "OPENAI_MODEL": self._t("label_OPENAI_MODEL"),
@@ -1582,7 +1587,6 @@ class MainAppLogic(QObject):
             finished_callback=lambda results: self.on_task_finished(results, task_id),
             error_callback=lambda error: self.on_task_error(error, task_id),
             progress_callback=self.on_task_progress,
-            log_callback=self.on_worker_log,
             file_processed_callback=self.on_file_completed
         )
         
@@ -1990,28 +1994,6 @@ class MainAppLogic(QObject):
             self._ui_log(f"应用关闭异常: {e}", "ERROR")
     # endregion
 
-class QtLogHandler(logging.Handler):
-    """线程安全的日志处理器，将日志发送到 Qt 信号"""
-    
-    def __init__(self, signal):
-        super().__init__()
-        self.signal = signal
-        self._log_queue = queue.Queue()  # 使用队列缓冲日志
-        
-        # 检查是否在 Qt 线程中
-        from PyQt6.QtCore import QThread
-        self._main_thread = QThread.currentThread()
-
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            # PyQt 信号在跨线程时会自动使用 QueuedConnection
-            # 直接发射信号是线程安全的
-            self.signal.emit(msg)
-        except Exception:
-            # 忽略日志发送失败
-            pass
-
 class FileScannerWorker(QObject):
     """
     Worker for scanning files and folders in a background thread.
@@ -2196,7 +2178,6 @@ class TranslationWorker(QObject):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
     progress = pyqtSignal(int, int, str)
-    log_received = pyqtSignal(str)
     file_processed = pyqtSignal(dict)
 
     def __init__(self, files, config_dict, output_folder, root_dir, file_to_folder_map=None):
@@ -2217,6 +2198,21 @@ class TranslationWorker(QObject):
         if self.i18n:
             return self.i18n.translate(key, **kwargs)
         return key
+
+    def _log(self, level: int, message: str):
+        message = str(message).rstrip()
+        if not message:
+            return
+        self.logger.log(level, message)
+
+    def _log_info(self, message: str):
+        self._log(logging.INFO, message)
+
+    def _log_warning(self, message: str):
+        self._log(logging.WARNING, message)
+
+    def _log_error(self, message: str):
+        self._log(logging.ERROR, message)
     
     def _calculate_output_path(self, image_path: str, save_info: dict) -> str:
         """
@@ -2278,7 +2274,7 @@ class TranslationWorker(QObject):
         return final_output_path
 
     def stop(self):
-        self.log_received.emit("--- Stop request received.")
+        self._log_info("--- Stop request received.")
         self._is_running = False
         # 取消当前运行的异步任务
         if self._current_task and not self._current_task.done():
@@ -2289,17 +2285,32 @@ class TranslationWorker(QObject):
             from desktop_qt_ui.utils.memory_cleanup import full_memory_cleanup
             # 使用配置中的卸载模型开关
             unload_models = self.config_dict.get('app', {}).get('unload_models_after_translation', False)
-            full_memory_cleanup(log_callback=lambda msg: self.log_received.emit(msg), unload_models=unload_models)
+            full_memory_cleanup(log_callback=self._log_info, unload_models=unload_models)
         except Exception as e:
-            self.log_received.emit(f"--- [CLEANUP] Warning: Failed to cleanup: {e}")
+            self._log_warning(f"--- [CLEANUP] Warning: Failed to cleanup: {e}")
 
     def _build_friendly_error_message(self, error_message: str, error_traceback: str) -> str:
         """
         根据错误信息构建友好的中文错误提示
         """
-        friendly_msg = "\n" + "="*80 + "\n"
-        friendly_msg += "❌ 翻译任务失败\n"
-        friendly_msg += "="*80 + "\n\n"
+        def _wrap_error_text(text: str, width: int = 88) -> str:
+            wrapped_lines = []
+            for line in (text or "").splitlines():
+                if not line:
+                    wrapped_lines.append("")
+                    continue
+                wrapped_lines.extend(
+                    textwrap.wrap(
+                        line,
+                        width=width,
+                        break_long_words=True,
+                        break_on_hyphens=False,
+                    )
+                    or [""]
+                )
+            return "\n".join(wrapped_lines)
+
+        friendly_msg = ""
         
         # 如果是"达到最大尝试次数"的错误，提取真正的错误原因
         real_error = error_message
@@ -2456,14 +2467,34 @@ class TranslationWorker(QObject):
             friendly_msg += "      - 登录对应平台查看余额和使用情况\n\n"
         
         # 检查是否是网络连接错误
-        elif "connection" in real_error.lower() or "连接" in real_error or "timeout" in real_error.lower() or "超时" in real_error or "network" in real_error.lower() or "网络" in real_error:
-            friendly_msg += "🔍 错误原因：网络连接失败\n\n"
+        elif (
+            "connection" in real_error.lower()
+            or "连接" in real_error
+            or "timeout" in real_error.lower()
+            or "超时" in real_error
+            or "network" in real_error.lower()
+            or "网络" in real_error
+            or "host" in real_error.lower()
+            or "hostname" in real_error.lower()
+            or "dns" in real_error.lower()
+            or "getaddrinfo" in real_error.lower()
+            or "failed to resolve" in real_error.lower()
+            or "temporary failure in name resolution" in real_error.lower()
+            or "name or service not known" in real_error.lower()
+            or "no address associated with hostname" in real_error.lower()
+            or "nodename nor servname provided" in real_error.lower()
+            or "主机" in real_error
+            or "解析" in real_error
+        ):
+            friendly_msg += "🔍 错误原因：网络连接或 Host 解析失败\n\n"
             friendly_msg += "📝 详细说明：\n"
-            friendly_msg += "   无法连接到API服务器，可能是网络问题或需要代理。\n\n"
+            friendly_msg += "   无法连接到API服务器，可能是网络异常、超时，或 Host / DNS 解析失败。\n\n"
             friendly_msg += "解决方案：\n"
             friendly_msg += "   1. 检查网络连接\n"
             friendly_msg += "      - 确认电脑可以正常访问互联网\n\n"
-            friendly_msg += "   2. 检查API地址是否正确\n"
+            friendly_msg += "   2. 尝试开启 TUN（虚拟网卡模式）\n"
+            friendly_msg += "      - 某些代理环境下，开启 TUN 后域名解析会更稳定\n\n"
+            friendly_msg += "   3. 检查API地址是否正确\n"
             friendly_msg += "      - 位置：翻译设置 → 环境变量 → API_BASE\n"
             friendly_msg += "      - 默认值：https://api.openai.com/v1\n\n"
         
@@ -2637,15 +2668,9 @@ class TranslationWorker(QObject):
             friendly_msg += "   3. 查看详细日志\n"
             friendly_msg += "      - 在日志框中查找更多错误信息\n\n"
         
-        friendly_msg += "="*80 + "\n"
         friendly_msg += "📋 原始错误信息：\n"
-        friendly_msg += "-"*80 + "\n"
-        friendly_msg += f"{error_message}\n"
+        friendly_msg += f"{_wrap_error_text(error_message)}\n"
         if error_traceback and "Traceback" in error_traceback:
-            friendly_msg += "\n" + "-"*80 + "\n"
-            friendly_msg += "详细错误：\n"
-            friendly_msg += "-"*80 + "\n"
-            
             # 只保留API详细错误信息（不保留代码路径）
             lines = error_traceback.split('\n')
             api_error_lines = []
@@ -2656,18 +2681,13 @@ class TranslationWorker(QObject):
                     api_error_lines.append(line.strip())
             
             if api_error_lines:
-                friendly_msg += '\n'.join(api_error_lines) + "\n"
-                
-        friendly_msg += "="*80 + "\n"
+                friendly_msg += "\n"
+                friendly_msg += _wrap_error_text('\n'.join(api_error_lines)) + "\n"
         
         return friendly_msg
 
     async def _do_processing(self):
-        log_handler = QtLogHandler(self.log_received)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        log_handler.setFormatter(formatter)
         manga_logger = logging.getLogger('manga_translator')
-        manga_logger.addHandler(log_handler)
         
         # 根据 verbose 配置设置日志级别
         verbose = self.config_dict.get('cli', {}).get('verbose', False)
@@ -2701,7 +2721,7 @@ class TranslationWorker(QObject):
             from manga_translator.manga_translator import MangaTranslator
             from manga_translator.utils import open_pil_image
 
-            self.log_received.emit("--- 正在初始化翻译器...")
+            self._log_info("--- 正在初始化翻译器...")
             translator_params = self.config_dict.get('cli', {})
             translator_params.update(self.config_dict)
             
@@ -2719,7 +2739,7 @@ class TranslationWorker(QObject):
                     self.config_dict['render']['font_path'] = font_full_path
 
             translator = MangaTranslator(params=translator_params)
-            self.log_received.emit("--- 翻译器初始化完成")
+            self._log_info("--- 翻译器初始化完成")
             
             # 注册进度钩子，接收后端的批次进度
             progress_signal = self.progress  # 捕获信号引用
@@ -2762,12 +2782,12 @@ class TranslationWorker(QObject):
                 if os.path.exists(full_prompt_path):
                     translator_config_data['high_quality_prompt_path'] = full_prompt_path
                 else:
-                    self.log_received.emit(f"--- WARNING: High quality prompt file not found at {full_prompt_path}")
+                    self._log_warning(f"--- WARNING: High quality prompt file not found at {full_prompt_path}")
             
             # 将 CLI 配置中的 attempts 复制到 translator 配置中
             cli_attempts = self.config_dict.get('cli', {}).get('attempts', -1)
             translator_config_data['attempts'] = cli_attempts
-            self.log_received.emit(f"--- Setting translator attempts to: {cli_attempts} (from UI config)")
+            self._log_info(f"--- Setting translator attempts to: {cli_attempts} (from UI config)")
 
             # 转换超分倍数：'不使用' -> None, '2'/'4' -> int
             upscale_config_data = self.config_dict.get('upscale', {}).copy()
@@ -2794,7 +2814,7 @@ class TranslationWorker(QObject):
                 ocr=OcrConfig(**self.config_dict.get('ocr', {})),
                 **remaining_config
             )
-            self.log_received.emit("--- 配置对象创建完成")
+            self._log_info("--- 配置对象创建完成")
 
             translator_type = config.translator.translator
             is_hq = translator_type in [Translator.openai_hq, Translator.gemini_hq]
@@ -2829,7 +2849,7 @@ class TranslationWorker(QObject):
             cli_config = self.config_dict.get('cli', {})
             
             if not save_info['overwrite']:
-                self.log_received.emit("--- 🔍 检查已存在的文件（覆盖检测已禁用）...")
+                self._log_info("--- 🔍 检查已存在的文件（覆盖检测已禁用）...")
                 self.logger.info("检查已存在的文件（覆盖检测已禁用）")
                 
                 for file_path in self.files:
@@ -2867,13 +2887,13 @@ class TranslationWorker(QObject):
                 
                 if skipped_files:
                     skip_msg = self._t("⏭️ Skipped {count} existing files.", count=len(skipped_files))
-                    self.log_received.emit(skip_msg)
-                    self.log_received.emit("--- ℹ️ 跳过的文件将不会被处理，如需重新翻译请启用「覆盖已存在文件」选项")
+                    self._log_info(skip_msg)
+                    self._log_info("--- ℹ️ 跳过的文件将不会被处理，如需重新翻译请启用「覆盖已存在文件」选项")
                     self.logger.info(f"已跳过 {len(skipped_files)} 个已存在的文件（覆盖检测已禁用）")
                     # Update files list to only include those needing processing
                     self.files = files_to_process
                 else:
-                    self.log_received.emit("--- ✅ 未发现已存在的文件，将处理所有文件")
+                    self._log_info("--- ✅ 未发现已存在的文件，将处理所有文件")
                     self.logger.info("未发现已存在的文件，将处理所有文件")
             
             # Update total count for progress bar logic
@@ -2944,10 +2964,10 @@ class TranslationWorker(QObject):
                 if replace_translation:
                     incompatible_modes.append("替换翻译")
                 
-                self.log_received.emit(f"⚠️  并发流水线已禁用：当前模式 [{', '.join(incompatible_modes)}] 不支持并发处理")
+                self._log_warning(f"⚠️  并发流水线已禁用：当前模式 [{', '.join(incompatible_modes)}] 不支持并发处理")
                 batch_concurrent = False
             if is_hq or (len(self.files) > 0 and batch_size > 1):
-                self.log_received.emit(f"--- 开始批量处理 ({'高质量模式' if is_hq else '批量模式'})")
+                self._log_info(f"--- 开始批量处理 ({'高质量模式' if is_hq else '批量模式'})")
 
                 # 输出批量处理信息
                 # total_images is the number of files to process
@@ -2955,12 +2975,12 @@ class TranslationWorker(QObject):
                 
                 # 如果启用并发模式，不分批加载（并发流水线内部会按需加载）
                 if batch_concurrent:
-                    self.log_received.emit(self._t("📊 Concurrent pipeline mode: {total} images (Total: {orig})", total=total_images, orig=total_original_count))
-                    self.log_received.emit(self._t("🔧 Translation workflow: {mode}", mode=workflow_mode))
-                    self.log_received.emit(self._t("📁 Output directory: {dir}", dir=self.output_folder))
+                    self._log_info(self._t("📊 Concurrent pipeline mode: {total} images (Total: {orig})", total=total_images, orig=total_original_count))
+                    self._log_info(self._t("🔧 Translation workflow: {mode}", mode=workflow_mode))
+                    self._log_info(self._t("📁 Output directory: {dir}", dir=self.output_folder))
                     if workflow_tip:
-                        self.log_received.emit(workflow_tip)
-                    self.log_received.emit(self._t("🚀 Starting translation..."))
+                        self._log_info(workflow_tip)
+                    self._log_info(self._t("🚀 Starting translation..."))
                     
                     # 初始化进度条 (start from skipped_count)
                     self.progress.emit(skipped_count, total_original_count, "")
@@ -2990,18 +3010,18 @@ class TranslationWorker(QObject):
                     
                     # 显示批量处理信息
                     if skipped_count > 0:
-                        self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
-                        self.log_received.emit(f"--- ℹ️ 另有 {skipped_count} 个文件已跳过（原始总数：{total_original_count}）")
+                        self._log_info(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
+                        self._log_info(f"--- ℹ️ 另有 {skipped_count} 个文件已跳过（原始总数：{total_original_count}）")
                     else:
-                        self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
+                        self._log_info(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
                     
-                    self.log_received.emit(self._t("🔧 Translation workflow: {mode}", mode=workflow_mode))
-                    self.log_received.emit(self._t("📁 Output directory: {dir}", dir=self.output_folder))
+                    self._log_info(self._t("🔧 Translation workflow: {mode}", mode=workflow_mode))
+                    self._log_info(self._t("📁 Output directory: {dir}", dir=self.output_folder))
                     if workflow_tip:
-                        self.log_received.emit(workflow_tip)
+                        self._log_info(workflow_tip)
 
                     # 按批次加载和处理图片（节省内存）
-                    self.log_received.emit(self._t("🚀 Starting translation..."))
+                    self._log_info(self._t("🚀 Starting translation..."))
                     
                     # 初始化进度条
                     self.progress.emit(skipped_count, total_original_count, "")
@@ -3027,7 +3047,7 @@ class TranslationWorker(QObject):
                                 image.name = file_path
                                 images_with_configs.append((image, config))
                             except Exception as e:
-                                self.log_received.emit(f"⚠️ 无法加载图片 {os.path.basename(file_path)}: {e}")
+                                self._log_warning(f"⚠️ 无法加载图片 {os.path.basename(file_path)}: {e}")
                                 self.logger.error(f"Error loading image {file_path}: {e}")
                                 # 创建错误上下文
                                 from manga_translator.utils import Context
@@ -3075,8 +3095,8 @@ class TranslationWorker(QObject):
                             results.append({'success': False, 'original_path': ctx.image_name, 'error': ctx.translation_error})
                             failed_count += 1
                             # 输出详细的错误信息（包含原始错误）
-                            self.log_received.emit(f"\n⚠️ 图片 {os.path.basename(ctx.image_name)} 翻译失败：")
-                            self.log_received.emit(ctx.translation_error)
+                            self._log_warning(f"\n⚠️ 图片 {os.path.basename(ctx.image_name)} 翻译失败：")
+                            self._log_error(ctx.translation_error)
                         elif hasattr(ctx, 'success') and ctx.success:
                             # 优先检查success标志（因为result可能被清理了）
                             # 计算后端保存的文件路径
@@ -3095,21 +3115,21 @@ class TranslationWorker(QObject):
                         failed_count += 1
 
                 if failed_count > 0:
-                    self.log_received.emit(self._t("\n⚠️ Batch translation completed: {success}/{total} succeeded, {failed}/{total} failed", success=success_count, total=total_images, failed=failed_count))
+                    self._log_warning(self._t("\n⚠️ Batch translation completed: {success}/{total} succeeded, {failed}/{total} failed", success=success_count, total=total_images, failed=failed_count))
                 else:
-                    self.log_received.emit(self._t("✅ Batch translation completed: {success}/{total} succeeded", success=success_count, total=total_images))
-                self.log_received.emit(self._t("💾 Files saved to: {dir}", dir=self.output_folder))
+                    self._log_info(self._t("✅ Batch translation completed: {success}/{total} succeeded", success=success_count, total=total_images))
+                self._log_info(self._t("💾 Files saved to: {dir}", dir=self.output_folder))
 
             else:
-                self.log_received.emit("--- 开始顺序处理...")
+                self._log_info("--- 开始顺序处理...")
                 total_files = len(self.files)
 
                 # 输出顺序处理信息
-                self.log_received.emit(self._t("📊 Sequential processing mode: {total} images (Total: {orig})", total=total_files, orig=total_original_count))
-                self.log_received.emit(self._t("🔧 Translation workflow: {mode}", mode=workflow_mode))
-                self.log_received.emit(self._t("📁 Output directory: {dir}", dir=self.output_folder))
+                self._log_info(self._t("📊 Sequential processing mode: {total} images (Total: {orig})", total=total_files, orig=total_original_count))
+                self._log_info(self._t("🔧 Translation workflow: {mode}", mode=workflow_mode))
+                self._log_info(self._t("📁 Output directory: {dir}", dir=self.output_folder))
                 if workflow_tip:
-                    self.log_received.emit(workflow_tip)
+                    self._log_info(workflow_tip)
 
                 # 初始化进度条
                 self.progress.emit(skipped_count, total_original_count, "")
@@ -3122,7 +3142,7 @@ class TranslationWorker(QObject):
                     current_num = skipped_count + i + 1
                     # 更新进度条（显示图片数量）
                     self.progress.emit(current_num, total_original_count, "")
-                    self.log_received.emit(f"🔄 [{current_num}/{total_original_count}] 正在处理：{os.path.basename(file_path)}")
+                    self._log_info(f"🔄 [{current_num}/{total_original_count}] 正在处理：{os.path.basename(file_path)}")
 
                     try:
                         # 使用二进制模式读取以避免Windows路径编码问题
@@ -3143,25 +3163,25 @@ class TranslationWorker(QObject):
                                 'output_path': output_path  # 后端保存的路径
                             })
                             success_count += 1
-                            self.log_received.emit(f"✅ [{current_num}/{total_files}] 完成：{os.path.basename(file_path)}")
+                            self._log_info(f"✅ [{current_num}/{total_files}] 完成：{os.path.basename(file_path)}")
                         else:
                             error_msg = getattr(ctx, 'translation_error', 'Translation returned no result') if ctx else 'Translation failed'
                             self.file_processed.emit({'success': False, 'original_path': file_path, 'error': error_msg})
-                            self.log_received.emit(f"❌ [{current_num}/{total_files}] 失败：{os.path.basename(file_path)}")
+                            self._log_warning(f"❌ [{current_num}/{total_files}] 失败：{os.path.basename(file_path)}")
 
                     except Exception as e:
-                        self.log_received.emit(f"❌ [{current_num}/{total_files}] 错误：{os.path.basename(file_path)} - {e}")
+                        self._log_error(f"❌ [{current_num}/{total_files}] 错误：{os.path.basename(file_path)} - {e}")
                         self.file_processed.emit({'success': False, 'original_path': file_path, 'error': str(e)})
                         # 抛出异常，终止整个翻译流程
                         raise
 
-                self.log_received.emit(f"✅ 顺序翻译完成：成功 {success_count}/{total_files} 张")
-                self.log_received.emit(f"💾 文件已保存到：{self.output_folder}")
+                self._log_info(f"✅ 顺序翻译完成：成功 {success_count}/{total_files} 张")
+                self._log_info(f"💾 文件已保存到：{self.output_folder}")
             
             self.finished.emit(results)
 
         except asyncio.CancelledError as e:
-            self.log_received.emit(f"Task cancelled: {e}")
+            self._log_warning(f"Task cancelled: {e}")
             self.logger.warning(f"Task cancelled: {e}")
             self.error.emit(str(e))
         except Exception as e:
@@ -3176,11 +3196,8 @@ class TranslationWorker(QObject):
             # 构建友好的中文错误提示
             friendly_error = self._build_friendly_error_message(error_message, error_traceback)
             
-            self.log_received.emit(friendly_error)
             self.error.emit(friendly_error)
         finally:
-            manga_logger.removeHandler(log_handler)
-
             # 翻译结束后进行完整的内存清理（特别是CPU模式）
             try:
                 # 显式清理大对象引用，帮助GC回收
@@ -3203,9 +3220,9 @@ class TranslationWorker(QObject):
                 from desktop_qt_ui.utils.memory_cleanup import full_memory_cleanup
                 # 使用配置中的卸载模型开关
                 unload_models = self.config_dict.get('app', {}).get('unload_models_after_translation', False)
-                full_memory_cleanup(log_callback=lambda msg: self.log_received.emit(msg), unload_models=unload_models)
+                full_memory_cleanup(log_callback=self._log_info, unload_models=unload_models)
             except Exception as e:
-                self.log_received.emit(f"--- [CLEANUP] Warning: 内存清理时出错: {e}")
+                self._log_warning(f"--- [CLEANUP] Warning: 内存清理时出错: {e}")
 
     @pyqtSlot()
     def process(self):
@@ -3213,7 +3230,7 @@ class TranslationWorker(QObject):
         try:
             import asyncio
             import sys
-            self.log_received.emit("--- 开始处理任务...")
+            self._log_info("--- 开始处理任务...")
 
             # 在Windows上的工作线程中，需要手动初始化Windows Socket
             if sys.platform == 'win32':
@@ -3228,9 +3245,9 @@ class TranslationWorker(QObject):
                     ws2_32 = ctypes.WinDLL('ws2_32')
                     result = ws2_32.WSAStartup(0x0202, wsa_data)
                     if result != 0:
-                        self.log_received.emit(f"--- [ERROR] WSAStartup failed with code {result}")
+                        self._log_error(f"--- [ERROR] WSAStartup failed with code {result}")
                 except Exception as e:
-                    self.log_received.emit(f"--- [ERROR] Failed to initialize WSA: {e}")
+                    self._log_error(f"--- [ERROR] Failed to initialize WSA: {e}")
                 
                 # 使用ProactorEventLoop（Windows默认）
                 asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -3239,9 +3256,9 @@ class TranslationWorker(QObject):
             try:
                 loop = asyncio.new_event_loop()
             except Exception as e:
-                self.log_received.emit(f"--- [ERROR] Failed to create event loop: {e}")
+                self._log_error(f"--- [ERROR] Failed to create event loop: {e}")
                 import traceback
-                self.log_received.emit(f"--- [ERROR] Traceback: {traceback.format_exc()}")
+                self._log_error(f"--- [ERROR] Traceback: {traceback.format_exc()}")
                 raise
             
             asyncio.set_event_loop(loop)
@@ -3251,7 +3268,7 @@ class TranslationWorker(QObject):
             # 任务处理完成，不输出日志
 
         except asyncio.CancelledError:
-            pass  # self.log_received.emit("--- 任务已取消")
+            pass
         except Exception as e:
             import traceback
             error_msg = f"An error occurred in the asyncio runner: {str(e)}\n{traceback.format_exc()}"
@@ -3273,7 +3290,7 @@ class TranslationWorker(QObject):
                     # Shutdown async generators
                     loop.run_until_complete(loop.shutdown_asyncgens())
                 except Exception as e:
-                    self.log_received.emit(f"--- ERROR during asyncio cleanup: {e}")
+                    self._log_error(f"--- ERROR during asyncio cleanup: {e}")
                 finally:
                     loop.close()
                     asyncio.set_event_loop(None)
@@ -3291,7 +3308,6 @@ class WorkerSignals(QObject):
     error = pyqtSignal(str)
     progress = pyqtSignal(str)
     translation_progress = pyqtSignal(int, int, str)
-    log = pyqtSignal(str)
     file_processed = pyqtSignal(dict)
 
 
@@ -3496,7 +3512,7 @@ class TranslationRunnable(QRunnable):
     """翻译任务（线程池版本）"""
     
     def __init__(self, files, config_dict, output_folder, root_dir, file_to_folder_map,
-                 finished_callback, error_callback, progress_callback, log_callback, file_processed_callback):
+                 finished_callback, error_callback, progress_callback, file_processed_callback):
         super().__init__()
         self.files = files
         self.config_dict = config_dict
@@ -3522,14 +3538,12 @@ class TranslationRunnable(QRunnable):
             
         if progress_callback:
             self.signals.translation_progress.connect(progress_callback, type=Qt.ConnectionType.QueuedConnection)
-        if log_callback:
-            self.signals.log.connect(log_callback, type=Qt.ConnectionType.QueuedConnection)
         if file_processed_callback:
             self.signals.file_processed.connect(file_processed_callback, type=Qt.ConnectionType.QueuedConnection)
     
     def stop(self):
         """停止任务"""
-        self._emit_log("--- 收到停止请求")
+        self.logger.info("--- 收到停止请求")
         self._is_running = False
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
@@ -3537,9 +3551,9 @@ class TranslationRunnable(QRunnable):
         try:
             from desktop_qt_ui.utils.memory_cleanup import full_memory_cleanup
             # 使用配置中的卸载模型开关（这里没有config_dict，默认使用False）
-            full_memory_cleanup(log_callback=lambda msg: self._emit_log(msg), unload_models=False)
+            full_memory_cleanup(log_callback=lambda msg: self.logger.info(str(msg).rstrip()), unload_models=False)
         except Exception as e:
-            self._emit_log(f"--- [CLEANUP] 清理失败: {e}")
+            self.logger.warning(f"--- [CLEANUP] 清理失败: {e}")
     
     def run(self):
         """在线程池中执行"""
@@ -3547,7 +3561,7 @@ class TranslationRunnable(QRunnable):
         try:
             import asyncio
             import sys
-            self._emit_log("--- 开始处理任务...")
+            self.logger.info("--- 开始处理任务...")
 
             # Windows平台初始化
             if sys.platform == 'win32':
@@ -3558,9 +3572,9 @@ class TranslationRunnable(QRunnable):
                     ws2_32 = ctypes.WinDLL('ws2_32')
                     result = ws2_32.WSAStartup(0x0202, wsa_data)
                     if result != 0:
-                        self._emit_log(f"--- [ERROR] WSAStartup failed with code {result}")
+                        self.logger.error(f"--- [ERROR] WSAStartup failed with code {result}")
                 except Exception as e:
-                    self._emit_log(f"--- [ERROR] Failed to initialize WSA: {e}")
+                    self.logger.error(f"--- [ERROR] Failed to initialize WSA: {e}")
                 
                 asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
@@ -3581,7 +3595,6 @@ class TranslationRunnable(QRunnable):
                 results.extend(worker_results)
             
             # 连接信号到回调
-            worker.log_received.connect(lambda msg: self._emit_log(msg))
             worker.progress.connect(lambda c, t, m: self._emit_progress(c, t, m))
             worker.file_processed.connect(lambda d: self._emit_file_processed(d))
             worker.error.connect(lambda msg: self._emit_error(msg))
@@ -3610,7 +3623,7 @@ class TranslationRunnable(QRunnable):
                         loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
                     loop.run_until_complete(loop.shutdown_asyncgens())
                 except Exception as e:
-                    self._emit_log(f"--- ERROR during asyncio cleanup: {e}")
+                    self.logger.error(f"--- ERROR during asyncio cleanup: {e}")
                 finally:
                     loop.close()
                     asyncio.set_event_loop(None)
@@ -3626,10 +3639,6 @@ class TranslationRunnable(QRunnable):
     def _emit_progress(self, current, total, message):
         """线程安全地发送进度信号"""
         self.signals.translation_progress.emit(current, total, message)
-    
-    def _emit_log(self, msg):
-        """线程安全地发送日志信号"""
-        self.signals.log.emit(msg)
     
     def _emit_file_processed(self, data):
         """线程安全地发送文件处理完成信号"""

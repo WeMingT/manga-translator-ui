@@ -46,7 +46,6 @@ class OpenAITranslator(CommonTranslator):
         self.base_url = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
         self.model = os.getenv('OPENAI_MODEL', "gpt-4o")
         self.max_tokens = None  # 不限制，使用模型默认最大值
-        self.temperature = 0.1
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
         # 使用全局时间戳,跨实例共享
         if self.model not in OpenAITranslator._GLOBAL_LAST_REQUEST_TS:
@@ -166,7 +165,7 @@ class OpenAITranslator(CommonTranslator):
 
     def _build_user_prompt(self, texts: List[str], ctx: Any, retry_attempt: int = 0, retry_reason: str = "") -> str:
         """构建用户提示词（纯文本版）- 使用 JSON 格式以配合 HQ Prompt"""
-        return self._build_user_prompt_for_texts(texts, ctx, self.prev_context, retry_attempt=retry_attempt, retry_reason=retry_reason)
+        return self._build_user_prompt_for_texts(texts, ctx, "", retry_attempt=retry_attempt, retry_reason=retry_reason)
 
     def _get_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """获取完整的系统提示词"""
@@ -221,10 +220,9 @@ class OpenAITranslator(CommonTranslator):
             # 构建系统提示词和用户提示词（包含重试信息以避免缓存）
             system_prompt = self._get_system_prompt(_source_lang, _target_lang, custom_prompt_json=_custom_prompt_json, line_break_prompt_json=_line_break_prompt_json, retry_attempt=retry_attempt, retry_reason=retry_reason, extract_glossary=extract_glossary)
             user_prompt = self._build_user_prompt(texts, ctx, retry_attempt=retry_attempt, retry_reason=retry_reason)
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
+            messages = [{"role": "system", "content": system_prompt}]
+            messages.extend(self._build_openai_context_messages(self.prev_context))
+            messages.append({"role": "user", "content": user_prompt})
 
             try:
                 # RPM限制
@@ -238,16 +236,10 @@ class OpenAITranslator(CommonTranslator):
                         self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
                         await self._sleep_with_cancel_polling(sleep_time)
                 
-                # 动态调整温度：质量检查或BR检查失败时提高温度帮助跳出错误模式
-                current_temperature = self._get_retry_temperature(self.temperature, retry_attempt, retry_reason)
-                if retry_attempt > 0 and current_temperature != self.temperature:
-                    self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
-                
                 # 构建API参数，只有当max_tokens有值时才传递（新模型如o1/gpt-4.1不支持null值）
                 api_params = {
                     "model": self.model,
                     "messages": messages,
-                    "temperature": current_temperature
                 }
                 if self.max_tokens is not None:
                     api_params["max_tokens"] = self.max_tokens

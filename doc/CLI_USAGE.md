@@ -1183,8 +1183,10 @@ print(f"已清理 {result['deleted']} 个临时文件")
 
 **文件生成位置**：
 - JSON 文件：`manga_translator_work/json/图片名_translations.json`
+- 编辑器底图：`manga_translator_work/editor_base/图片名.原扩展名`
 - 原文 TXT：`manga_translator_work/originals/图片名_original.txt`
 - 翻译 TXT：`manga_translator_work/translations/图片名_translated.txt`
+- 修复图片：`manga_translator_work/inpainted/图片名_inpainted.原扩展名`
 - 翻译结果：`manga_translator_work/result/图片名.png`（开启 `--save-to-source-dir` 时）
 
 **工作流程说明**：

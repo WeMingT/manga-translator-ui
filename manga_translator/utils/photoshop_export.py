@@ -619,13 +619,40 @@ def get_psd_output_path(image_path: str) -> str:
     return psd_path
 
 
+def _save_image_like_to_temp(image_data, target_path: str) -> bool:
+    """将当前会话图像数据保存为临时文件，供 PSD 导出复用。"""
+    try:
+        import numpy as np
+        from PIL import Image
+
+        if image_data is None:
+            return False
+
+        if isinstance(image_data, Image.Image):
+            image_to_save = image_data.copy()
+        elif isinstance(image_data, np.ndarray):
+            image_to_save = Image.fromarray(image_data)
+        else:
+            logger.warning(f"Unsupported PSD image type: {type(image_data)}")
+            return False
+
+        if image_to_save.mode == 'CMYK':
+            image_to_save = image_to_save.convert('RGB')
+
+        image_to_save.save(target_path)
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to save temporary PSD image: {e}")
+        return False
+
+
 def photoshop_export(output_file: str, ctx: Context, default_font: str = None, image_path: str = None, verbose: bool = False, result_path_fn=None, line_spacing: float = None, script_only: bool = False):
     """
     使用 Photoshop 导出 PSD 文件
     
     图层结构（从下到上）：
-    1. 原图 (original) - 锁定
-    2. 修复图 (inpainted) - 从工作目录读取
+    1. 原图 (original) - 优先使用 editor_base，回退原图，锁定
+    2. 修复图 (inpainted) - 优先使用当前会话修复图，回退工作目录
     3. 遮罩 (mask) - 如果有
     4. 文字图层 - 可编辑
     
@@ -633,7 +660,7 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = None, i
         output_file: 输出 PSD 文件路径
         ctx: 翻译上下文，包含图片和文本区域信息
         default_font: 默认字体名称，如果为 None 则使用 Photoshop 默认字体
-        image_path: 原图路径（用于查找工作目录中的修复图）
+        image_path: 原图路径（用于查找 editor_base 和工作目录中的修复图）
         verbose: 是否启用调试模式（保存JSX脚本到result文件夹）
         result_path_fn: 结果路径生成函数（用于保存调试脚本）
         line_spacing: 行间距系数
@@ -664,40 +691,36 @@ def photoshop_export(output_file: str, ctx: Context, default_font: str = None, i
             pass
     
     try:
-        # 直接使用原图路径，不需要保存临时文件
+        # PSD底图优先使用 editor_base，保持与编辑器中的“原图层”一致
         if not image_path or not os.path.exists(image_path):
             raise ValueError(f"原图路径无效或文件不存在: {image_path}")
-        
-        input_file = image_path
-        logger.info(f"使用原图: {input_file}")
-        
-        # 从工作目录读取修复后的图（如果存在）
+
+        from .path_manager import find_work_image_path, get_inpainted_path
+
+        work_image_path = find_work_image_path(image_path)
+        if work_image_path and os.path.exists(work_image_path):
+            input_file = work_image_path
+            logger.info(f"PSD底图使用 editor_base: {input_file}")
+        else:
+            input_file = image_path
+            logger.info(f"PSD底图回退原图: {input_file}")
+
+        # 修复图优先使用当前会话结果，避免吃到磁盘旧图
         inpainted_layer_code = ""
-        if image_path:
-            # 构建修复图路径：原图目录/manga_translator_work/inpainted/文件名.png
-            from .path_manager import get_inpainted_path
-            inpainted_path = get_inpainted_path(image_path, create_dir=False)
-            
-            if os.path.exists(inpainted_path):
-                # 直接使用工作目录中的修复图
-                inpainted_layer_code = INPAINTED_LAYER_TEMPLATE.format(
-                    inpainted_file=inpainted_path.replace("\\", "/")  # 使用正斜杠
-                )
-                logger.info(f"找到修复图: {inpainted_path}")
-            else:
-                logger.debug(f"未找到修复图: {inpainted_path}")
-        
-        # 如果工作目录没有，尝试从ctx读取
-        if not inpainted_layer_code and hasattr(ctx, 'img_inpainted') and ctx.img_inpainted is not None:
-            import cv2
-            from PIL import Image
-            # 将numpy数组转换为PIL图像
-            inpainted_pil = Image.fromarray(cv2.cvtColor(ctx.img_inpainted, cv2.COLOR_BGR2RGB))
-            inpainted_pil.save(inpainted_file)
+        if hasattr(ctx, 'img_inpainted') and ctx.img_inpainted is not None and _save_image_like_to_temp(ctx.img_inpainted, inpainted_file):
             inpainted_layer_code = INPAINTED_LAYER_TEMPLATE.format(
                 inpainted_file=inpainted_file.replace("\\", "/")  # 使用正斜杠
             )
-            logger.info("使用Context中的修复图")
+            logger.info("PSD修复图使用当前会话结果")
+        elif image_path:
+            inpainted_path = get_inpainted_path(image_path, create_dir=False)
+            if os.path.exists(inpainted_path):
+                inpainted_layer_code = INPAINTED_LAYER_TEMPLATE.format(
+                    inpainted_file=inpainted_path.replace("\\", "/")  # 使用正斜杠
+                )
+                logger.info(f"PSD修复图回退工作目录: {inpainted_path}")
+            else:
+                logger.debug(f"未找到可用修复图: {inpainted_path}")
         
         # 蒙版层 - 不添加
         mask_layer_code = ""

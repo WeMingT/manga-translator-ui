@@ -332,6 +332,7 @@ python -m manga_translator --help
 1. 在"基础设置"中勾选 **详细日志**
 2. 查看 `result/` 目录中的调试文件
 3. 调整检测器和 OCR 参数
+4. 排查完成后按文档清理旧日志（避免 `result/` 目录过大）
 
 **调试流程指南** → [doc/DEBUGGING.md](doc/DEBUGGING.md)
 

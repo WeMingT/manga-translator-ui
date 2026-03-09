@@ -131,6 +131,7 @@
         "render.no_hyphenation",
         "render.font_color",
         "render.line_spacing",
+        "render.letter_spacing",
         "render.font_size",
         "render.auto_rotate_symbols",
         "render.rtl",

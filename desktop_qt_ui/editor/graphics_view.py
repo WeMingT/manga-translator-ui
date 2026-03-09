@@ -842,6 +842,8 @@ class GraphicsView(QGraphicsView):
         region_specific_params = build_region_specific_params(global_params_dict, text_block)
         if region_dict.get("line_spacing") is not None:
             region_specific_params["line_spacing"] = region_dict.get("line_spacing")
+        if region_dict.get("letter_spacing") is not None:
+            region_specific_params["letter_spacing"] = region_dict.get("letter_spacing")
 
         # 3. 计算渲染框 dst_points
         try:
@@ -856,6 +858,7 @@ class GraphicsView(QGraphicsView):
             print(f"  font_size={text_block.font_size}, horizontal={text_block.horizontal}, "
                   f"center={text_block.center}, xyxy={text_block.xyxy}, "
                   f"line_spacing={region_specific_params.get('line_spacing')}, "
+                  f"letter_spacing={region_specific_params.get('letter_spacing')}, "
                   f"angle={region_dict.get('angle')}")
             import traceback
             traceback.print_exc()
@@ -916,6 +919,8 @@ class GraphicsView(QGraphicsView):
                 region_params = build_region_specific_params(global_params_dict, text_block)
                 if region_dict.get("line_spacing") is not None:
                     region_params["line_spacing"] = region_dict.get("line_spacing")
+                if region_dict.get("letter_spacing") is not None:
+                    region_params["letter_spacing"] = region_dict.get("letter_spacing")
                 dst_points_list.append(
                     calculate_region_dst_points(
                         text_block,
@@ -928,6 +933,7 @@ class GraphicsView(QGraphicsView):
                 print(f"  font_size={text_block.font_size}, horizontal={text_block.horizontal}, "
                       f"center={text_block.center}, xyxy={text_block.xyxy}, "
                       f"line_spacing={global_params_dict.get('line_spacing')}, "
+                      f"letter_spacing={global_params_dict.get('letter_spacing')}, "
                       f"angle={regions[i].get('angle') if i < len(regions) else 'N/A'}")
                 dst_points_list.append(None)
 
@@ -1805,7 +1811,8 @@ class GraphicsView(QGraphicsView):
                             'bg_colors': template_region.get('bg_colors', template_region.get('bg_color', [255, 255, 255])),
                             'alignment': template_region.get('alignment', 'center'),
                             'direction': template_region.get('direction', 'auto'),
-                            'angle': template_region.get('angle', 0)
+                            'angle': template_region.get('angle', 0),
+                            'letter_spacing': template_region.get('letter_spacing', 1.0),
                         }
             
             # 从配置服务获取默认渲染参数
@@ -1813,10 +1820,13 @@ class GraphicsView(QGraphicsView):
             config_service = get_config_service()
             config = config_service.get_config()
             default_line_spacing = config.render.line_spacing if hasattr(config.render, 'line_spacing') else 1.0
+            default_letter_spacing = config.render.letter_spacing if hasattr(config.render, 'letter_spacing') else 1.0
             default_stroke_width = config.render.stroke_width if hasattr(config.render, 'stroke_width') else 0.07
             # 确保不为 None
             if default_line_spacing is None:
                 default_line_spacing = 1.0
+            if default_letter_spacing is None:
+                default_letter_spacing = 1.0
             if default_stroke_width is None:
                 default_stroke_width = 0.07
             
@@ -1838,6 +1848,7 @@ class GraphicsView(QGraphicsView):
                 'direction': inferred_direction,
                 'angle': template_data.get('angle', 0),
                 'line_spacing': default_line_spacing,
+                'letter_spacing': template_data.get('letter_spacing', default_letter_spacing),
                 'stroke_width': default_stroke_width,
                 'font_path': ''  # 空字符串，渲染时会自动使用主页配置的默认字体
             }

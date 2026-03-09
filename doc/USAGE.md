@@ -239,9 +239,11 @@
 在"**选项**"标签页中选择 OCR 模型：
 
 - **48px**（推荐）：默认模型，平衡速度和准确率
-- **48px_ctc**：CTC 模型，识别准确率更高
+- **48px_ctc**：CTC 变体模型，可作为备选对比，不代表一定更精确
 - **mocr**：Manga OCR 专用模型
-- **paddleocr**：PaddleOCR 引擎，支持多语言
+- **paddleocr**：PaddleOCR 引擎，支持多语言，英肉推荐
+- **paddleocr_korean**：韩漫推荐
+- **日漫混合 OCR 推荐**：`48px + mocr`
 
 ### 字体设置
 

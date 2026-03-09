@@ -500,6 +500,24 @@ def set_font(path: str):
     update_font_selection()
     get_char_glyph.cache_clear()
 
+
+def _normalize_letter_spacing(letter_spacing: float) -> float:
+    try:
+        value = float(letter_spacing)
+    except (TypeError, ValueError):
+        return 1.0
+    return value if value > 0 else 1.0
+
+
+def _scale_advance(advance: int, letter_spacing: float) -> int:
+    if advance <= 0:
+        return int(advance)
+    multiplier = _normalize_letter_spacing(letter_spacing)
+    if multiplier == 1.0:
+        return int(advance)
+    return max(1, int(round(advance * multiplier)))
+
+
 class namespace:
     pass
 
@@ -642,7 +660,7 @@ def _smart_vertical_ellipsis_advance(slot, font_size: int, char_bitmap_rows: int
 
     return max(1, raw)
 
-def _measure_vertical_char_metrics(font_size: int, cdpt: str):
+def _measure_vertical_char_metrics(font_size: int, cdpt: str, letter_spacing: float = 1.0):
     """Return (advance_y, top_offset, bitmap_rows, has_visible_ink) for vertical rendering."""
     cdpt_trans, _ = CJK_Compatibility_Forms_translate(cdpt, 1)
     slot = get_char_glyph(cdpt_trans, font_size, 1)
@@ -671,6 +689,7 @@ def _measure_vertical_char_metrics(font_size: int, cdpt: str):
         char_bitmap_rows * char_bitmap_width > 0 and
         len(bitmap.buffer) == char_bitmap_rows * char_bitmap_width
     )
+    char_offset_y = _scale_advance(char_offset_y, letter_spacing)
     if has_bitmap:
         # Keep vertical alignment in font-metrics space to avoid glyph-specific top snapping.
         top_offset = (slot.metrics.vertBearingY >> 6) if (hasattr(slot, 'metrics') and slot.metrics and hasattr(slot.metrics, 'vertBearingY')) else 0
@@ -695,7 +714,7 @@ def _get_vertical_column_char_width(font_size: int, cdpt: str) -> int:
             width = max(width, bitmap.width)
     return max(1, int(width))
 
-def _measure_horizontal_block_render_height(font_size: int, content: str, border_size: int, config=None, stroke_ratio: float = 0.07, rotate_90: bool = False) -> int:
+def _measure_horizontal_block_render_height(font_size: int, content: str, border_size: int, config=None, stroke_ratio: float = 0.07, rotate_90: bool = False, letter_spacing: float = 1.0) -> int:
     """Measure the actual rendered pixel height of a horizontal block used in vertical text."""
     if not rotate_90:
         rotate_90 = should_rotate_horizontal_block_90(content)
@@ -703,7 +722,7 @@ def _measure_horizontal_block_render_height(font_size: int, content: str, border
     if not content:
         return 0
 
-    h_width = get_string_width(font_size, content) + font_size
+    h_width = get_string_width(font_size, content, letter_spacing=letter_spacing) + font_size
     h_height = font_size * 2
     temp_canvas_text = np.zeros((h_height, h_width), dtype=np.uint8)
     temp_canvas_border = np.zeros((h_height, h_width), dtype=np.uint8)
@@ -722,7 +741,8 @@ def _measure_horizontal_block_render_height(font_size: int, content: str, border
             temp_canvas_border,
             border_size=border_size,
             config=config,
-            stroke_width=stroke_ratio
+            stroke_width=stroke_ratio,
+            letter_spacing=letter_spacing
         )
         pen_h[0] += offset_x
 
@@ -736,7 +756,7 @@ def _measure_horizontal_block_render_height(font_size: int, content: str, border
         return 0
     return h_crop
 
-def _measure_vertical_line_visual_extents(line_text: str, font_size: int, border_size: int, config=None, stroke_ratio: float = 0.07):
+def _measure_vertical_line_visual_extents(line_text: str, font_size: int, border_size: int, config=None, stroke_ratio: float = 0.07, letter_spacing: float = 1.0):
     """Measure visual ink extents (top, bottom) for one vertical line, relative to line start pen y."""
     pen_y = 0
     min_y = None
@@ -758,7 +778,8 @@ def _measure_vertical_line_visual_extents(line_text: str, font_size: int, border
                 border_size=border_size,
                 config=config,
                 stroke_ratio=stroke_ratio,
-                rotate_90=should_rotate_horizontal_block_90(content)
+                rotate_90=should_rotate_horizontal_block_90(content),
+                letter_spacing=letter_spacing
             )
             if rh > 0:
                 block_top = pen_y
@@ -771,7 +792,7 @@ def _measure_vertical_line_visual_extents(line_text: str, font_size: int, border
         for c in part:
             if not c:
                 continue
-            char_offset_y, top_offset, char_rows, has_ink = _measure_vertical_char_metrics(font_size, c)
+            char_offset_y, top_offset, char_rows, has_ink = _measure_vertical_char_metrics(font_size, c, letter_spacing=letter_spacing)
             if has_ink and char_rows > 0:
                 char_top = pen_y + top_offset
                 char_bottom = char_top + char_rows
@@ -783,12 +804,12 @@ def _measure_vertical_line_visual_extents(line_text: str, font_size: int, border
         return 0, 0
     return min_y, max_y
 
-def _measure_horizontal_line_visual_extents(line_text: str, font_size: int, border_size: int, config=None, stroke_ratio: float = 0.07, reversed_direction: bool = False):
+def _measure_horizontal_line_visual_extents(line_text: str, font_size: int, border_size: int, config=None, stroke_ratio: float = 0.07, reversed_direction: bool = False, letter_spacing: float = 1.0):
     """Measure visual ink extents (left, right) for one horizontal line, relative to line start pen x."""
     if not line_text:
         return 0, 0
 
-    total_advance = get_string_width(font_size, line_text)
+    total_advance = get_string_width(font_size, line_text, letter_spacing=letter_spacing)
     temp_w = max(font_size * 4, total_advance + (font_size + border_size) * 4)
     temp_h = max(font_size * 3, (font_size + border_size) * 4)
     canvas_text = np.zeros((temp_h, temp_w), dtype=np.uint8)
@@ -799,9 +820,7 @@ def _measure_horizontal_line_visual_extents(line_text: str, font_size: int, bord
 
     for c in line_text:
         if reversed_direction:
-            cdpt, _ = CJK_Compatibility_Forms_translate(c, 0)
-            glyph = get_char_glyph(cdpt, font_size, 0)
-            offset_x = glyph.metrics.horiAdvance >> 6
+            offset_x = get_char_offset_x(font_size, c, letter_spacing=letter_spacing)
             pen[0] -= offset_x
         offset_x = put_char_horizontal(
             font_size,
@@ -811,7 +830,8 @@ def _measure_horizontal_line_visual_extents(line_text: str, font_size: int, bord
             canvas_border,
             border_size=border_size,
             config=config,
-            stroke_width=stroke_ratio
+            stroke_width=stroke_ratio,
+            letter_spacing=letter_spacing
         )
         if not reversed_direction:
             pen[0] += offset_x
@@ -824,7 +844,7 @@ def _measure_horizontal_line_visual_extents(line_text: str, font_size: int, bord
     right_rel = left_rel + w
     return left_rel, right_rel
 
-def calc_horizontal_block_height(font_size: int, content: str) -> int:
+def calc_horizontal_block_height(font_size: int, content: str, letter_spacing: float = 1.0) -> int:
     """
     预先计算横排块在竖排文本中的实际渲染高度
     用于准确计算竖排文本的总高度，特别是在智能缩放模式下
@@ -843,7 +863,7 @@ def calc_horizontal_block_height(font_size: int, content: str) -> int:
         # --- 计算竖排旋转块的高度 ---
         # 使用与渲染相同的方式：横排渲染后旋转90度
         # 旋转后，原来的宽度变成高度
-        total_width = get_string_width(font_size, content)
+        total_width = get_string_width(font_size, content, letter_spacing=letter_spacing)
         # 旋转90度后，宽度变成高度
         return total_width
     else:
@@ -852,7 +872,7 @@ def calc_horizontal_block_height(font_size: int, content: str) -> int:
 
         # 创建临时画布来渲染横排内容
         h_height = h_font_size * 2
-        h_width = get_string_width(h_font_size, content) + h_font_size
+        h_width = get_string_width(h_font_size, content, letter_spacing=letter_spacing) + h_font_size
 
         temp_canvas = np.zeros((h_height, h_width), dtype=np.uint8)
         pen_h = [h_font_size // 2, h_font_size]
@@ -864,7 +884,7 @@ def calc_horizontal_block_height(font_size: int, content: str) -> int:
             elif char_h == '？':
                 char_h = '?'
             try:
-                offset_x = get_char_offset_x(h_font_size, char_h)
+                offset_x = get_char_offset_x(h_font_size, char_h, letter_spacing=letter_spacing)
                 cdpt, _ = CJK_Compatibility_Forms_translate(char_h, 0)
                 slot = get_char_glyph(cdpt, h_font_size, 0)
                 bitmap = slot.bitmap
@@ -897,7 +917,7 @@ def calc_horizontal_block_height(font_size: int, content: str) -> int:
         # 如果没有内容，返回默认高度
         return font_size
 
-def calc_vertical(font_size: int, text: str, max_height: int, config=None):
+def calc_vertical(font_size: int, text: str, max_height: int, config=None, letter_spacing: float = 1.0):
     """
     Line breaking logic for vertical text.
     Handles forced newlines (\\n) and is aware of <H> horizontal blocks.
@@ -935,7 +955,7 @@ def calc_vertical(font_size: int, text: str, max_height: int, config=None):
                     continue
                 # 使用实际渲染高度而不是固定的 font_size
                 # 这对于智能缩放模式下准确计算文本框拉伸比例至关重要
-                block_height = calc_horizontal_block_height(font_size, content)
+                block_height = calc_horizontal_block_height(font_size, content, letter_spacing=letter_spacing)
 
                 if current_line_height + block_height > max_height and current_line_text:
                     line_text_list.append(current_line_text)
@@ -950,21 +970,7 @@ def calc_vertical(font_size: int, text: str, max_height: int, config=None):
                     if not cdpt:
                         continue
                     
-                    cdpt_trans, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 1)
-                    ckpt = get_char_glyph(cdpt_trans, font_size, 1)
-                    bitmap = ckpt.bitmap
-
-                    if bitmap.rows * bitmap.width == 0 or len(bitmap.buffer) != bitmap.rows * bitmap.width:
-                        char_offset_y = ckpt.metrics.vertAdvance >> 6 if hasattr(ckpt.metrics, 'vertAdvance') and ckpt.metrics.vertAdvance != 0 else font_size
-                    else:
-                        char_offset_y = ckpt.metrics.vertAdvance >> 6 if hasattr(ckpt.metrics, 'vertAdvance') and ckpt.metrics.vertAdvance != 0 else font_size
-
-                    # Keep vertical ellipsis compact and stable across fonts.
-                    if _is_vertical_ellipsis_char(cdpt_trans):
-                        bitmap_char = None
-                        if bitmap.rows * bitmap.width > 0 and len(bitmap.buffer) == bitmap.rows * bitmap.width:
-                            bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((bitmap.rows, bitmap.width))
-                        char_offset_y = _smart_vertical_ellipsis_advance(ckpt, font_size, bitmap.rows, bitmap_char)
+                    char_offset_y = get_char_offset_y(font_size, cdpt, letter_spacing=letter_spacing)
 
                     should_wrap = current_line_height + char_offset_y > max_height
 
@@ -987,10 +993,10 @@ def calc_vertical(font_size: int, text: str, max_height: int, config=None):
 
     return line_text_list, line_height_list
 
-def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_text: np.ndarray, canvas_border: np.ndarray, border_size: int, config=None, line_width: int = 0, stroke_width: float = None):
+def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_text: np.ndarray, canvas_border: np.ndarray, border_size: int, config=None, line_width: int = 0, stroke_width: float = None, letter_spacing: float = 1.0):
     if cdpt == '＿':
         # For the placeholder, just advance the pen vertically and do nothing else.
-        return font_size
+        return _scale_advance(font_size, letter_spacing)
 
     pen = pen_l.copy()
     _is_pun = is_punctuation(cdpt)
@@ -1023,6 +1029,8 @@ def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_
         if hasattr(slot.advance, 'y') and slot.advance.y:
             char_offset_y = slot.advance.y >> 6
     
+    char_offset_y = _scale_advance(char_offset_y, letter_spacing)
+
     # 如果bitmap为空，直接返回计算好的offset
     if char_bitmap_rows * char_bitmap_width == 0 or len(bitmap.buffer) != char_bitmap_rows * char_bitmap_width:
         return char_offset_y
@@ -1122,7 +1130,7 @@ def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_
                         logger.warning("Shape mismatch: target={{target_slice.shape}}, source={{bitmap_border_slice.shape}}")
     return char_offset_y  
 
-def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tuple[int, int, int], bg: Optional[Tuple[int, int, int]], line_spacing: int, config=None, region_count: int = 1, stroke_width: float = None):
+def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tuple[int, int, int], bg: Optional[Tuple[int, int, int]], line_spacing: int, config=None, region_count: int = 1, stroke_width: float = None, letter_spacing: float = 1.0):
 
     # 应用最大字体限制
     if config and hasattr(config.render, 'max_font_size') and config.render.max_font_size > 0:
@@ -1149,7 +1157,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
     logger.debug(f"[VERTICAL DEBUG] effective_max_height={effective_max_height}")
 
     # Use original font size for line breaking calculation
-    line_text_list, line_height_list = calc_vertical(font_size, text, effective_max_height, config=config)
+    line_text_list, line_height_list = calc_vertical(font_size, text, effective_max_height, config=config, letter_spacing=letter_spacing)
     if not line_height_list:
         return
 
@@ -1226,7 +1234,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
                     r_font_size = font_size
                     
                     # 先在临时画布上横排渲染
-                    r_width = get_string_width(r_font_size, content) + r_font_size
+                    r_width = get_string_width(r_font_size, content, letter_spacing=letter_spacing) + r_font_size
                     r_height = r_font_size * 2
                     
                     temp_canvas_text = np.zeros((r_height, r_width), dtype=np.uint8)
@@ -1236,7 +1244,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
                     for char_r in content:
                         if char_r == '！': char_r = '!'
                         elif char_r == '？': char_r = '?'
-                        offset_x = put_char_horizontal(r_font_size, char_r, pen_r, temp_canvas_text, temp_canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio)
+                        offset_x = put_char_horizontal(r_font_size, char_r, pen_r, temp_canvas_text, temp_canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
                         pen_r[0] += offset_x
                     
                     # 旋转90度（顺时针）
@@ -1294,7 +1302,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
                     # --- RENDER HORIZONTAL BLOCK (符号/非字母数字块横排) ---
                     h_font_size = font_size
 
-                    h_width = get_string_width(h_font_size, content) + h_font_size
+                    h_width = get_string_width(h_font_size, content, letter_spacing=letter_spacing) + h_font_size
                     h_height = h_font_size * 2
 
                     temp_canvas_text = np.zeros((h_height, h_width), dtype=np.uint8)
@@ -1304,7 +1312,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
                     for char_h in content:
                         if char_h == '！': char_h = '!'
                         elif char_h == '？': char_h = '?'
-                        offset_x = put_char_horizontal(h_font_size, char_h, pen_h, temp_canvas_text, temp_canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio)
+                        offset_x = put_char_horizontal(h_font_size, char_h, pen_h, temp_canvas_text, temp_canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
                         pen_h[0] += offset_x
 
                     combined_temp = cv2.add(temp_canvas_text, temp_canvas_border)
@@ -1371,7 +1379,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
 
             else: # It's a vertical part
                 for char_idx, c in enumerate(part):
-                    offset_y = put_char_vertical(font_size, c, pen_line, canvas_text, canvas_border, border_size=bg_size, config=config, line_width=line_width, stroke_width=stroke_ratio)
+                    offset_y = put_char_vertical(font_size, c, pen_line, canvas_text, canvas_border, border_size=bg_size, config=config, line_width=line_width, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
                     pen_line[1] += offset_y
         
         # 使用实际列宽而不是固定的font_size来计算下一列的位置
@@ -1417,10 +1425,10 @@ def select_hyphenator(lang: str):
         _hyphenator_cache[lang] = None
         return None
 
-def get_char_offset_x(font_size: int, cdpt: str):
+def get_char_offset_x(font_size: int, cdpt: str, letter_spacing: float = 1.0):
     if cdpt == '＿':
         # Return the width of a full-width space for the placeholder
-        return get_char_offset_x(font_size, '　')
+        return get_char_offset_x(font_size, '　', letter_spacing=letter_spacing)
 
     c, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 0)
     glyph = get_char_glyph(c, font_size, 0)
@@ -1429,15 +1437,15 @@ def get_char_offset_x(font_size: int, cdpt: str):
         char_offset_x = glyph.advance.x >> 6
     else:
         char_offset_x = glyph.metrics.horiAdvance >> 6
-    return char_offset_x
+    return _scale_advance(char_offset_x, letter_spacing)
 
-def get_string_width(font_size: int, text: str):
-    return sum([get_char_offset_x(font_size, c) for c in text])
+def get_string_width(font_size: int, text: str, letter_spacing: float = 1.0):
+    return sum([get_char_offset_x(font_size, c, letter_spacing=letter_spacing) for c in text])
 
-def get_char_offset_y(font_size: int, cdpt: str):
+def get_char_offset_y(font_size: int, cdpt: str, letter_spacing: float = 1.0):
     """获取单个字符的竖排高度（像素）"""
     if cdpt == '＿':
-        return get_char_offset_y(font_size, '　')
+        return get_char_offset_y(font_size, '　', letter_spacing=letter_spacing)
 
     cdpt_trans, _ = CJK_Compatibility_Forms_translate(cdpt, 1)
     slot = get_char_glyph(cdpt_trans, font_size, 1)
@@ -1461,9 +1469,9 @@ def get_char_offset_y(font_size: int, cdpt: str):
         if hasattr(slot.advance, 'y') and slot.advance.y:
             char_offset_y = slot.advance.y >> 6
 
-    return char_offset_y
+    return _scale_advance(char_offset_y, letter_spacing)
 
-def get_string_height(font_size: int, text: str):
+def get_string_height(font_size: int, text: str, letter_spacing: float = 1.0):
     """获取字符串的竖排总高度（像素），考虑<H>横排块"""
     # 处理 BR 标记（不换行时当作连续文本）
     text_clean = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '', text, flags=re.IGNORECASE)
@@ -1483,14 +1491,14 @@ def get_string_height(font_size: int, text: str):
             content = part[3:-4]
             if content:
                 # 用精确的横排块高度计算
-                total_height += calc_horizontal_block_height(font_size, content)
+                total_height += calc_horizontal_block_height(font_size, content, letter_spacing=letter_spacing)
         else:
             # 普通竖排字符
-            total_height += sum([get_char_offset_y(font_size, c) for c in part])
+            total_height += sum([get_char_offset_y(font_size, c, letter_spacing=letter_spacing) for c in part])
 
     return total_height
 
-def calc_horizontal_cjk(font_size: int, text: str, max_width: int) -> Tuple[List[str], List[int]]:
+def calc_horizontal_cjk(font_size: int, text: str, max_width: int, letter_spacing: float = 1.0) -> Tuple[List[str], List[int]]:
     """
     Line breaking logic for CJK languages with punctuation rules.
     Handles forced newlines (\n) and invisible placeholders (＿).
@@ -1512,18 +1520,18 @@ def calc_horizontal_cjk(font_size: int, text: str, max_width: int) -> Tuple[List
         current_line = ""
         current_width = 0
         for char_idx, char in enumerate(paragraph):
-            char_width = get_char_offset_x(font_size, char)
+            char_width = get_char_offset_x(font_size, char, letter_spacing=letter_spacing)
 
             if current_width + char_width > max_width and current_line:
                 if current_line and current_line[-1] in no_end_chars:
                     last_char = current_line[-1]
                     current_line = current_line[:-1]
-                    lines.append((current_line, get_string_width(font_size, current_line)))
+                    lines.append((current_line, get_string_width(font_size, current_line, letter_spacing=letter_spacing)))
                     current_line = last_char + char
                 else:
                     lines.append((current_line, current_width))
                     current_line = char
-                current_width = get_string_width(font_size, current_line)
+                current_width = get_string_width(font_size, current_line, letter_spacing=letter_spacing)
             elif not current_line and char in no_start_chars:
                 if lines:
                     prev_line_text, prev_line_width = lines[-1]
@@ -1543,15 +1551,15 @@ def calc_horizontal_cjk(font_size: int, text: str, max_width: int) -> Tuple[List
 
     return line_text_list, line_width_list
 
-def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, language: str = 'en_US', hyphenate: bool = True) -> Tuple[List[str], List[int]]:
+def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, language: str = 'en_US', hyphenate: bool = True, letter_spacing: float = 1.0) -> Tuple[List[str], List[int]]:
 
     # 统一处理所有类型的AI换行符
     text = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text, flags=re.IGNORECASE)
 
     max_width = max(max_width, 2 * font_size)
 
-    whitespace_offset_x = get_char_offset_x(font_size, ' ')
-    hyphen_offset_x = get_char_offset_x(font_size, '-')
+    whitespace_offset_x = get_char_offset_x(font_size, ' ', letter_spacing=letter_spacing)
+    hyphen_offset_x = get_char_offset_x(font_size, '-', letter_spacing=letter_spacing)
 
     # 先按换行符分割段落，然后对每段分割单词
     # 使用特殊标记来保留换行位置
@@ -1576,7 +1584,7 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
 
     word_widths = []
     for i, word in enumerate(words):
-        width = get_string_width(font_size, word)
+        width = get_string_width(font_size, word, letter_spacing=letter_spacing)
         word_widths.append(width)
 
     while True:
@@ -1610,7 +1618,7 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
 
         normalized_syls = []
         for syl in new_syls:
-            syl_width = get_string_width(font_size, syl)
+            syl_width = get_string_width(font_size, syl, letter_spacing=letter_spacing)
             if syl_width > max_width:
                 normalized_syls.extend(list(syl))
             else:
@@ -1670,7 +1678,7 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
             hyphenation_idx = 0
             while j < len(syllables[i]):
                 syl = syllables[i][j]
-                syl_width = get_string_width(font_size, syl)
+                syl_width = get_string_width(font_size, syl, letter_spacing=letter_spacing)
 
                 if line_width + current_width + syl_width <= max_width:
                     current_width += syl_width
@@ -1723,7 +1731,7 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
                 current_width = 0
                 for i in range(syl_start_idx, syl_end_idx):
                     syl = syllables[word_idx][i]
-                    syl_width = get_string_width(font_size, syl)
+                    syl_width = get_string_width(font_size, syl, letter_spacing=letter_spacing)
                     if left_space > current_width + syl_width:
                         current_width += syl_width
                     else:
@@ -1756,8 +1764,8 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
         if line_words1[-1] == line_words2[0]:
             word1_text = ''.join(get_present_syllables(line_idx, -1))
             word2_text = ''.join(get_present_syllables(line_idx + 1, 0))
-            word1_width = get_string_width(font_size, word1_text)
-            word2_width = get_string_width(font_size, word2_text)
+            word1_width = get_string_width(font_size, word1_text, letter_spacing=letter_spacing)
+            word2_width = get_string_width(font_size, word2_text, letter_spacing=letter_spacing)
             if len(word2_text) == 1 or word2_width < font_size:
                 merged_word_idx = line_words1[-1]
                 line_words2.pop(0)
@@ -1798,15 +1806,15 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
             elif use_hyphen_chars and syl_end_idx != len(syllables[word_idx]) and len(words[word_idx]) > 3 and line_text[-1] != '-' and not (syl_end_idx < len(syllables[word_idx]) and not re.search(r'\w', syllables[word_idx][syl_end_idx][0])):
                 line_text += '-'
                 line_width_list[i] += hyphen_offset_x
-        line_width_list[i] = get_string_width(font_size, line_text)
+        line_width_list[i] = get_string_width(font_size, line_text, letter_spacing=letter_spacing)
         line_text_list.append(line_text)
 
     return line_text_list, line_width_list
 
-def put_char_horizontal(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_text: np.ndarray, canvas_border: np.ndarray, border_size: int, config=None, stroke_width: float = None):
+def put_char_horizontal(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_text: np.ndarray, canvas_border: np.ndarray, border_size: int, config=None, stroke_width: float = None, letter_spacing: float = 1.0):
     if cdpt == '＿':
         # For the placeholder, just advance the pen and do nothing else.
-        return get_char_offset_x(font_size, '＿')
+        return get_char_offset_x(font_size, '＿', letter_spacing=letter_spacing)
 
     pen = list(pen_l)
     cdpt, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 0)
@@ -1834,6 +1842,8 @@ def put_char_horizontal(font_size: int, cdpt: str, pen_l: Tuple[int, int], canva
             char_offset_x = slot.bitmap_left + bitmap.width
         else:
             char_offset_x = bitmap.width
+    char_offset_x = _scale_advance(char_offset_x, letter_spacing)
+
     if bitmap.rows * bitmap.width == 0 or len(bitmap.buffer) != bitmap.rows * bitmap.width:
         return char_offset_x
     bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((bitmap.rows, bitmap.width))
@@ -1925,7 +1935,7 @@ def is_cjk_lang(lang: str):
 
 def put_text_horizontal(font_size: int, text: str, width: int, height: int, alignment: str,
                         reversed_direction: bool, fg: Tuple[int, int, int], bg: Tuple[int, int, int],
-                        lang: str = 'en_US', hyphenate: bool = True, line_spacing: int = 0, config=None, region_count: int = 1, stroke_width: float = None):
+                        lang: str = 'en_US', hyphenate: bool = True, line_spacing: int = 0, config=None, region_count: int = 1, stroke_width: float = None, letter_spacing: float = 1.0):
 
     # 应用最大字体限制
     if config and hasattr(config.render, 'max_font_size') and config.render.max_font_size > 0:
@@ -1960,9 +1970,9 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
     # 横排基本间距: 0.01
     spacing_y = int(font_size * 0.01 * (line_spacing or 1.0))
     if layout_mode != 'default' and is_cjk_lang(lang):
-        line_text_list, line_width_list = calc_horizontal_cjk(font_size, text, width)
+        line_text_list, line_width_list = calc_horizontal_cjk(font_size, text, width, letter_spacing=letter_spacing)
     else:
-        line_text_list, line_width_list = calc_horizontal(font_size, text, width, height, lang, hyphenate)
+        line_text_list, line_width_list = calc_horizontal(font_size, text, width, height, lang, hyphenate, letter_spacing=letter_spacing)
 
     line_visual_extents_x = []
     line_visual_widths = []
@@ -1973,7 +1983,8 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
             border_size=bg_size,
             config=config,
             stroke_ratio=stroke_ratio,
-            reversed_direction=reversed_direction
+            reversed_direction=reversed_direction,
+            letter_spacing=letter_spacing
         )
         line_visual_extents_x.append((line_left, line_right))
         line_visual_widths.append(max(0, line_right - line_left))
@@ -2017,11 +2028,9 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
 
         for char_idx, c in enumerate(line_text):
             if reversed_direction:
-                cdpt, rot_degree = CJK_Compatibility_Forms_translate(c, 0)
-                glyph = get_char_glyph(cdpt, font_size, 0)
-                offset_x = glyph.metrics.horiAdvance >> 6
+                offset_x = get_char_offset_x(font_size, c, letter_spacing=letter_spacing)
                 pen_line[0] -= offset_x
-            offset_x = put_char_horizontal(font_size, c, pen_line, canvas_text, canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio)
+            offset_x = put_char_horizontal(font_size, c, pen_line, canvas_text, canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
             if not reversed_direction:
                 pen_line[0] += offset_x
         pen_orig[1] += spacing_y + font_size

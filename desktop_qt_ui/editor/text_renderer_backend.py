@@ -142,6 +142,7 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
 
         config_obj = Config(render=RenderConfig(**config_data)) if config_data else Config()
         line_spacing_multiplier = render_params.get('line_spacing', 1.0)
+        letter_spacing_multiplier = render_params.get('letter_spacing', 1.0)
 
         # 获取区域数（lines数组的长度），用于智能排版模式的换行判断
         region_count = 1
@@ -176,7 +177,8 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
                 line_spacing_multiplier, 
                 config=config_obj, 
                 region_count=region_count,
-                stroke_width=stroke_width
+                stroke_width=stroke_width,
+                letter_spacing=letter_spacing_multiplier
             )
         else:
             rendered_surface = text_render.put_text_vertical(
@@ -189,7 +191,8 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
                 line_spacing_multiplier, 
                 config=config_obj, 
                 region_count=region_count,
-                stroke_width=stroke_width
+                stroke_width=stroke_width,
+                letter_spacing=letter_spacing_multiplier
             )
 
         if rendered_surface is None or rendered_surface.size == 0:

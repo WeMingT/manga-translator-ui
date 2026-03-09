@@ -29,6 +29,8 @@ def build_region_specific_params(global_params_dict: dict, text_block: TextBlock
     region_params = global_params_dict.copy()
     if hasattr(text_block, "direction"):
         region_params["direction"] = _normalize_direction(getattr(text_block, "direction", None))
+    if hasattr(text_block, "letter_spacing"):
+        region_params["letter_spacing"] = getattr(text_block, "letter_spacing", None)
     region_font_path = getattr(text_block, "font_path", "")
     if region_font_path:
         region_params["font_path"] = region_font_path
@@ -56,6 +58,7 @@ def calculate_region_dst_points(
 
     is_horizontal = text_block.horizontal
     line_spacing = region_params.get("line_spacing") or config_obj.render.line_spacing or 1.0
+    letter_spacing = region_params.get("letter_spacing") or getattr(config_obj.render, "letter_spacing", None) or 1.0
     target_lang = text_block.target_lang or "en_US"
     region_font_path = region_params.get("font_path") or getattr(text_block, "font_path", "")
     text_renderer_backend.apply_font_for_render(region_font_path)
@@ -72,6 +75,7 @@ def calculate_region_dst_points(
         target_lang,
         center=None,
         angle=0,
+        letter_spacing=letter_spacing,
     )
     cx, cy = tuple(text_block.center)
     hw = float(box_w) / 2.0

@@ -218,6 +218,7 @@ class I18nManager:
                 "Stroke Color": "描边颜色",
                 "Stroke Width": "描边宽度",
                 "Line Spacing": "行间距",
+                "Letter Spacing": "字间距",
                 "Rotation": "旋转",
                 "Position": "位置",
                 "Copy": "复制",
