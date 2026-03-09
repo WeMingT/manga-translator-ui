@@ -455,6 +455,7 @@
   - `dict/system_prompt_hq.yaml` - 高质量翻译的系统提示词
   - `dict/system_prompt_line_break.yaml` - AI断句的系统提示词
   - `dict/glossary_extraction_prompt.yaml` - 术语提取的系统提示词
+  - `dict/system_prompt_hq_format.yaml` - 高质量翻译输出格式的系统提示词
 - **用户自定义提示词**（在界面中选择）：
   - `dict/prompt_example.yaml` - 提示词示例
   - 可以在此目录添加自己的 `.yaml` 或 `.json` 提示词文件
@@ -518,6 +519,15 @@ glossary:
 - 默认：`examples/translation_template.json`
 - 用于自定义导出原文的格式
 - 定义一组文本框的结构，程序会自动重复应用
+
+**过滤列表路径**：
+- 默认：`examples/filter_list.json`
+- 旧版兼容：`examples/filter_list.txt`（启动时会自动迁移到 JSON）
+- 用于跳过水印、广告等不需要翻译的文本
+
+**自定义 API 参数路径**：
+- 默认：`examples/custom_api_params.json`
+- 用于 OpenAI / Gemini / OpenAI HQ / Gemini HQ 的额外 API 参数
 
 **字体路径**：
 - 默认：`fonts` 目录
