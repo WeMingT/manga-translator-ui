@@ -51,45 +51,52 @@ class LogService:
         
         logger = logging.getLogger(self.app_name)
         logger.setLevel(logging.DEBUG)  # 设为 DEBUG 以允许所有日志通过
+        logger.propagate = True
         
         # 清除现有处理器
         for handler in logger.handlers[:]:
             logger.removeHandler(handler)
-        
-        # 控制台处理器（默认 INFO，可通过 set_console_log_level 调整）
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        
-        # ✅ 强制每次日志后刷新输出
-        class FlushingStreamHandler(logging.StreamHandler):
-            def emit(self, record):
-                super().emit(record)
-                self.flush()
-        
-        console_handler = FlushingStreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        
-        # 保存 console_handler 引用以便后续动态调整
-        self.console_handler = console_handler
-        
-        # 创建格式化器
-        simple_formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%H:%M:%S'
-        )
-        
-        # 设置格式化器
-        console_handler.setFormatter(simple_formatter)
-        
-        # 添加处理器
-        logger.addHandler(console_handler)
+
+        self.console_handler = None
+
+        # 主程序已经配置 root 控制台输出时，不再为 UI logger 额外挂一份 stdout handler，
+        # 否则同一条日志会先在这里打印，再向 root 传播后再打印一次。
+        if not self._get_root_console_handlers():
+            class FlushingStreamHandler(logging.StreamHandler):
+                def emit(self, record):
+                    super().emit(record)
+                    self.flush()
+
+            console_handler = FlushingStreamHandler(sys.stdout)
+            console_handler.setLevel(logging.INFO)
+            simple_formatter = logging.Formatter(
+                '%(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%H:%M:%S'
+            )
+            console_handler.setFormatter(simple_formatter)
+            logger.addHandler(console_handler)
+            self.console_handler = console_handler
         
         # 添加自定义处理器用于收集实时日志
         memory_handler = self._create_memory_handler()
         logger.addHandler(memory_handler)
         
         self.loggers[self.app_name] = logger
-        self.log_handlers.extend([console_handler, memory_handler])
+        if self.console_handler is not None:
+            self.log_handlers.append(self.console_handler)
+        self.log_handlers.append(memory_handler)
+
+    def _get_root_console_handlers(self) -> List[logging.Handler]:
+        """返回 root logger 上负责控制台输出的 handler。"""
+        root_logger = logging.getLogger()
+        handlers: List[logging.Handler] = []
+        for handler in root_logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                continue
+            if getattr(handler, 'stream', None) is None:
+                continue
+            handlers.append(handler)
+        return handlers
     
     def _create_memory_handler(self):
         """创建内存日志处理器"""
@@ -132,8 +139,11 @@ class LogService:
         level = logging.DEBUG if verbose else logging.INFO
         
         # 设置控制台处理器级别
-        if hasattr(self, 'console_handler'):
+        if self.console_handler is not None:
             self.console_handler.setLevel(level)
+
+        for handler in self._get_root_console_handlers():
+            handler.setLevel(level)
         
         # 根日志器保持 DEBUG 以允许所有日志通过
         logging.getLogger().setLevel(logging.DEBUG)

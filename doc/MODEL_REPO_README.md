@@ -46,7 +46,8 @@ license: CC-BY-NC-4.0
 - `yolo26obb.onnx` - YOLO OBB 检测器
 
 ### 气泡检测模型 (Bubble Detection)
-- `mangalens.onnx` - 漫画气泡检测模型
+- `mangalens.pt` - MangaLens PyTorch 漫画气泡检测模型（原 `best.pt` 已更名）
+- `mangalens.onnx` - MangaLens ONNX 漫画气泡检测模型
 
 ### OCR 识别模型
 - `ocr.zip` - 32px OCR 模型

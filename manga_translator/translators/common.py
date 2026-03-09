@@ -466,6 +466,35 @@ class AsyncGeminiCurlCffi:
             # 构建请求数据
             data = {}
 
+            def _normalize_system_instruction(value):
+                if not value:
+                    return None
+                if isinstance(value, str):
+                    return {"parts": [{"text": value}]}
+                if isinstance(value, dict):
+                    if "parts" in value:
+                        return value
+                    if "text" in value:
+                        return {"parts": [{"text": str(value["text"])}]}
+                    return {"parts": [{"text": json.dumps(value, ensure_ascii=False)}]}
+                if isinstance(value, list):
+                    parts = []
+                    for item in value:
+                        if isinstance(item, dict):
+                            if any(k in item for k in ("text", "inlineData", "inline_data", "fileData", "file_data")):
+                                parts.append(item)
+                            else:
+                                parts.append({"text": json.dumps(item, ensure_ascii=False)})
+                        else:
+                            parts.append({"text": str(item)})
+                    return {"parts": parts}
+                if hasattr(value, "model_dump"):
+                    dumped = value.model_dump(mode="json", by_alias=True, exclude_none=True)
+                    if isinstance(dumped, dict) and "parts" in dumped:
+                        return dumped
+                    return {"parts": [{"text": json.dumps(dumped, ensure_ascii=False)}]}
+                return {"parts": [{"text": str(value)}]}
+
             # 处理 contents 参数
             if isinstance(contents, str):
                 data["contents"] = [{"role": "user", "parts": [{"text": contents}]}]
@@ -497,6 +526,16 @@ class AsyncGeminiCurlCffi:
                     config_dict['maxOutputTokens'] = generation_config.max_output_tokens
                 if config_dict:
                     data["generationConfig"] = config_dict
+
+                system_instruction = _normalize_system_instruction(
+                    getattr(generation_config, 'system_instruction', None)
+                )
+                if system_instruction:
+                    data["systemInstruction"] = system_instruction
+
+            kw_system_instruction = _normalize_system_instruction(kwargs.pop("system_instruction", None))
+            if kw_system_instruction:
+                data["systemInstruction"] = kw_system_instruction
 
             # 添加安全设置
             if safety_settings:
@@ -724,11 +763,20 @@ class _GeminiResponse:
             content_data = candidate_data.get('content') or {}
             parts_data = content_data.get('parts') or []
             self.content = self.Content(parts_data)
-            self.finish_reason = candidate_data.get('finishReason', 'STOP')
+            self.finish_reason = candidate_data.get('finishReason')
+            self.safety_ratings = candidate_data.get('safetyRatings') or []
+
+    class PromptFeedback:
+        def __init__(self, feedback_data):
+            feedback_data = feedback_data or {}
+            self.block_reason = feedback_data.get('blockReason')
+            self.safety_ratings = feedback_data.get('safetyRatings') or []
 
     def __init__(self, data):
+        self.raw = data or {}
         candidates_data = data.get('candidates') or [] if data else []
         self.candidates = [self.Candidate(c) for c in candidates_data]
+        self.prompt_feedback = self.PromptFeedback(self.raw.get('promptFeedback') or {})
 
         # 提供便捷的 text 属性
         if self.candidates and self.candidates[0].content.parts:
@@ -810,19 +858,184 @@ def validate_gemini_response(response, logger=None) -> bool:
     
     # 检查是否有text属性（某些错误响应可能没有）
     if not hasattr(response, 'text'):
-        error_msg = f"Gemini API响应缺少text属性: {type(response).__name__}"
+        diagnostics = extract_gemini_response_diagnostics(response)
+        error_msg = f"Gemini API响应缺少text属性: {format_gemini_response_diagnostics(diagnostics)}"
         if logger:
             logger.error(error_msg)
         raise Exception("Gemini API响应缺少text属性")
     
     # text 可能存在但为 None（如安全拦截/空回），后续 .strip() 会崩溃
     if getattr(response, 'text', None) is None:
-        error_msg = "Gemini returned empty content (finish_reason: None)"
+        diagnostics = extract_gemini_response_diagnostics(response)
+        error_msg = f"Gemini returned empty content ({format_gemini_response_diagnostics(diagnostics)})"
         if logger:
             logger.error(error_msg)
         raise Exception(error_msg)
     
     return True
+
+
+def _get_gemini_field(obj: Any, *names: str) -> Any:
+    """兼容 SDK 对象 / 自定义对象 / dict 的 Gemini 字段读取。"""
+    if obj is None:
+        return None
+    for name in names:
+        if isinstance(obj, dict):
+            if name in obj:
+                return obj[name]
+        elif hasattr(obj, name):
+            return getattr(obj, name)
+    return None
+
+
+def _normalize_gemini_enum(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, 'name'):
+        try:
+            return str(value.name)
+        except Exception:
+            pass
+    text = str(value)
+    if '.' in text:
+        text = text.split('.')[-1]
+    return text
+
+
+def _normalize_gemini_safety_ratings(ratings: Any) -> List[Dict[str, Any]]:
+    normalized = []
+    for item in ratings or []:
+        category = _normalize_gemini_enum(_get_gemini_field(item, 'category'))
+        probability = _normalize_gemini_enum(_get_gemini_field(item, 'probability'))
+        severity = _normalize_gemini_enum(_get_gemini_field(item, 'severity'))
+        blocked = _get_gemini_field(item, 'blocked')
+        normalized.append({
+            'category': category,
+            'probability': probability,
+            'severity': severity,
+            'blocked': bool(blocked) if blocked is not None else None,
+        })
+    return normalized
+
+
+def extract_gemini_response_diagnostics(response: Any, fallback_finish_reason: Any = None) -> Dict[str, Any]:
+    """提取 Gemini 响应诊断信息，供日志与重试逻辑复用。"""
+    candidate = None
+    candidates = _get_gemini_field(response, 'candidates')
+    if candidates:
+        try:
+            candidate = candidates[0]
+        except Exception:
+            candidate = None
+
+    prompt_feedback = _get_gemini_field(response, 'prompt_feedback', 'promptFeedback')
+    finish_reason = fallback_finish_reason
+    if finish_reason is None:
+        finish_reason = _get_gemini_field(candidate, 'finish_reason', 'finishReason')
+    block_reason = _get_gemini_field(prompt_feedback, 'block_reason', 'blockReason')
+
+    prompt_safety_ratings = _normalize_gemini_safety_ratings(
+        _get_gemini_field(prompt_feedback, 'safety_ratings', 'safetyRatings')
+    )
+    candidate_safety_ratings = _normalize_gemini_safety_ratings(
+        _get_gemini_field(candidate, 'safety_ratings', 'safetyRatings')
+    )
+
+    finish_reason_str = _normalize_gemini_enum(finish_reason)
+    block_reason_str = _normalize_gemini_enum(block_reason)
+    text_value = _get_gemini_field(response, 'text')
+
+    return {
+        'finish_reason': finish_reason,
+        'finish_reason_str': finish_reason_str,
+        'block_reason': block_reason,
+        'block_reason_str': block_reason_str,
+        'prompt_safety_ratings': prompt_safety_ratings,
+        'candidate_safety_ratings': candidate_safety_ratings,
+        'text': text_value,
+    }
+
+
+def _format_gemini_safety_ratings(ratings: List[Dict[str, Any]]) -> str:
+    if not ratings:
+        return "[]"
+
+    parts = []
+    for item in ratings:
+        segments = []
+        if item.get('category'):
+            segments.append(item['category'])
+        if item.get('probability'):
+            segments.append(f"prob={item['probability']}")
+        if item.get('severity'):
+            segments.append(f"sev={item['severity']}")
+        if item.get('blocked') is not None:
+            segments.append(f"blocked={item['blocked']}")
+        parts.append("(" + ", ".join(segments) + ")")
+    return "[" + ", ".join(parts) + "]"
+
+
+def format_gemini_response_diagnostics(diagnostics: Dict[str, Any]) -> str:
+    """格式化 Gemini 诊断信息，便于日志输出。"""
+    parts = [
+        f"finish_reason={diagnostics.get('finish_reason_str') or 'None'}",
+        f"block_reason={diagnostics.get('block_reason_str') or 'None'}",
+    ]
+
+    prompt_ratings = diagnostics.get('prompt_safety_ratings') or []
+    candidate_ratings = diagnostics.get('candidate_safety_ratings') or []
+    if prompt_ratings:
+        parts.append(f"prompt_safety_ratings={_format_gemini_safety_ratings(prompt_ratings)}")
+    if candidate_ratings:
+        parts.append(f"candidate_safety_ratings={_format_gemini_safety_ratings(candidate_ratings)}")
+
+    return ", ".join(parts)
+
+
+def gemini_diagnostics_indicate_safety(diagnostics: Dict[str, Any]) -> bool:
+    """根据 Gemini 响应诊断判断是否属于安全策略拦截。"""
+    values = [
+        (diagnostics.get('finish_reason_str') or "").upper(),
+        (diagnostics.get('block_reason_str') or "").upper(),
+    ]
+    safety_keywords = (
+        'SAFETY',
+        'BLOCKLIST',
+        'PROHIBITED_CONTENT',
+        'SPII',
+        'RECITATION',
+    )
+    if any(any(keyword in value for keyword in safety_keywords) for value in values):
+        return True
+
+    for rating in (diagnostics.get('prompt_safety_ratings') or []) + (diagnostics.get('candidate_safety_ratings') or []):
+        if rating.get('blocked') is True:
+            return True
+
+    return False
+
+
+def gemini_diagnostics_should_disable_images(diagnostics: Dict[str, Any]) -> bool:
+    """根据 Gemini 诊断判断 HQ 重试时是否应去掉图片。"""
+    if gemini_diagnostics_indicate_safety(diagnostics):
+        return True
+    finish_reason = (diagnostics.get('finish_reason_str') or "").upper()
+    return 'OTHER' in finish_reason
+
+
+def gemini_error_message_indicates_safety(error_message: str) -> bool:
+    upper = (error_message or "").upper()
+    return any(token in upper for token in (
+        'SAFETY',
+        'BLOCKLIST',
+        'PROHIBITED_CONTENT',
+        'SPII',
+        'RECITATION',
+        'BLOCKED=TRUE',
+        'FINISH_REASON: 2',
+        'FINISH_REASON=2',
+        'FINISH_REASON IS 2',
+    ))
 
 def draw_text_boxes_on_image(image, text_regions: List[Any], text_order: List[int], 
                              upscaled_size: Tuple[int, int] = None):
@@ -1346,36 +1559,6 @@ class CommonTranslator(InfererModule):
 
         return ''.join(text_parts), last_finish_reason
 
-    def _get_retry_temperature(self, base_temperature: float, retry_attempt: int, retry_reason: str = "") -> float:
-        """
-        根据重试次数和原因动态调整温度，帮助模型跳出错误模式
-        
-        Args:
-            base_temperature: 基础温度（首次请求使用）
-            retry_attempt: 当前重试次数（0表示首次请求）
-            retry_reason: 重试原因（模型输出问题才提高温度，网络/链接错误不提高）
-            
-        Returns:
-            调整后的温度值
-        """
-        if retry_attempt <= 0:
-            return base_temperature
-        
-        # 只有模型输出问题才提高温度（数量不匹配、质量检查失败、BR检查失败）
-        # 网络错误、链接错误、返回空内容等不需要提高温度
-        should_increase_temp = (
-            "Translation count mismatch" in retry_reason or
-            "Quality check failed" in retry_reason or 
-            "BR markers missing" in retry_reason
-        )
-        
-        if not should_increase_temp:
-            return base_temperature
-        
-        # 每次重试增加 0.2，最高不超过 1.0
-        adjusted_temp = base_temperature + (retry_attempt * 0.2)
-        return min(adjusted_temp, 1.0)
-
     def _get_retry_hint(self, attempt: int, reason: str = "") -> str:
         """
         生成重试提示信息，用于避免模型服务器缓存导致的重复错误
@@ -1409,24 +1592,115 @@ class CommonTranslator(InfererModule):
 
 **CRITICAL INSTRUCTIONS (FOLLOW STRICTLY):**
 
-1.  **DIRECT TRANSLATION ONLY**: Your output MUST contain ONLY the raw, translated text. Nothing else.
-    -   DO NOT include the original text.
-    -   DO NOT include any explanations, greetings, apologies, or any conversational text.
-    -   DO NOT use Markdown formatting (like ```json or ```).
-    -   The output is fed directly to an automated script. Any extra text will cause it to fail.
+1.  **TRANSLATE EVERYTHING**: Translate all text provided, including sound effects and single characters. Do not leave any line untranslated.
 
-2.  **MATCH LINE COUNT**: The number of lines in your output MUST EXACTLY match the number of text regions you are asked to translate. Each line in your output corresponds to one numbered text region in the input.
-
-3.  **TRANSLATE EVERYTHING**: Translate all text provided, including sound effects and single characters. Do not leave any line untranslated.
-
-4.  **ACCURACY AND TONE**:
+2.  **ACCURACY AND TONE**:
     -   Preserve the original tone, emotion, and character's voice.
     -   Ensure consistent translation of names, places, and special terms.
     -   For onomatopoeia (sound effects), provide the equivalent sound in {{{target_lang}}} or a brief description (e.g., '(rumble)', '(thud)').
 
+3.  **ANTI-HALLUCINATION**:
+    -   Do not add information that is not present in the original text.
+    -   If OCR appears wrong, prefer the visible image context over broken OCR text.
+
 ---
 
-**FINAL INSTRUCTION:** Now, perform the translation task. Remember, your response must be clean, containing only the translated text."""
+**FINAL INSTRUCTION:** Translate the provided text regions faithfully and follow the separate output-format requirements appended below."""
+    _PREV_CONTEXT_PREFIX = "Here are the previous translation results for reference:\n"
+    _PREV_CONTEXT_MESSAGE = (
+        "The next assistant/model message contains finalized translation results from previous pages "
+        "for reference only. Use them only to maintain consistency in terminology, tone, and character "
+        "voice. Do not translate, summarize, repeat, or comment on that history."
+    )
+
+    def _extract_prev_context_payload(self, prev_context: str) -> str:
+        """提取历史上下文正文，供多轮消息使用。"""
+        payload = (prev_context or "").strip()
+        if payload.startswith(self._PREV_CONTEXT_PREFIX):
+            payload = payload[len(self._PREV_CONTEXT_PREFIX):].strip()
+        return payload
+
+    def _build_openai_context_messages(self, prev_context: str) -> List[Dict[str, Any]]:
+        """将历史上下文转换为 OpenAI 多轮消息，不附带图片。"""
+        payload = self._extract_prev_context_payload(prev_context)
+        if not payload:
+            self.logger.info("[Context] None")
+            return []
+
+        self.logger.info(f"[Context] Length: {len(payload)} chars")
+        return [
+            {"role": "user", "content": self._PREV_CONTEXT_MESSAGE},
+            {"role": "assistant", "content": payload},
+        ]
+
+    def _build_gemini_context_messages(self, prev_context: str) -> List[Dict[str, Any]]:
+        """将历史上下文转换为 Gemini 多轮消息，不附带图片。"""
+        payload = self._extract_prev_context_payload(prev_context)
+        if not payload:
+            self.logger.info("[Context] None")
+            return []
+
+        self.logger.info(f"[Context] Length: {len(payload)} chars")
+        return [
+            {"role": "user", "parts": [{"text": self._PREV_CONTEXT_MESSAGE}]},
+            {"role": "model", "parts": [{"text": payload}]},
+        ]
+
+    def _build_system_prompt_prefix(
+        self,
+        line_break_prompt_str: str,
+        custom_prompt_str: str,
+        retry_attempt: int = 0,
+        retry_reason: str = "",
+    ) -> str:
+        """构建系统提示词前缀：[重试提示] → [断句提示] → [自定义提示]"""
+        prompt_prefix = ""
+
+        if retry_attempt > 0:
+            prompt_prefix += self._get_retry_hint(retry_attempt, retry_reason) + "\n"
+
+        if line_break_prompt_str:
+            prompt_prefix += f"{line_break_prompt_str}\n\n---\n\n"
+
+        if custom_prompt_str:
+            prompt_prefix += f"{custom_prompt_str}\n\n---\n\n"
+
+        return prompt_prefix
+
+    def _build_system_prompt_without_glossary(
+        self,
+        prompt_prefix: str,
+        base_prompt: str,
+        target_lang_full: str,
+    ) -> str:
+        """普通翻译模式：基础系统提示 + 标准 translations 输出格式。"""
+        final_prompt = prompt_prefix + base_prompt
+        output_format_prompt = get_system_prompt_hq_format_prompt(target_lang_full, extract_glossary=False)
+        if output_format_prompt:
+            final_prompt += "\n\n---\n\n" + output_format_prompt
+        else:
+            self.logger.info("未启用自动术语提取，但未加载到标准输出格式提示词。")
+        return final_prompt
+
+    def _build_system_prompt_with_glossary(
+        self,
+        prompt_prefix: str,
+        base_prompt: str,
+        target_lang_full: str,
+    ) -> str:
+        """术语提取模式：基础系统提示 + 术语提取规则 + 扩展输出格式。"""
+        final_prompt = prompt_prefix + base_prompt
+        extraction_prompt = get_glossary_extraction_prompt(target_lang_full)
+        output_format_prompt = get_system_prompt_hq_format_prompt(target_lang_full, extract_glossary=True)
+        glossary_sections = [p for p in (extraction_prompt, output_format_prompt) if p]
+
+        if glossary_sections:
+            final_prompt += "\n\n---\n\n" + "\n\n---\n\n".join(glossary_sections)
+            self.logger.info("已启用自动术语提取，使用带 new_terms 输出格式的系统提示词。")
+        else:
+            self.logger.info("已启用自动术语提取，但未加载到术语提取附加提示词。")
+
+        return final_prompt
 
     def _build_system_prompt(
         self,
@@ -1441,7 +1715,11 @@ class CommonTranslator(InfererModule):
         """
         构建完整的系统提示词（统一实现，所有翻译器共享）。
 
-        组装顺序：[重试提示] → [断句提示] → [自定义提示] → [基础系统提示] → [术语提取提示]
+        不开启自动术语提取时：
+        [重试提示] → [断句提示] → [自定义提示] → [基础系统提示] → [标准输出格式]
+
+        开启自动术语提取时：
+        [重试提示] → [断句提示] → [自定义提示] → [基础系统提示] → [术语提取规则] → [扩展输出格式]
         """
         target_lang_full = VALID_LANGUAGES.get(target_lang, target_lang)
 
@@ -1471,32 +1749,25 @@ class CommonTranslator(InfererModule):
         if custom_prompt_str:
             custom_prompt_str = custom_prompt_str.replace("{{{target_lang}}}", target_lang_full)
 
-        # --- 组装最终提示词 ---
-        final_prompt = ""
+        prompt_prefix = self._build_system_prompt_prefix(
+            line_break_prompt_str=line_break_prompt_str,
+            custom_prompt_str=custom_prompt_str,
+            retry_attempt=retry_attempt,
+            retry_reason=retry_reason,
+        )
 
-        # 重试提示
-        if retry_attempt > 0:
-            final_prompt += self._get_retry_hint(retry_attempt, retry_reason) + "\n"
-
-        # 断句提示
-        if line_break_prompt_str:
-            final_prompt += f"{line_break_prompt_str}\n\n---\n\n"
-
-        # 自定义提示
-        if custom_prompt_str:
-            final_prompt += f"{custom_prompt_str}\n\n---\n\n"
-
-        # 基础系统提示
-        final_prompt += base_prompt
-
-        # 术语提取提示
         if extract_glossary:
-            extraction_prompt = get_glossary_extraction_prompt(target_lang_full)
-            if extraction_prompt:
-                final_prompt += f"\n\n---\n\n{extraction_prompt}"
-                self.logger.info("已启用自动术语提取，提示词已追加。")
+            return self._build_system_prompt_with_glossary(
+                prompt_prefix=prompt_prefix,
+                base_prompt=base_prompt,
+                target_lang_full=target_lang_full,
+            )
 
-        return final_prompt
+        return self._build_system_prompt_without_glossary(
+            prompt_prefix=prompt_prefix,
+            base_prompt=base_prompt,
+            target_lang_full=target_lang_full,
+        )
 
     def _build_unified_user_prompt(self, batch_data: List[Dict], ctx=None, prev_context: str = "", retry_attempt: int = 0, retry_reason: str = "", is_image_mode: bool = True) -> str:
         """
@@ -1506,7 +1777,7 @@ class CommonTranslator(InfererModule):
         Args:
             batch_data: List of dicts, each containing 'original_texts' and optional 'text_regions'.
             ctx: Context object.
-            prev_context: Previous context string.
+            prev_context: 保留兼容；历史上下文现在作为独立消息注入，不再拼进当前用户提示词。
             retry_attempt: Retry attempt count.
             retry_reason: Reason for retry.
             is_image_mode: Whether to include image-specific descriptions.
@@ -1526,13 +1797,6 @@ class CommonTranslator(InfererModule):
         # 添加重试提示到最前面（如果是重试）
         if retry_attempt > 0:
             prompt += self._get_retry_hint(retry_attempt, retry_reason) + "\n"
-
-        # 添加多页上下文（如果有）
-        if prev_context:
-            prompt += f"{prev_context}\n\n---\n\n"
-            self.logger.info(f"[Context] Length: {len(prev_context)} chars")
-        else:
-            self.logger.info("[Context] None")
 
         if is_image_mode:
             prompt += "Please translate the following manga text regions. I'm providing multiple images with their text regions in reading order:\n\n"
@@ -2774,3 +3038,24 @@ def get_glossary_extraction_prompt(target_lang: str) -> str:
     
     dict_dir = os.path.join(BASE_PATH, 'dict')
     return _load_glossary(dict_dir, target_lang)
+
+
+def get_system_prompt_hq_format_prompt(target_lang: str, extract_glossary: bool = False) -> str:
+    """
+    获取 HQ 通用输出格式提示词。
+    extract_glossary=False: 仅要求 translations
+    extract_glossary=True: 要求 translations + new_terms
+    """
+    from ..utils import BASE_PATH
+    from .prompt_loader import load_system_prompt_hq_format as _load_hq_format
+    import os
+
+    dict_dir = os.path.join(BASE_PATH, 'dict')
+    return _load_hq_format(dict_dir, target_lang, extract_glossary=extract_glossary)
+
+
+def get_glossary_output_format_prompt(target_lang: str) -> str:
+    """
+    兼容旧调用：获取开启术语提取时的 HQ 输出格式提示词。
+    """
+    return get_system_prompt_hq_format_prompt(target_lang, extract_glossary=True)

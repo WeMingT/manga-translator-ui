@@ -539,6 +539,7 @@ class PermissionEditor {
                 ${this.createFormRow(this.t('label_font_scale_ratio', '字体缩放比例'), this.createInput('render', 'font_scale_ratio', 'number'), '', 'render', 'font_scale_ratio')}
                 ${this.createFormRow(this.t('label_font_color', '字体颜色'), this.createInput('render', 'font_color', 'text'), '如：FFFFFF或FFFFFF:000000', 'render', 'font_color')}
                 ${this.createFormRow(this.t('label_line_spacing', '行间距'), this.createInput('render', 'line_spacing', 'number'), '', 'render', 'line_spacing')}
+                ${this.createFormRow(this.t('label_letter_spacing', '字间距'), this.createInput('render', 'letter_spacing', 'number'), '', 'render', 'letter_spacing')}
                 ${this.createFormRow(this.t('label_stroke_width', '描边宽度比例'), this.createInput('render', 'stroke_width', 'number'), '相对字体大小，默认0.07', 'render', 'stroke_width')}
             </div>
             <div class="form-section">

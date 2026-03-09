@@ -71,9 +71,25 @@
 
 ### CLI 选项
 
-- **详细日志 (verbose)**：输出详细的调试信息
+- **详细日志 (verbose)**：输出详细的调试信息（问题排查建议开启）
+  - 默认：关闭（`false`）
+  - 开启后：
+    - 日志窗口会显示更多 `DEBUG` 级别过程日志（检测、OCR、渲染等中间步骤）
+    - 每次任务会在 `result/时间戳-图片名-目标语言-翻译器/` 生成调试中间文件
+    - UI 会写入 `result/log_时间戳.txt` 运行日志文件（文件日志始终保留完整信息）
+  - 关闭后：
+    - 界面以 `INFO` 级别为主，日志更简洁，适合日常使用
+  - 建议：
+    - 日常翻译关闭，遇到漏检/识别错误/排版异常时临时开启
+    - 排查完成后清理旧日志，避免 `result/` 目录持续膨胀
 
 - **使用 GPU (use_gpu)**：启用 GPU 加速
+
+- **禁用 ONNX GPU 加速 (disable_onnx_gpu)**：禁用 ONNX Runtime 的 GPU 加速，强制使用 `CPUExecutionProvider`
+  - 默认：关闭（`false`）
+  - 适用场景：GPU 模式下 ONNX Runtime 出现兼容性、驱动或 provider 初始化问题时
+  - 说明：该选项只影响 ONNX Runtime 路径，不会关闭整个程序的 GPU 开关
+  - 建议：遇到 ONNX 模型在 GPU 上报错、闪退或启动失败时优先尝试开启
 
 - **重试次数 (attempts)**：错误重试次数（-1 = 无限重试）
 
@@ -106,10 +122,17 @@
 
 - **导出可编辑 PSD (export_editable_psd)**：导出分图层的 PSD 文件
   - 需要安装 Photoshop
-  - 导出包含：原图、修复图、可编辑文本层
+  - 导出包含：原图层、修复图层、可编辑文本层
+  - 原图层优先使用 `manga_translator_work/editor_base/` 中的上色/超分底图
+  - 修复图层优先使用当前会话修复图，回退 `manga_translator_work/inpainted/`
   - 导出路径：`原图目录/manga_translator_work/psd/`
-- **PSD 默认字体 (psd_font)**：在 Photoshop 中显示的文本图层字体（支持字体显示名称或 PostScript 名称）
-- **仅生成 PSD 脚本 (psd_script_only)**：只生成 .jsx 脚本，不自动运行 Photoshop
+- **PSD 默认字体 (psd_font)**：在 Photoshop 中显示的文本图层字体
+  - 支持字体显示名称或 PostScript 名称
+  - 留空时使用 Photoshop 默认字体
+- **仅生成 PSD 脚本 (psd_script_only)**：只生成 `.jsx` 脚本，不自动运行 Photoshop
+  - 不会直接生成 PSD 文件
+  - 脚本保存路径：`原图目录/manga_translator_work/psd/`
+  - 适合手动检查脚本或自行执行导出
 
 - **翻译完成后卸载模型 (unload_models_after_translation)**：翻译完成后卸载所有模型以释放内存
   - 默认：关闭
@@ -200,9 +223,9 @@
   - **manga2eng_pillow**：Manga2Eng Pillow 渲染器
 
 - **排版模式 (layout_mode)**：文本排版模式
-  - **smart_scaling**：智能缩放（推荐，自动调整字体大小）
+  - **smart_scaling**：智能缩放（自动调整字体大小）
   - **strict**：严格边界（缩小字体以适应文本框）
-  - **balloon_fill**：智能气泡（自动检测气泡并填充）
+  - **balloon_fill**：智能气泡（推荐，自动检测气泡并填充）
 
 - **对齐方式 (alignment)**：文本对齐方式
   - **auto**：自动对齐
@@ -248,6 +271,11 @@
 - **字体颜色 (font_color)**：字体颜色（十六进制颜色代码，如 #FFFFFF）
 
 - **行间距 (line_spacing)**：行间距倍率（调节行与行之间的空隙），默认 1.0，范围 0.1-5.0
+
+- **字间距 (letter_spacing)**：字间距倍率（调节字符推进距离），默认 1.0，范围 0.1-5.0
+  - `1.0` 与旧版默认渲染行为一致
+  - 同时作用于排版、文本框尺寸计算和最终渲染
+  - 支持全局设置，也支持在编辑器中按区域单独覆盖
 
 - **字体大小 (font_size)**：固定字体大小（覆盖自动计算）
 
@@ -329,14 +357,18 @@
 
 - **OCR模型 (ocr)**：OCR 识别模型
   - **48px**：默认模型（推荐，平衡速度和准确率）
-  - **48px_ctc**：CTC 模型（识别准确率更高）
+  - **48px_ctc**：CTC 变体模型（可作为备选对比，不代表一定更精确）
   - **mocr**：Manga OCR 专用模型（专门针对漫画优化）
   - **paddleocr**：PaddleOCR 引擎（支持多语言）
+  - **paddleocr_korean**：韩漫推荐
   - **paddleocr_vl**：PaddleOCR-VL-For-Manga 模型（效果最好，最吃配置）
+  - **推荐**：日漫推荐 `48px` 或 `mocr`，韩漫推荐 `paddleocr_korean`，英肉推荐原始 `paddleocr`
 
 - **启用混合OCR (use_hybrid_ocr)**：启用混合 OCR（同时使用两个模型，提高准确率）
+  - **日漫推荐组合**：`48px + mocr`
 
 - **备用OCR (secondary_ocr)**：第二个 OCR 模型（混合 OCR 时使用）
+  - **日漫推荐**：主 OCR 为 `48px` 时，备用 OCR 设为 `mocr`
 
 - **最小文本长度 (min_text_length)**：最小文本长度（过滤掉长度小于此值的文本）
 

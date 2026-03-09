@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ import numpy as np
 from PIL import Image
 
 from manga_translator.utils import open_pil_image
+from manga_translator.utils.path_manager import get_inpainted_path
 from utils.json_encoder import CustomJSONEncoder
 
 # 全局输出目录存储
@@ -37,6 +39,31 @@ class ExportService:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+
+    def _build_backend_export_config(self, config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """编辑器导出时直接渲染当前图像，不再重复跑上色/超分。"""
+        export_config = copy.deepcopy(config) if config else {}
+        upscale_config = export_config.setdefault('upscale', {})
+        upscale_config['upscale_ratio'] = None
+        colorizer_config = export_config.setdefault('colorizer', {})
+        colorizer_config['colorizer'] = 'none'
+        return export_config
+
+    def _save_temp_inpainted_image(self, temp_image_path: str, editor_inpainted_image: Optional[Image.Image], base_size=None) -> Optional[str]:
+        """将编辑器当前修复图临时落盘，供 load_text 导出流程直接复用。"""
+        if editor_inpainted_image is None:
+            return None
+
+        temp_inpainted_path = get_inpainted_path(temp_image_path, create_dir=True)
+        save_image = editor_inpainted_image.copy()
+        if base_size and save_image.size != base_size:
+            save_image = save_image.resize(base_size, Image.Resampling.LANCZOS)
+        if save_image.mode == 'CMYK':
+            save_image = save_image.convert('RGB')
+
+        save_image.save(temp_inpainted_path)
+        self.logger.info(f"已写入临时修复图供导出复用: {temp_inpainted_path}")
+        return temp_inpainted_path
     
     def get_output_directory(self) -> Optional[str]:
         """获取设置的输出目录"""
@@ -118,7 +145,8 @@ class ExportService:
                             success_callback: Optional[callable] = None,
                             error_callback: Optional[callable] = None,
                             source_image_path: Optional[str] = None,
-                            save_inpainted_only: bool = False):
+                            save_inpainted_only: bool = False,
+                            editor_inpainted_image: Optional[Image.Image] = None):
         """
         导出后端渲染的图片
         
@@ -133,6 +161,7 @@ class ExportService:
             error_callback: 错误回调
             source_image_path: 原图路径（用于PSD导出）
             save_inpainted_only: 是否只保存修复后的图片（不渲染翻译文字）
+            editor_inpainted_image: 编辑器当前修复图，导出时优先直接复用
         """
         if not image:
             if error_callback:
@@ -155,11 +184,18 @@ class ExportService:
             if error_callback:
                 error_callback(error_msg)
             return
+
+        editor_inpainted_copy = None
+        if editor_inpainted_image is not None:
+            try:
+                editor_inpainted_copy = editor_inpainted_image.copy()
+            except Exception as e:
+                self.logger.warning(f"复制编辑器修复图失败，将回退后端流程: {e}")
         
         # 在后台线程中执行导出
         export_thread = threading.Thread(
             target=self._perform_backend_render_export,
-            args=(image_copy, regions_data, config, output_path, mask, progress_callback, success_callback, error_callback, source_image_path, save_inpainted_only),
+            args=(image_copy, regions_data, config, output_path, mask, progress_callback, success_callback, error_callback, source_image_path, save_inpainted_only, editor_inpainted_copy),
             daemon=True
         )
         export_thread.start()
@@ -171,7 +207,8 @@ class ExportService:
                                      success_callback: Optional[callable] = None,
                                      error_callback: Optional[callable] = None,
                                      source_image_path: Optional[str] = None,
-                                     save_inpainted_only: bool = False):
+                                     save_inpainted_only: bool = False,
+                                     editor_inpainted_image: Optional[Image.Image] = None):
         """在后台线程中执行后端渲染导出"""
         import gc
         import os
@@ -192,6 +229,7 @@ class ExportService:
 
             # 创建临时目录
             temp_dir = tempfile.mkdtemp()
+            backend_config = self._build_backend_export_config(config)
             
             # 保存当前图片到临时文件
             temp_image_path = os.path.join(temp_dir, "temp_image.png")
@@ -199,21 +237,23 @@ class ExportService:
             if image.mode == 'CMYK':
                 image = image.convert('RGB')
             image.save(temp_image_path)
+
+            self._save_temp_inpainted_image(temp_image_path, editor_inpainted_image, image.size)
             
             # 保存区域数据到JSON文件
             base_name = os.path.splitext(os.path.basename(temp_image_path))[0]
             regions_json_path = os.path.join(temp_dir, f"{base_name}_translations.json")
-            self._save_regions_data(regions_data, regions_json_path, mask, config)
+            self._save_regions_data(regions_data, regions_json_path, mask, backend_config)
             
             if progress_callback:
                 progress_callback("初始化翻译引擎...")
             
             # 准备翻译器参数
-            translator_params = self._prepare_translator_params(config)
+            translator_params = self._prepare_translator_params(backend_config)
             
             # 执行后端渲染
             rendered_image = self._execute_backend_render(
-                temp_image_path, regions_json_path, translator_params, config, progress_callback, output_path, source_image_path, save_inpainted_only
+                temp_image_path, regions_json_path, translator_params, backend_config, progress_callback, output_path, source_image_path, save_inpainted_only
             )
             
             if not rendered_image:
@@ -246,6 +286,12 @@ class ExportService:
             try:
                 if image:
                     image.close()
+            except:
+                pass
+
+            try:
+                if editor_inpainted_image is not None:
+                    editor_inpainted_image.close()
             except:
                 pass
             

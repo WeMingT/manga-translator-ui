@@ -171,13 +171,6 @@ def cleanup_gpu_memory():
             except Exception:
                 pass
             
-            # 清理cuDNN缓存
-            try:
-                torch.backends.cudnn.benchmark = False
-                torch.backends.cudnn.deterministic = False
-            except Exception:
-                pass
-            
             return True
     except Exception:
         pass

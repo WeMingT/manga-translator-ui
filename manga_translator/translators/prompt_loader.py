@@ -128,6 +128,55 @@ def load_system_prompt_hq(dict_dir: str) -> str:
     return prompt
 
 
+def load_system_prompt_hq_format(dict_dir: str, target_lang: str, extract_glossary: bool = False) -> str:
+    """
+    加载 HQ 输出格式提示词。
+
+    Args:
+        dict_dir: dict/ 目录路径
+        target_lang: 目标语言名称
+        extract_glossary: 是否要求额外输出 new_terms
+
+    Returns:
+        替换了占位符的提示词文本，加载失败返回空字符串
+    """
+    data, path = load_prompt_by_stem(dict_dir, 'system_prompt_hq_format')
+    if data is None:
+        return ""
+
+    prompt = data.get('system_prompt_hq_format', '')
+    if not prompt:
+        return ""
+
+    prompt = prompt.replace("{{{target_lang}}}", target_lang)
+
+    if extract_glossary:
+        optional_new_terms_rule = (
+            '      -   The object MUST also contain a key "new_terms" which is a list of objects.\n'
+            '      -   If no new terms are found, return `"new_terms": []`.\n'
+            '      -   Each item in the "new_terms" list MUST have "original", "translation", and "category".\n'
+        )
+        optional_new_terms_example_suffix = (
+            ',\n'
+            '    "new_terms": [\n'
+            f'      {{ "original": "Excalibur", "translation": "<{target_lang} translation>", "category": "Item" }}\n'
+            '    ]\n'
+        )
+        optional_new_terms_final_instruction = ' Return "new_terms": [] when no new terms are found.'
+    else:
+        optional_new_terms_rule = ""
+        optional_new_terms_example_suffix = ""
+        optional_new_terms_final_instruction = ""
+
+    prompt = prompt.replace("{{{optional_new_terms_rule}}}", optional_new_terms_rule)
+    prompt = prompt.replace("{{{optional_new_terms_example_suffix}}}", optional_new_terms_example_suffix)
+    prompt = prompt.replace("{{{optional_new_terms_final_instruction}}}", optional_new_terms_final_instruction)
+
+    if path:
+        logger.debug(f"Loaded HQ output format prompt from: {path}")
+    return prompt
+
+
 def load_line_break_prompt(dict_dir: str) -> Optional[Dict[str, Any]]:
     """
     加载 AI 断句提示词
@@ -164,6 +213,20 @@ def load_glossary_extraction_prompt(dict_dir: str, target_lang: str) -> str:
         if path:
             logger.debug(f"Loaded glossary extraction prompt from: {path}")
     return prompt
+
+
+def load_glossary_output_format_prompt(dict_dir: str, target_lang: str) -> str:
+    """
+    兼容旧调用：加载开启术语提取时的 HQ 输出格式提示词。
+
+    Args:
+        dict_dir: dict/ 目录路径
+        target_lang: 目标语言名称
+
+    Returns:
+        替换了占位符的提示词文本，加载失败返回空字符串
+    """
+    return load_system_prompt_hq_format(dict_dir, target_lang, extract_glossary=True)
 
 
 def load_custom_prompt(path: str) -> Optional[Dict[str, Any]]:
@@ -213,6 +276,7 @@ def list_prompt_files(dict_dir: str, exclude_system: bool = True) -> list:
     """
     system_stems = {
         'system_prompt_hq',
+        'system_prompt_hq_format',
         'system_prompt_line_break',
         'glossary_extraction_prompt'
     }

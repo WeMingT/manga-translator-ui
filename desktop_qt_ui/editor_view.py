@@ -253,7 +253,6 @@ class EditorView(QWidget):
         self.toolbar.back_requested.connect(self.back_to_main_requested)
         self.toolbar.export_requested.connect(self.controller.export_image)
         self.toolbar.save_json_requested.connect(self.controller.save_json)
-        self.toolbar.edit_file_requested.connect(self.controller.edit_source_file)
         self.toolbar.undo_requested.connect(self.controller.undo)
         self.toolbar.redo_requested.connect(self.controller.redo)
         self.toolbar.zoom_in_requested.connect(self.graphics_view.zoom_in)

@@ -21,6 +21,7 @@ from .utils import (
     LANGUAGE_ORIENTATION_PRESETS,
     ModelWrapper,
     Context,
+    detect_bubbles_with_mangalens,
     open_pil_image,
     load_image,
     dump_image,
@@ -38,7 +39,9 @@ from matplotlib import cm
 from .utils.path_manager import (
     get_json_path,
     get_inpainted_path,
-    find_json_path
+    find_inpainted_path,
+    find_json_path,
+    get_work_image_path,
 )
 
 from .detection import dispatch as dispatch_detection, prepare as prepare_detection, unload as unload_detection
@@ -780,13 +783,61 @@ class MangaTranslator:
             logger.error(f"Failed to export original text for {os.path.basename(image_name)}: {e}")
 
     def _save_inpainted_image(self, image_path: str, inpainted_img: np.ndarray):
-        """保存修复后的图片到inpainted目录"""
+        """保存修复后的图片到 inpainted 目录。"""
+        inpainted_path = get_inpainted_path(image_path, create_dir=True)
+        self._save_image_to_path(inpainted_path, inpainted_img, "Inpainted image")
+
+    def _save_work_image(self, image_path: str, image_data, label: str = "Work image") -> Optional[str]:
+        """保存编辑器专用的上色/超分底图到 editor_base 目录。"""
+        work_image_path = get_work_image_path(image_path, create_dir=True)
+        return self._save_image_to_path(work_image_path, image_data, label)
+
+    def _save_editor_base_if_needed(self, ctx, config, image_data=None) -> Optional[str]:
+        """在执行了上色或超分时，保存编辑器使用的底图。"""
+        input_image = getattr(ctx, 'input', None)
+        image_path = getattr(input_image, 'name', None)
+        if not image_path:
+            return None
+
+        has_colorized = config.colorizer.colorizer != Colorizer.none
+        has_upscaled = bool(config.upscale.upscale_ratio)
+        if not has_colorized and not has_upscaled:
+            return None
+
+        if image_data is None:
+            image_data = getattr(ctx, 'upscaled', None) or getattr(ctx, 'img_colorized', None)
+        if image_data is None:
+            return None
+
+        return self._save_work_image(image_path, image_data, "Processed base image")
+
+    def _save_image_to_path(self, target_path: str, image_data, label: str) -> Optional[str]:
+        """将图像保存到指定路径。"""
         try:
-            inpainted_path = get_inpainted_path(image_path, create_dir=True)
-            imwrite_unicode(inpainted_path, cv2.cvtColor(inpainted_img, cv2.COLOR_RGB2BGR), logger)
-            logger.info(f"Inpainted image saved to: {inpainted_path}")
+            if image_data is None:
+                return None
+
+            if isinstance(image_data, Image.Image):
+                image_to_save = image_data.copy()
+            elif isinstance(image_data, np.ndarray):
+                image_to_save = Image.fromarray(image_data)
+            else:
+                raise TypeError(f"Unsupported work image type: {type(image_data)}")
+
+            save_kwargs = {}
+            if target_path.lower().endswith(('.jpg', '.jpeg')):
+                if image_to_save.mode in ('RGBA', 'LA'):
+                    image_to_save = image_to_save.convert('RGB')
+                save_kwargs['quality'] = self.save_quality
+            elif target_path.lower().endswith('.webp'):
+                save_kwargs['quality'] = self.save_quality
+
+            image_to_save.save(target_path, **save_kwargs)
+            logger.info(f"{label} saved to: {target_path}")
+            return target_path
         except Exception as e:
-            logger.error(f"Failed to save inpainted image: {e}")
+            logger.error(f"Failed to save {label.lower()}: {e}")
+            return None
 
     def _preprocess_load_text_mode(self, images_with_configs: List[tuple]):
         """
@@ -1299,7 +1350,32 @@ class MangaTranslator:
                 )
             result = (forward_textlines, result[1], result[2])
 
+        self._prime_bubble_detection_cache(config, getattr(ctx, 'img_rgb', None))
         return result
+
+    def _should_prime_bubble_cache(self, config: Config) -> bool:
+        render_cfg = getattr(config, 'render', None)
+        ocr_cfg = getattr(config, 'ocr', None)
+        return any(
+            (
+                getattr(render_cfg, 'layout_mode', None) == 'balloon_fill',
+                bool(getattr(ocr_cfg, 'use_model_bubble_filter', False)),
+                bool(getattr(ocr_cfg, 'use_model_bubble_repair_intersection', False)),
+                bool(getattr(ocr_cfg, 'limit_mask_dilation_to_bubble_mask', False)),
+            )
+        )
+
+    def _prime_bubble_detection_cache(self, config: Config, image: Optional[np.ndarray]) -> None:
+        if image is None or getattr(image, 'size', 0) == 0:
+            return
+        if not self._should_prime_bubble_cache(config):
+            return
+        try:
+            result = detect_bubbles_with_mangalens(image, return_annotated=False, verbose=False)
+            detected = len(result.detections) if result is not None else 0
+            logger.info(f"Bubble cache primed during detection stage: detections={detected}")
+        except Exception as exc:
+            logger.warning(f"Bubble cache priming failed during detection stage: {exc}")
 
     def _save_labeled_textline_debug_image(self, img_rgb: np.ndarray, textlines: List, filename: str = 'bboxes_unfiltered_labeled.png'):
         """
@@ -1316,6 +1392,8 @@ class MangaTranslator:
             'qipao': (0, 255, 0),           # 绿
             'other': (0, 255, 255),         # 黄
             'changfangtiao': (255, 0, 255), # 品红
+            'fangkuai': (255, 128, 0),      # 橙
+            'kuangwai': (128, 0, 255),      # 紫
             'hengxie': (255, 128, 0),       # 橙
             'shuqing': (128, 0, 255),       # 紫
             'unlabeled': (200, 200, 200),   # 灰
@@ -1415,6 +1493,49 @@ class MangaTranslator:
                     torch.cuda.synchronize()
             except Exception:
                 pass
+
+    def _get_cuda_memory_snapshot(self) -> Optional[dict]:
+        """获取当前 CUDA 显存快照。非 CUDA 设备返回 None。"""
+        device_str = str(getattr(self, 'device', ''))
+        if not device_str.startswith('cuda'):
+            return None
+        try:
+            if not torch.cuda.is_available():
+                return None
+            device = torch.device(device_str)
+            device_index = device.index if device.index is not None else torch.cuda.current_device()
+            free_bytes, total_bytes = torch.cuda.mem_get_info(device_index)
+            return {
+                'device': device_index,
+                'allocated_mb': torch.cuda.memory_allocated(device_index) / (1024 ** 2),
+                'reserved_mb': torch.cuda.memory_reserved(device_index) / (1024 ** 2),
+                'peak_allocated_mb': torch.cuda.max_memory_allocated(device_index) / (1024 ** 2),
+                'peak_reserved_mb': torch.cuda.max_memory_reserved(device_index) / (1024 ** 2),
+                'free_mb': free_bytes / (1024 ** 2),
+                'total_mb': total_bytes / (1024 ** 2),
+            }
+        except Exception:
+            return None
+
+    def _log_cuda_memory_snapshot(self, stage: str, include_peak: bool = True):
+        """打印 CUDA 显存占用快照，便于定位阶段性显存增长。"""
+        snapshot = self._get_cuda_memory_snapshot()
+        if snapshot is None:
+            return
+        peak_suffix = ""
+        if include_peak:
+            peak_suffix = (
+                f", peak_allocated={snapshot['peak_allocated_mb']:.1f}MB"
+                f", peak_reserved={snapshot['peak_reserved_mb']:.1f}MB"
+            )
+        logger.info(
+            f"[显存] {stage}: cuda:{snapshot['device']}, "
+            f"allocated={snapshot['allocated_mb']:.1f}MB, "
+            f"reserved={snapshot['reserved_mb']:.1f}MB"
+            f"{peak_suffix}, "
+            f"free={snapshot['free_mb']:.1f}MB, "
+            f"total={snapshot['total_mb']:.1f}MB"
+        )
     
     def _cleanup_context_memory(self, ctx, keep_result=True):
         """
@@ -2179,6 +2300,10 @@ class MangaTranslator:
             region.target_lang = config.translator.target_lang
             region._alignment = config.render.alignment
             region._direction = config.render.direction
+            if not isinstance(getattr(region, 'line_spacing', None), (int, float)) or getattr(region, 'line_spacing', 0) <= 0:
+                region.line_spacing = float(getattr(config.render, 'line_spacing', None) or 1.0)
+            if not isinstance(getattr(region, 'letter_spacing', None), (int, float)) or getattr(region, 'letter_spacing', 0) <= 0:
+                region.letter_spacing = float(getattr(config.render, 'letter_spacing', None) or 1.0)
 
         # --- Save results (moved to after post-processing) ---
         # JSON保存移到后处理（标点符号替换等）之后，确保保存的是最终结果
@@ -2467,13 +2592,42 @@ class MangaTranslator:
         await asyncio.sleep(0)
         self._check_cancelled()
 
+        img_shape = tuple(ctx.img_rgb.shape[:2]) if getattr(ctx, 'img_rgb', None) is not None else None
+        mask_shape = tuple(ctx.mask.shape[:2]) if getattr(ctx, 'mask', None) is not None else None
+        logger.info(
+            f"[修复] inpainter={config.inpainter.inpainter}, "
+            f"precision={getattr(config.inpainter, 'inpainting_precision', 'n/a')}, "
+            f"inpainting_size={config.inpainter.inpainting_size}, "
+            f"image_shape={img_shape}, mask_shape={mask_shape}"
+        )
+        self._log_cuda_memory_snapshot("inpainting/before_cleanup")
+
         # 修复前先执行一次激进显存清理，降低并发/长批次下的显存碎片与OOM概率。
         self._cleanup_gpu_memory(aggressive=True)
+        self._log_cuda_memory_snapshot("inpainting/after_cleanup")
+        snapshot = self._get_cuda_memory_snapshot()
+        if snapshot is not None:
+            try:
+                torch.cuda.reset_peak_memory_stats(snapshot['device'])
+            except Exception:
+                pass
+            self._log_cuda_memory_snapshot("inpainting/before_dispatch", include_peak=False)
         
         current_time = time.time()
         self._model_usage_timestamps[("inpainting", config.inpainter.inpainter)] = current_time
-        return await dispatch_inpainting(config.inpainter.inpainter, ctx.img_rgb, ctx.mask, config.inpainter, config.inpainter.inpainting_size, self.device,
-                                         self.verbose)
+        try:
+            result = await dispatch_inpainting(
+                config.inpainter.inpainter,
+                ctx.img_rgb,
+                ctx.mask,
+                config.inpainter,
+                config.inpainter.inpainting_size,
+                self.device,
+                self.verbose,
+            )
+            return result
+        finally:
+            self._log_cuda_memory_snapshot("inpainting/after_dispatch")
 
     async def _run_text_rendering(self, config: Config, ctx: Context, skip_font_scaling: bool = False):
         # ✅ 检查停止标志
@@ -2978,18 +3132,32 @@ class MangaTranslator:
                             
                             ctx.text_regions = loaded_regions
                             
-                            # 执行上色和超分
-                            if config.colorizer.colorizer != Colorizer.none:
+                            existing_inpainted_path = find_inpainted_path(image_name) if image_name else None
+
+                            # 导入翻译并渲染时，如果已有修复图，直接复用它作为渲染底图
+                            if existing_inpainted_path and os.path.exists(existing_inpainted_path):
+                                logger.info(f"Load text mode: Reusing inpainted image as render base: {existing_inpainted_path}")
+                                ctx.img_colorized = open_pil_image(existing_inpainted_path, eager=False)
+                            elif config.colorizer.colorizer != Colorizer.none:
                                 await self._report_progress('colorizing')
                                 ctx.img_colorized = await self._run_colorizer(config, ctx)
                             else:
                                 ctx.img_colorized = ctx.input
                             
-                            if config.upscale.upscale_ratio:
+                            if existing_inpainted_path and os.path.exists(existing_inpainted_path):
+                                ctx.upscaled = ctx.img_colorized
+                            elif config.upscale.upscale_ratio:
                                 await self._report_progress('upscaling')
                                 ctx.upscaled = await self._run_upscaling(config, ctx)
                             else:
                                 ctx.upscaled = ctx.img_colorized
+
+                            if (
+                                image_name and
+                                not existing_inpainted_path and
+                                (config.colorizer.colorizer != Colorizer.none or config.upscale.upscale_ratio)
+                            ):
+                                self._save_editor_base_if_needed(ctx, config)
                             
                             ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
                             
@@ -3076,8 +3244,12 @@ class MangaTranslator:
                                     ctx.mask = await self._run_mask_refinement(config, ctx)
                                 
                                 # Inpainting
-                                await self._report_progress('inpainting')
-                                ctx.img_inpainted = await self._run_inpainting(config, ctx)
+                                if existing_inpainted_path and loaded_mask is not None:
+                                    logger.info("Load text mode: Using existing inpainted image, skipping inpainting.")
+                                    ctx.img_inpainted = ctx.img_rgb
+                                else:
+                                    await self._report_progress('inpainting')
+                                    ctx.img_inpainted = await self._run_inpainting(config, ctx)
                                 
                                 # Rendering - load_text按JSON中的skip_font_scaling控制：True=跳过字体缩放，False=执行字体缩放
                                 await self._report_progress('rendering')
@@ -3372,6 +3544,7 @@ class MangaTranslator:
             logger.info("Colorize Only mode (batch): Running colorization only, skipping detection, OCR, translation and rendering.")
             ctx.result = ctx.img_colorized
             ctx.text_regions = []  # Empty text regions
+            self._save_editor_base_if_needed(ctx, config, ctx.img_colorized)
             await self._report_progress('colorize-only-complete', True)
             # 不在这里清理，让调用方在保存JSON后统一清理
             return ctx
@@ -3392,6 +3565,12 @@ class MangaTranslator:
                 ctx.upscaled = ctx.img_colorized
         else:
             ctx.upscaled = ctx.img_colorized
+
+        if (
+            hasattr(ctx.input, 'name') and ctx.input.name and
+            (config.colorizer.colorizer != Colorizer.none or config.upscale.upscale_ratio)
+        ):
+            self._save_editor_base_if_needed(ctx, config)
 
         # --- Upscale Only Mode Check (for batch processing) ---
         if self.upscale_only:
@@ -3469,10 +3648,14 @@ class MangaTranslator:
                 logger.warning("Falling back to simple text_regions (1 textline = 1 region)")
                 ctx.text_regions = []
                 fallback_line_spacing = 1.0
+                fallback_letter_spacing = 1.0
                 if hasattr(config, 'render'):
                     line_spacing_val = getattr(config.render, 'line_spacing', None)
                     if line_spacing_val is not None:
                         fallback_line_spacing = float(line_spacing_val)
+                    letter_spacing_val = getattr(config.render, 'letter_spacing', None)
+                    if letter_spacing_val is not None:
+                        fallback_letter_spacing = float(letter_spacing_val)
 
                 for textline in ctx.textlines:
                     region = TextBlock(
@@ -3483,7 +3666,8 @@ class MangaTranslator:
                         prob=textline.prob if hasattr(textline, 'prob') else 1.0,
                         fg_color=(0, 0, 0),
                         bg_color=(255, 255, 255),
-                        line_spacing=fallback_line_spacing
+                        line_spacing=fallback_line_spacing,
+                        letter_spacing=fallback_letter_spacing
                     )
                     ctx.text_regions.append(region)
                 logger.info(f"Created {len(ctx.text_regions)} simple text_regions")

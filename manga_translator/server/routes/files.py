@@ -97,6 +97,7 @@ async def upload_prompt(
     # Prohibit uploading system prompt filenames
     SYSTEM_PROMPT_FILES = {
         'system_prompt_hq.json', 'system_prompt_hq.yaml', 'system_prompt_hq.yml',
+        'system_prompt_hq_format.json', 'system_prompt_hq_format.yaml', 'system_prompt_hq_format.yml',
         'system_prompt_line_break.json', 'system_prompt_line_break.yaml', 'system_prompt_line_break.yml',
         'glossary_extraction_prompt.json', 'glossary_extraction_prompt.yaml', 'glossary_extraction_prompt.yml',
     }
@@ -129,7 +130,7 @@ async def list_prompts():
             files = os.listdir(dict_dir)
             print(f"[DEBUG] Found {len(files)} files in dict_dir")
             SYSTEM_PROMPT_BASES = {
-                'system_prompt_hq', 'system_prompt_line_break', 'glossary_extraction_prompt',
+                'system_prompt_hq', 'system_prompt_hq_format', 'system_prompt_line_break', 'glossary_extraction_prompt',
             }
             PROMPT_EXTENSIONS = ('.json', '.yaml', '.yml')
             for f in files:
@@ -186,7 +187,7 @@ async def delete_prompt(
     
     # Prohibit deleting system prompts
     SYSTEM_PROMPT_BASES = {
-        'system_prompt_hq', 'system_prompt_line_break', 'glossary_extraction_prompt',
+        'system_prompt_hq', 'system_prompt_hq_format', 'system_prompt_line_break', 'glossary_extraction_prompt',
     }
     name_without_ext = os.path.splitext(filename)[0]
     if name_without_ext in SYSTEM_PROMPT_BASES:

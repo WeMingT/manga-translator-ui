@@ -16,6 +16,64 @@ TRANSLATIONS_SUBDIR = "translations"
 ORIGINALS_SUBDIR = "originals"
 INPAINTED_SUBDIR = "inpainted"
 TRANSLATED_IMAGES_SUBDIR = "translated_images"  # 已翻译图片目录（替换翻译模式使用）
+EDITOR_BASE_SUBDIR = "editor_base"
+WORK_DIR_RESERVED_NAMES = {
+    JSON_SUBDIR,
+    TRANSLATIONS_SUBDIR,
+    ORIGINALS_SUBDIR,
+    INPAINTED_SUBDIR,
+    TRANSLATED_IMAGES_SUBDIR,
+    EDITOR_BASE_SUBDIR,
+}
+
+
+def normalize_image_path(image_path: str) -> str:
+    """规范化图片路径。"""
+    return os.path.normpath(os.path.abspath(image_path))
+
+
+def is_work_image_path(image_path: str) -> bool:
+    """
+    判断路径是否是编辑器专用的上色/超分底图。
+    """
+    norm_path = normalize_image_path(image_path)
+    parent_dir = os.path.dirname(norm_path)
+    grandparent_dir = os.path.dirname(parent_dir)
+
+    # 新结构：manga_translator_work/editor_base/xxx.png
+    if (
+        os.path.basename(parent_dir) == EDITOR_BASE_SUBDIR and
+        os.path.basename(grandparent_dir) == WORK_DIR_NAME
+    ):
+        return True
+
+    # 兼容之前已经落在根目录的临时底图
+    if os.path.basename(parent_dir) == WORK_DIR_NAME:
+        return os.path.basename(norm_path) not in WORK_DIR_RESERVED_NAMES
+
+    return False
+
+
+def resolve_original_image_path(image_path: str) -> str:
+    """
+    将工作目录中的统一底图路径还原为原图路径，其它路径保持原样。
+    """
+    norm_path = normalize_image_path(image_path)
+    if not is_work_image_path(norm_path):
+        return norm_path
+
+    parent_dir = os.path.dirname(norm_path)
+    grandparent_dir = os.path.dirname(parent_dir)
+
+    if (
+        os.path.basename(parent_dir) == EDITOR_BASE_SUBDIR and
+        os.path.basename(grandparent_dir) == WORK_DIR_NAME
+    ):
+        source_dir = os.path.dirname(grandparent_dir)
+        return os.path.join(source_dir, os.path.basename(norm_path))
+
+    source_dir = os.path.dirname(parent_dir)
+    return os.path.join(source_dir, os.path.basename(norm_path))
 
 
 def get_work_dir(image_path: str) -> str:
@@ -28,8 +86,57 @@ def get_work_dir(image_path: str) -> str:
     Returns:
         工作目录的绝对路径
     """
-    image_dir = os.path.dirname(os.path.abspath(image_path))
+    image_dir = os.path.dirname(resolve_original_image_path(image_path))
     return os.path.join(image_dir, WORK_DIR_NAME)
+
+
+def get_work_image_path(image_path: str, create_dir: bool = True) -> str:
+    """
+    获取编辑器专用的上色/超分底图路径。
+    """
+    if is_work_image_path(image_path):
+        work_image_path = normalize_image_path(image_path)
+        if create_dir:
+            os.makedirs(os.path.dirname(work_image_path), exist_ok=True)
+        return work_image_path
+
+    original_path = resolve_original_image_path(image_path)
+    work_dir = get_work_dir(original_path)
+    editor_base_dir = os.path.join(work_dir, EDITOR_BASE_SUBDIR)
+    if create_dir:
+        os.makedirs(editor_base_dir, exist_ok=True)
+    return os.path.join(editor_base_dir, os.path.basename(original_path))
+
+
+def find_work_image_path(image_path: str) -> Optional[str]:
+    """查找编辑器专用的上色/超分底图。"""
+    work_image_path = get_work_image_path(image_path, create_dir=False)
+    if os.path.exists(work_image_path):
+        return work_image_path
+
+    # 兼容之前可能已经落在根目录的底图
+    original_path = resolve_original_image_path(image_path)
+    legacy_root_work_image = os.path.join(get_work_dir(original_path), os.path.basename(original_path))
+    if os.path.exists(legacy_root_work_image):
+        return legacy_root_work_image
+
+    return None
+
+
+def get_legacy_inpainted_path(image_path: str, create_dir: bool = True) -> str:
+    """
+    获取旧版修复图路径（manga_translator_work/inpainted/*_inpainted.ext）。
+    """
+    original_path = resolve_original_image_path(image_path)
+    work_dir = get_work_dir(original_path)
+    inpainted_dir = os.path.join(work_dir, INPAINTED_SUBDIR)
+
+    if create_dir:
+        os.makedirs(inpainted_dir, exist_ok=True)
+
+    base_name = os.path.splitext(os.path.basename(original_path))[0]
+    ext = os.path.splitext(original_path)[1]
+    return os.path.join(inpainted_dir, f"{base_name}_inpainted{ext}")
 
 
 def get_json_path(image_path: str, create_dir: bool = True) -> str:
@@ -106,15 +213,7 @@ def get_inpainted_path(image_path: str, create_dir: bool = True) -> str:
     Returns:
         修复后图片的绝对路径
     """
-    work_dir = get_work_dir(image_path)
-    inpainted_dir = os.path.join(work_dir, INPAINTED_SUBDIR)
-    
-    if create_dir:
-        os.makedirs(inpainted_dir, exist_ok=True)
-    
-    base_name = os.path.splitext(os.path.basename(image_path))[0]
-    ext = os.path.splitext(image_path)[1]
-    return os.path.join(inpainted_dir, f"{base_name}_inpainted{ext}")
+    return get_legacy_inpainted_path(image_path, create_dir=create_dir)
 
 
 def get_translated_images_dir(image_path: str, create_dir: bool = True) -> str:
@@ -192,13 +291,15 @@ def find_json_path(image_path: str) -> Optional[str]:
     Returns:
         找到的JSON文件路径，如果不存在返回None
     """
+    original_path = resolve_original_image_path(image_path)
+
     # 1. 优先查找新位置
-    new_json_path = get_json_path(image_path, create_dir=False)
+    new_json_path = get_json_path(original_path, create_dir=False)
     if os.path.exists(new_json_path):
         return new_json_path
     
     # 2. 向后兼容：查找旧位置（图片同目录）
-    old_json_path = os.path.splitext(image_path)[0] + '_translations.json'
+    old_json_path = os.path.splitext(original_path)[0] + '_translations.json'
     if os.path.exists(old_json_path):
         return old_json_path
     
@@ -313,4 +414,3 @@ def migrate_legacy_files(image_path: str, move_files: bool = False) -> dict:
             result['skipped'].append(('txt', old_txt, 'target exists'))
     
     return result
-

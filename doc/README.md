@@ -114,10 +114,12 @@
 
 ### OCR 模型
 
-- **48px**：默认模型，推荐使用
-- **48px_ctc**：CTC 模型，识别准确率更高
+- **48px**：默认模型，日漫推荐
+- **48px_ctc**：CTC 变体模型，可作为备选对比，不代表一定更精确
 - **mocr**：Manga OCR 专用模型
-- **paddleocr**：PaddleOCR 引擎
+- **paddleocr**：PaddleOCR 引擎，英肉推荐
+- **paddleocr_korean**：韩漫推荐
+- **混合 OCR 推荐**：日漫建议 `48px + mocr`
 
 ### 字体设置
 
@@ -318,17 +320,24 @@
 - **JSON 文件**：`manga_translator_work/json/图片名_translations.json`
   - 包含文本区域、原文、翻译、位置信息
 
+- **编辑器底图**：`manga_translator_work/editor_base/图片名.原扩展名`
+  - 保存上色/超分后的底图
+  - 仅供编辑器原图层与 PSD 原图层使用
+
 - **原文 TXT**：`manga_translator_work/originals/图片名_original.txt`
   - 导出原文时生成
 
 - **翻译 TXT**：`manga_translator_work/translations/图片名_translated.txt`
   - 手动翻译后保存在此
 
-- **修复图片**：`manga_translator_work/inpainted/图片名_inpainted.png`
+- **修复图片**：`manga_translator_work/inpainted/图片名_inpainted.原扩展名`
   - 擦除文字后的图片
+  - `保存 JSON` 会直接更新这张图
+  - `导入翻译并渲染` 会优先复用这张图，不再重复跑修复
 
 - **翻译结果**：`manga_translator_work/result/图片名.png`
   - 开启"输出到原图目录"功能时，翻译完成的图片输出到此目录
+  - 编辑器“导出图片”不会再重复执行上色/超分
 
 ---
 
@@ -510,9 +519,9 @@
 #### 渲染器设置
 
 - **排版模式**：文本排版模式
-  - **智能缩放**：智能缩放（推荐，自动调整字体大小）
+  - **智能缩放**：智能缩放（自动调整字体大小）
   - **严格边界**：严格边界（缩小字体以适应文本框）
-  - **智能气泡**：智能气泡（自动检测气泡并填充）
+  - **智能气泡**：智能气泡（推荐，自动检测气泡并填充）
 
 - **对齐方式**：文本对齐方式
   - **自动**：自动对齐
@@ -568,14 +577,15 @@
 #### OCR 设置
 
 - **OCR模型**：OCR 识别模型
-  - **48px**：默认模型（推荐，平衡速度和准确率）
-  - **48px_ctc**：CTC 模型（识别准确率更高）
+  - **48px**：默认模型（推荐，平衡速度和准确率；日漫推荐）
+  - **48px_ctc**：CTC 变体模型（可作为备选对比，不代表一定更精确）
   - **mocr**：Manga OCR 专用模型（专门针对漫画优化）
-  - **paddleocr**：PaddleOCR 引擎（支持多语言）
+  - **paddleocr**：PaddleOCR 引擎（支持多语言；英肉推荐）
+  - **paddleocr_korean**：韩漫推荐
 
-- **启用混合OCR**：启用混合 OCR（同时使用两个模型，提高准确率）
+- **启用混合OCR**：启用混合 OCR（同时使用两个模型，提高准确率；日漫推荐 `48px + mocr`）
 
-- **备用OCR**：第二个 OCR 模型（混合 OCR 时使用）
+- **备用OCR**：第二个 OCR 模型（混合 OCR 时使用；日漫主 OCR 为 `48px` 时推荐 `mocr`）
 
 - **最小文本长度**：最小文本长度（过滤掉长度小于此值的文本）
 

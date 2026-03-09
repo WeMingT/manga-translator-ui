@@ -32,7 +32,3 @@ glossary_extraction_prompt: |
   *   **Skill**: Unique Special Moves / Spells.
   *   **Creature**: Unique Fictional Creatures / Named Pets.
 
-  # Output Format
-  Populate the "new_terms" field in the output JSON object.
-  Format: `{"original": "<extracted_text>", "translation": "<{{{target_lang}}}_translation>", "category": "<category>"}`.
-  If no new terms are found, return an empty list `[]`.

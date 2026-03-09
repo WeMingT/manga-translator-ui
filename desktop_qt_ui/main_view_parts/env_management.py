@@ -143,6 +143,51 @@ def _get_api_address_example(api_type: str) -> str:
     return "https://api.openai.com/v1"
 
 
+def _format_test_connection_error(api_type: str, message: str) -> str:
+    raw_message = str(message or "").strip()
+    error_lower = raw_message.lower()
+
+    network_keywords = (
+        "connection",
+        "cannot connect to host",
+        "connection refused",
+        "connection reset",
+        "network",
+        "timeout",
+        "timed out",
+        "dns",
+        "host",
+        "hostname",
+        "getaddrinfo",
+        "name or service not known",
+        "no address associated with hostname",
+        "nodename nor servname provided",
+        "failed to resolve",
+        "temporary failure in name resolution",
+        "远程主机",
+        "连接",
+        "超时",
+        "网络",
+        "主机",
+    )
+
+    is_network_error = any(keyword in error_lower for keyword in network_keywords)
+
+    if is_network_error:
+        friendly_message = (
+            "检测到连接错误、超时或 Host 解析错误。\n"
+            "请检查网络连接，并尝试开启 TUN（虚拟网卡模式）。"
+        )
+    else:
+        friendly_message = "请检查 API 密钥和地址。"
+
+    friendly_message += f"\n\nAPI 地址示例：{_get_api_address_example(api_type)}"
+    if raw_message:
+        friendly_message += f"\n\n原始错误：\n{raw_message}"
+
+    return friendly_message
+
+
 def _split_env_key(env_key: str) -> tuple[str, str, str]:
     normalized_key = (env_key or "").upper()
     scope = ""
@@ -289,10 +334,7 @@ def on_test_api_clicked(self, key: str):
         if success:
             QMessageBox.information(self, self._t("Success"), self._t("API connection test successful!"))
         else:
-            friendly_message = self._t("Please check your API key and address.")
-            friendly_message += f"\n\n{self._t('Address format example')}: {_get_api_address_example(api_type)}"
-            if message and str(message).strip():
-                friendly_message += f"\n\n{str(message).strip()}"
+            friendly_message = _format_test_connection_error(api_type, message)
             QMessageBox.critical(
                 self,
                 self._t("Error"),

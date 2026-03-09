@@ -97,7 +97,6 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         self.base_url = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
         self.model = os.getenv('OPENAI_MODEL', "gpt-4o")
         self.max_tokens = None  # 不限制，使用模型默认最大值
-        self.temperature = 0.1
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
         # 使用全局时间戳,跨实例共享
         if self.model not in OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
@@ -218,8 +217,8 @@ class OpenAIHighQualityTranslator(CommonTranslator):
 
 
     def _build_user_prompt(self, batch_data: List[Dict], ctx: Any, retry_attempt: int = 0, retry_reason: str = "") -> str:
-        """构建用户提示词（高质量版）- 使用统一方法，只包含上下文和待翻译文本"""
-        return self._build_user_prompt_for_hq(batch_data, ctx, self.prev_context, retry_attempt=retry_attempt, retry_reason=retry_reason)
+        """构建用户提示词（高质量版）- 使用统一方法，只包含当前待翻译文本"""
+        return self._build_user_prompt_for_hq(batch_data, ctx, "", retry_attempt=retry_attempt, retry_reason=retry_reason)
     
     def _get_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """获取完整的系统提示词（包含断句提示词、自定义提示词和基础系统提示词）"""
@@ -314,10 +313,9 @@ class OpenAIHighQualityTranslator(CommonTranslator):
             elif retry_attempt > 0:
                  self.logger.warning("降级模式：仅发送文本，不发送图片")
             
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ]
+            messages = [{"role": "system", "content": system_prompt}]
+            messages.extend(self._build_openai_context_messages(self.prev_context))
+            messages.append({"role": "user", "content": user_content})
 
             try:
                 # RPM限制
@@ -331,16 +329,10 @@ class OpenAIHighQualityTranslator(CommonTranslator):
                         self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
                         await self._sleep_with_cancel_polling(sleep_time)
                 
-                # 动态调整温度：质量检查或BR检查失败时提高温度帮助跳出错误模式
-                current_temperature = self._get_retry_temperature(self.temperature, retry_attempt, retry_reason)
-                if retry_attempt > 0 and current_temperature != self.temperature:
-                    self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
-                
                 # 构建API参数，只有当max_tokens有值时才传递（新模型如o1/gpt-4.1不支持null值）
                 api_params = {
                     "model": self.model,
                     "messages": messages,
-                    "temperature": current_temperature
                 }
                 if self.max_tokens is not None:
                     api_params["max_tokens"] = self.max_tokens
