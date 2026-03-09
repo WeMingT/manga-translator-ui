@@ -193,8 +193,10 @@ manga-translator-ui-1.7.6/
 desktop-ui/
 
 # Ignore local dictionaries and fonts (user configuration files)
-# Only affects new untracked files, existing tracked files remain tracked
-dict/
+# Keep the shared HQ prompt format in the repository.
+!dict/
+dict/*
+!dict/system_prompt_hq_format.yaml
 fonts/
 
 # Ignore local wheels
@@ -267,3 +269,6 @@ Saber-Translator-main/
 
 # Codex local workspace metadata
 /.codex/
+
+# Local GitHub command presets
+.github/commands/
