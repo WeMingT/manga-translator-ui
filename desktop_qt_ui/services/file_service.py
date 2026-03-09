@@ -18,7 +18,7 @@ from PIL import Image
 # 添加项目根目录到路径以便导入path_manager
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from manga_translator.utils import open_pil_image
-from manga_translator.utils.path_manager import find_json_path
+from manga_translator.utils.path_manager import find_json_path, is_work_image_path
 
 
 class FileService:
@@ -106,7 +106,9 @@ class FileService:
                 self.logger.warning(f"无法解析超分倍率: {image_data.get('upscale_ratio')}, 将忽略")
                 upscale_ratio = 0
             
-            if upscale_ratio > 0:
+            should_downscale_for_original = upscale_ratio > 0 and not is_work_image_path(image_path)
+
+            if should_downscale_for_original:
                 self.logger.info(f"检测到超分倍率: {upscale_ratio}, 将坐标和字体大小缩小到原图比例")
                 for region in regions:
                     # 缩放坐标
@@ -146,7 +148,7 @@ class FileService:
                     img_array = np.frombuffer(img_bytes, dtype=np.uint8)
                     raw_mask = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
                     # 如果有超分倍率，缩小mask
-                    if upscale_ratio > 0 and raw_mask is not None:
+                    if should_downscale_for_original and raw_mask is not None:
                         new_height = int(raw_mask.shape[0] / upscale_ratio)
                         new_width = int(raw_mask.shape[1] / upscale_ratio)
                         raw_mask = cv2.resize(raw_mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
@@ -157,7 +159,7 @@ class FileService:
             elif isinstance(mask_data, list):
                 raw_mask = np.array(mask_data, dtype=np.uint8)
                 # 如果有超分倍率，缩小mask
-                if upscale_ratio > 0 and raw_mask is not None:
+                if should_downscale_for_original and raw_mask is not None:
                     new_height = int(raw_mask.shape[0] / upscale_ratio)
                     new_width = int(raw_mask.shape[1] / upscale_ratio)
                     raw_mask = cv2.resize(raw_mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST)

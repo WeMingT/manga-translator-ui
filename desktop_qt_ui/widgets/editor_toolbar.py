@@ -21,7 +21,6 @@ class EditorToolbar(QWidget):
     back_requested = pyqtSignal()
     export_requested = pyqtSignal()
     save_json_requested = pyqtSignal()
-    edit_file_requested = pyqtSignal()
     undo_requested = pyqtSignal()
     redo_requested = pyqtSignal()
     zoom_in_requested = pyqtSignal()
@@ -66,12 +65,6 @@ class EditorToolbar(QWidget):
         self.save_json_button.setObjectName("editor_save_json_button")
         layout.addWidget(self.save_json_button)
         
-        self.edit_file_button = QToolButton()
-        self.edit_file_button.setText(self._t("Edit Original"))
-        self.edit_file_button.setToolTip(self._t("Switch to source file of current translation for editing") + " (Ctrl+E)")
-        self.edit_file_button.setObjectName("editor_edit_file_button")
-        layout.addWidget(self.edit_file_button)
-
         layout.addWidget(self._create_separator())
 
         # --- Edit Actions ---
@@ -175,7 +168,6 @@ class EditorToolbar(QWidget):
         self.back_button.clicked.connect(self.back_requested)
         self.export_button.clicked.connect(self.export_requested)
         self.save_json_button.clicked.connect(self.save_json_requested)
-        self.edit_file_button.clicked.connect(self.edit_file_requested)
         self.undo_button.clicked.connect(self.undo_requested)
         self.redo_button.clicked.connect(self.redo_requested)
         self.zoom_in_button.clicked.connect(self.zoom_in_requested)
@@ -216,8 +208,6 @@ class EditorToolbar(QWidget):
         self.export_button.setToolTip(self._t("Export current rendered image") + " (Ctrl+Q)")
         self.save_json_button.setText(self._t("Save JSON"))
         self.save_json_button.setToolTip(self._t("Save translation data to JSON file") + " (Ctrl+W)")
-        self.edit_file_button.setText(self._t("Edit Original"))
-        self.edit_file_button.setToolTip(self._t("Switch to source file of current translation for editing") + " (Ctrl+E)")
         self.undo_button.setText(self._t("Undo"))
         self.undo_button.setToolTip(self._t("Undo last operation") + " (Ctrl+Z)")
         self.redo_button.setText(self._t("Redo"))

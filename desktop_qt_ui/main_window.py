@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QLibraryInfo, QLocale, QTimer, Qt, QTranslator, pyqtSlot
 from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStackedWidget, QTextEdit
 
 from app_logic import MainAppLogic
 from editor.editor_controller import EditorController
@@ -530,9 +530,19 @@ class MainWindow(QMainWindow):
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle(self._t("Translation Error"))
             msg_box.setIcon(QMessageBox.Icon.Critical)
+            msg_box.setTextFormat(Qt.TextFormat.PlainText)
             msg_box.setText(error_message)
+            msg_box.setDetailedText(error_message)
+            msg_box.setSizeGripEnabled(True)
+            msg_box.setMinimumSize(760, 560)
             msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
             apply_message_box_style(msg_box)
+            for label in msg_box.findChildren(QLabel):
+                label.setWordWrap(True)
+                label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            for text_edit in msg_box.findChildren(QTextEdit):
+                text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+                text_edit.setReadOnly(True)
             msg_box.exec()
         except Exception as e:
             self.logger.error(f"_show_error_dialog error: {e}", exc_info=True)
@@ -582,16 +592,15 @@ class MainWindow(QMainWindow):
 
             # 判断是否从翻译完成进入（有 files_to_load 参数）
             if files_to_load and len(files_to_load) > 0:
-                # 从翻译完成进入：显示翻译后的文件列表
-                # 不使用源文件的 folder_tree，让编辑器根据翻译后的文件自己构建树结构
+                # 从翻译完成进入：仍然显示源文件列表，具体加载时再解析到可编辑底图
                 self.editor_logic.load_file_lists(
-                    source_files=expanded_files,      # 传递源文件列表（用于配对）
-                    translated_files=translated_files, # 传递翻译后的文件列表
-                    folder_tree=None,                 # 不使用源文件的树结构
-                    show_translated=True              # 显示翻译后的文件列表
+                    source_files=expanded_files,
+                    translated_files=translated_files,
+                    folder_tree=folder_tree,
+                    show_translated=False
                 )
                 
-                # 加载第一个翻译后的文件
+                # 传入翻译结果路径，编辑器会自动解析到可编辑底图
                 self.editor_logic.load_image_into_editor(files_to_load[0])
             else:
                 # 手动打开编辑器：显示源文件列表
@@ -603,8 +612,9 @@ class MainWindow(QMainWindow):
                 # 如果指定了要加载的文件
                 if file_to_load:
                     self.editor_logic.load_image_into_editor(file_to_load)
+                elif expanded_files:
+                    self.editor_logic.load_image_into_editor(expanded_files[0])
                 elif translated_files:
-                    # 如果没有指定，加载第一个翻译后的文件
                     self.editor_logic.load_image_into_editor(translated_files[0])
 
             self.stacked_widget.setCurrentWidget(self.editor_view)

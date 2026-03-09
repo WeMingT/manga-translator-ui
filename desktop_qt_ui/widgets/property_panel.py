@@ -478,6 +478,18 @@ class PropertyPanel(QWidget):
         line_spacing_layout.addWidget(self.line_spacing_spinbox)
         self.line_spacing_label = QLabel(self._t("Line Spacing:"))
         style_layout.addRow(self.line_spacing_label, line_spacing_layout)
+
+        letter_spacing_layout = QHBoxLayout()
+        letter_spacing_layout.setContentsMargins(0, 0, 0, 0)
+        self.letter_spacing_spinbox = QDoubleSpinBox()
+        self.letter_spacing_spinbox.setRange(0.1, 5.0)
+        self.letter_spacing_spinbox.setSingleStep(0.1)
+        self.letter_spacing_spinbox.setDecimals(1)
+        self.letter_spacing_spinbox.setValue(1.0)
+        self.letter_spacing_spinbox.setMaximumWidth(96)
+        letter_spacing_layout.addWidget(self.letter_spacing_spinbox)
+        self.letter_spacing_label = QLabel(self._t("Letter Spacing:"))
+        style_layout.addRow(self.letter_spacing_label, letter_spacing_layout)
         
         # Alignment and direction
         self.alignment_combo = QComboBox()
@@ -558,6 +570,7 @@ class PropertyPanel(QWidget):
         self.stroke_color_picker.color_changed.connect(self._on_stroke_color_changed)
         self.stroke_width_spinbox.valueChanged.connect(self._on_stroke_width_changed)
         self.line_spacing_spinbox.valueChanged.connect(self._on_line_spacing_changed)
+        self.letter_spacing_spinbox.valueChanged.connect(self._on_letter_spacing_changed)
         # 实时更新（textChanged）
         self.translated_text_box.textChanged.connect(self._on_translated_text_changed)
         # self.translated_text_box.focusOutEvent = self._make_focus_out_handler(self.translated_text_box, self._on_translated_text_focus_out)
@@ -713,6 +726,8 @@ class PropertyPanel(QWidget):
             self.stroke_width_label.setText(self._t("Stroke Width:"))
         if hasattr(self, 'line_spacing_label'):
             self.line_spacing_label.setText(self._t("Line Spacing:"))
+        if hasattr(self, 'letter_spacing_label'):
+            self.letter_spacing_label.setText(self._t("Letter Spacing:"))
         if hasattr(self, 'alignment_label'):
             self.alignment_label.setText(self._t("Alignment:"))
         if hasattr(self, 'direction_label'):
@@ -898,6 +913,7 @@ class PropertyPanel(QWidget):
             self.font_size_input.clear()
             self.stroke_width_spinbox.setValue(0.07)  # 重置为默认值
             self.line_spacing_spinbox.setValue(1.0)  # 重置为默认值
+            self.letter_spacing_spinbox.setValue(1.0)  # 重置为默认值
             default_color = self.config_service.get_config().render.font_color or "#000000"
             self.font_color_picker.reset(default_color)
             self.stroke_color_picker.reset("#ffffff")
@@ -988,6 +1004,9 @@ class PropertyPanel(QWidget):
             # Update line spacing
             line_spacing = region_data.get("line_spacing", 1.0)
             self.line_spacing_spinbox.setValue(line_spacing if line_spacing is not None else 1.0)
+
+            letter_spacing = region_data.get("letter_spacing", 1.0)
+            self.letter_spacing_spinbox.setValue(letter_spacing if letter_spacing is not None else 1.0)
             
             # Update font family selector
             font_path = region_data.get("font_path", "")
@@ -1227,6 +1246,14 @@ class PropertyPanel(QWidget):
         selected_indices = self.model.get_selection()
         for region_index in selected_indices:
             self.model.update_region_style(region_index, "line_spacing", value)
+
+    def _on_letter_spacing_changed(self, value):
+        """处理字间距倍率变化"""
+        if self.block_updates:
+            return
+        selected_indices = self.model.get_selection()
+        for region_index in selected_indices:
+            self.model.update_region_style(region_index, "letter_spacing", value)
 
     def _on_mask_tool_changed(self, button):
         if button == self.select_button:

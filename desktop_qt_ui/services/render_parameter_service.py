@@ -280,6 +280,8 @@ class RenderParameterService:
                 # 行间距 - 读取 line_spacing
                 if 'line_spacing' in region_data and region_data['line_spacing'] is not None:
                     params.line_spacing = region_data['line_spacing']
+                if 'letter_spacing' in region_data and region_data['letter_spacing'] is not None:
+                    params.letter_spacing = region_data['letter_spacing']
 
                 # 字体样式
                 if 'bold' in region_data:
@@ -315,6 +317,10 @@ class RenderParameterService:
                 calculated_params.line_spacing = region_data['line_spacing']
             else:
                 calculated_params.line_spacing = default_params.line_spacing
+            if 'letter_spacing' in region_data and region_data['letter_spacing'] is not None:
+                calculated_params.letter_spacing = region_data['letter_spacing']
+            else:
+                calculated_params.letter_spacing = default_params.letter_spacing
 
             # 从 region_data 中读取用户设置的字段
             # 字体大小
@@ -479,10 +485,12 @@ class RenderParameterService:
         # 处理描边颜色 - 使用 params.bg_color 作为描边颜色
         backend_params['text_stroke_color'] = params.bg_color
 
-        # 覆盖 line_spacing 和 stroke_width（如果 region_data 中有的话）
+        # 覆盖 line_spacing / letter_spacing 和 stroke_width（如果 region_data 中有的话）
         if region_data:
             if 'line_spacing' in region_data:
                 backend_params['line_spacing'] = region_data['line_spacing']
+            if 'letter_spacing' in region_data:
+                backend_params['letter_spacing'] = region_data['letter_spacing']
             # 优先使用 stroke_width，兼容旧的 default_stroke_width
             stroke_width_val = region_data.get('stroke_width') or region_data.get('default_stroke_width')
             if stroke_width_val is not None:

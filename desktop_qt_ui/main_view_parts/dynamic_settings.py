@@ -799,7 +799,7 @@ def _create_param_widgets(self, data, parent_layout, prefix=""):
             widget = QLineEdit(str(value))
             widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_numeric_input_changed(w.text(), k, float if isinstance(value, float) else int))
 
-        elif value is None and key in ['tile_size', 'line_spacing', 'font_size', 'psd_font', 'ocr_vl_custom_prompt']:
+        elif value is None and key in ['tile_size', 'line_spacing', 'letter_spacing', 'font_size', 'psd_font', 'ocr_vl_custom_prompt']:
             # 处理值为 None 的可选参数（数值/字符串）
             widget = QLineEdit("")
             # 根据参数名设置提示文本
@@ -807,6 +807,9 @@ def _create_param_widgets(self, data, parent_layout, prefix=""):
                 widget.setPlaceholderText(self._t("Default: 400"))
                 widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_numeric_input_changed(w.text(), k, int))
             elif key == 'line_spacing':
+                widget.setPlaceholderText(self._t("Default: 1.0 (multiplier for base spacing)"))
+                widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_numeric_input_changed(w.text(), k, float))
+            elif key == 'letter_spacing':
                 widget.setPlaceholderText(self._t("Default: 1.0 (multiplier for base spacing)"))
                 widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_numeric_input_changed(w.text(), k, float))
             elif key == 'font_size':

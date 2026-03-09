@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 from PIL import Image
 from google.genai import types
 
-from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_gemini_response, AsyncGeminiCurlCffi
+from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_gemini_response, AsyncGeminiCurlCffi, extract_gemini_response_diagnostics, format_gemini_response_diagnostics, gemini_diagnostics_indicate_safety, gemini_diagnostics_should_disable_images, gemini_error_message_indicates_safety
 from .keys import GEMINI_API_KEY
 from ..utils import Context
 
@@ -91,7 +91,6 @@ class GeminiHighQualityTranslator(CommonTranslator):
         self.base_url = os.getenv('GEMINI_API_BASE', 'https://generativelanguage.googleapis.com')
         self.model_name = os.getenv('GEMINI_MODEL', "gemini-1.5-flash")
         self.max_tokens = None  # 不限制，使用模型默认最大值
-        self.temperature = 0.1
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
         # 使用全局时间戳,跨实例共享
         if self.model_name not in GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
@@ -221,8 +220,8 @@ class GeminiHighQualityTranslator(CommonTranslator):
 
 
     def _build_user_prompt(self, batch_data: List[Dict], ctx: Any, retry_attempt: int = 0, retry_reason: str = "") -> str:
-        """构建用户提示词（高质量版）- 使用统一方法，只包含上下文和待翻译文本"""
-        return self._build_user_prompt_for_hq(batch_data, ctx, self.prev_context, retry_attempt=retry_attempt, retry_reason=retry_reason)
+        """构建用户提示词（高质量版）- 使用统一方法，只包含当前待翻译文本"""
+        return self._build_user_prompt_for_hq(batch_data, ctx, "", retry_attempt=retry_attempt, retry_reason=retry_reason)
     
     def _get_system_instruction(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """获取完整的系统指令（包含断句提示词、自定义提示词和基础系统提示词）"""
@@ -286,7 +285,13 @@ class GeminiHighQualityTranslator(CommonTranslator):
             # 使用新版 SDK 的格式
             try:
                 image_bytes, mime_type = encode_image_for_gemini(image)
-                image_parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+                image_parts.append(
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type).model_dump(
+                        mode="json",
+                        by_alias=True,
+                        exclude_none=True,
+                    )
+                )
             except Exception as image_error:
                 self.logger.warning(f"图片[{i + 1}] 处理失败，跳过上传: {image_error}")
                 continue
@@ -337,7 +342,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
             
             extract_glossary = bool(_custom_prompt_json) and config_extract
 
-            # 获取系统指令（不再用于初始化客户端，而是合并到用户消息）
+            # 获取系统指令（通过 systemInstruction 发送）
             system_instruction = self._get_system_instruction(_source_lang, _target_lang, custom_prompt_json=_custom_prompt_json, line_break_prompt_json=_line_break_prompt_json, retry_attempt=retry_attempt, retry_reason=retry_reason, extract_glossary=extract_glossary)
             
             # 初始化客户端（不传入 system_instruction）
@@ -350,25 +355,18 @@ class GeminiHighQualityTranslator(CommonTranslator):
             
             # 构建用户提示词（包含重试信息以避免缓存）
             user_prompt = self._build_user_prompt(batch_data, ctx, retry_attempt=retry_attempt, retry_reason=retry_reason)
-            
-            # 将系统提示词合并到用户消息的开头
-            combined_prompt = f"{system_instruction}\n\n{user_prompt}"
-            
-            # 准备内容：user消息包含系统提示词、上下文、待翻译文本和图片
-            # 降级检查：如果 send_images 为 False，则不发送图片
+            contents = self._build_gemini_context_messages(self.prev_context)
+
+            current_user_parts = [{"text": user_prompt}]
             if send_images:
-                content_parts = [combined_prompt] + image_parts
+                current_user_parts.extend(image_parts)
             else:
                 if retry_attempt > 0: # 仅在重试且被标记为不发图时打印
                      self.logger.warning("降级模式：仅发送文本，不发送图片")
-                content_parts = [combined_prompt]
-            
-            # 动态调整温度：质量检查或BR检查失败时提高温度帮助跳出错误模式
-            current_temperature = self._get_retry_temperature(self.temperature, retry_attempt, retry_reason)
+            contents.append({"role": "user", "parts": current_user_parts})
             
             # 构建生成配置
             config_params = {
-                "temperature": current_temperature,
                 "top_p": 0.95,
                 "top_k": 64,
                 "safety_settings": None if should_retry_without_safety else self.safety_settings,
@@ -378,6 +376,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 config_params["max_output_tokens"] = self.max_tokens
             
             generation_config = types.GenerateContentConfig(**config_params)
+            generation_config.system_instruction = system_instruction
             
             # 合并自定义API参数
             if self._custom_api_params:
@@ -397,17 +396,8 @@ class GeminiHighQualityTranslator(CommonTranslator):
                         self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
                         await self._sleep_with_cancel_polling(sleep_time)
                 
-                if retry_attempt > 0 and current_temperature != self.temperature:
-                    self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
-
                 def _extract_gemini_stream_text(chunk):
                     return getattr(chunk, "text", "") or ""
-
-                def _extract_gemini_stream_finish_reason(chunk):
-                    if not (hasattr(chunk, 'candidates') and chunk.candidates):
-                        return None
-                    candidate = chunk.candidates[0]
-                    return getattr(candidate, 'finish_reason', None)
                 
                 def _on_stream_chunk(delta_text, _full_text):
                     self._emit_stream_json_preview("[Gemini HQ Stream]", _full_text, source_texts=texts)
@@ -415,18 +405,24 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 response = None
                 streamed_text = None
                 streamed_finish_reason = None
+                streamed_diagnostics = None
 
                 try:
                     self._reset_stream_json_preview()
                     # 自动尝试流式；不支持时回退普通请求
+                    def _extract_stream_finish_reason(chunk):
+                        nonlocal streamed_diagnostics
+                        streamed_diagnostics = extract_gemini_response_diagnostics(chunk)
+                        return streamed_diagnostics.get('finish_reason')
+
                     streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
                         create_stream=lambda: self.client.models.generate_content_stream(
                             model=self.model_name,
-                            contents=content_parts,
+                            contents=contents,
                             config=generation_config
                         ),
                         extract_text=_extract_gemini_stream_text,
-                        extract_finish_reason=_extract_gemini_stream_finish_reason,
+                        extract_finish_reason=_extract_stream_finish_reason,
                         on_chunk=_on_stream_chunk,
                         on_cancel=self._abort_inflight_request,
                         poll_interval=0.2,
@@ -441,7 +437,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                         response = await self._await_with_cancel_polling(
                             self.client.models.generate_content(
                                 model=self.model_name,
-                                contents=content_parts,
+                                contents=contents,
                                 generation_config=generation_config,
                                 safety_settings=None if should_retry_without_safety else self.safety_settings
                             ),
@@ -453,7 +449,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                             asyncio.to_thread(
                                 self.client.models.generate_content,
                                 model=self.model_name,
-                                contents=content_parts,
+                                contents=contents,
                                 config=generation_config
                             ),
                             poll_interval=0.2,
@@ -469,29 +465,28 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     # 验证响应对象是否有效
                     validate_gemini_response(response, self.logger)
 
-                finish_reason = streamed_finish_reason if streamed_text is not None else None
-
-                # 检查finish_reason，只有成功(STOP)才继续，其他都重试
-                if streamed_text is None and hasattr(response, 'candidates') and response.candidates:
-                    candidate = response.candidates[0]
-                    if hasattr(candidate, 'finish_reason'):
-                        finish_reason = candidate.finish_reason
-
-                finish_reason_str = str(finish_reason) if finish_reason else ""
+                diagnostics = streamed_diagnostics or extract_gemini_response_diagnostics(
+                    response,
+                    fallback_finish_reason=streamed_finish_reason if streamed_text is not None else None,
+                )
+                diagnostics_text = format_gemini_response_diagnostics(diagnostics)
+                finish_reason = diagnostics.get('finish_reason')
+                finish_reason_str = diagnostics.get('finish_reason_str') or ""
                 if finish_reason and "STOP" not in finish_reason_str.upper():  # 不是成功
                     attempt += 1
                     log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
 
-                    # 显示具体的finish_reason信息
-                    self.logger.warning(f"Gemini API失败 ({log_attempt}): finish_reason={finish_reason}")
+                    self.logger.warning(f"Gemini API失败 ({log_attempt}): {diagnostics_text}")
                     
-                    # 降级策略：如果是安全策略拦截或其他非成功状态，尝试不发送图片
-                    if "SAFETY" in finish_reason_str.upper() or "OTHER" in finish_reason_str.upper():
-                        self.logger.warning("检测到安全策略拦截或未知错误，下次重试将不再发送图片")
+                    if gemini_diagnostics_should_disable_images(diagnostics):
+                        self.logger.warning("检测到Gemini阻断或未知结束状态，下次重试将不再发送图片。")
                         send_images = False
+                    if gemini_diagnostics_indicate_safety(diagnostics) and not should_retry_without_safety:
+                        self.logger.warning("检测到Gemini安全策略拦截，下次重试将移除安全设置参数。")
+                        should_retry_without_safety = True
 
                     if not is_infinite and attempt >= max_retries:
-                        self.logger.error(f"Gemini翻译在多次重试后仍失败: {finish_reason}")
+                        self.logger.error(f"Gemini翻译在多次重试后仍失败: {diagnostics_text}")
                         break
                     await self._sleep_with_cancel_polling(1)
                     continue
@@ -509,10 +504,12 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 
                 self.logger.debug(f"--- Gemini Raw Response ---\n{result_text}\n---------------------------")
                 if not result_text:
-                     # 空回处理：也尝试降级
-                    self.logger.warning(f"Gemini返回空内容 (finish_reason: '{finish_reason}')，下次重试将不再发送图片")
+                    self.logger.warning(f"Gemini返回空内容 ({diagnostics_text})，下次重试将不再发送图片")
                     send_images = False
-                    raise Exception(f"Gemini returned empty content (finish_reason: {finish_reason})")
+                    if gemini_diagnostics_indicate_safety(diagnostics) and not should_retry_without_safety:
+                        self.logger.warning("空响应伴随Gemini安全策略信息，下次重试将移除安全设置参数。")
+                        should_retry_without_safety = True
+                    raise Exception(f"Gemini returned empty content ({diagnostics_text})")
 
 
                 # 使用通用函数解析响应（支持JSON和纯文本，以及术语提取）
@@ -612,7 +609,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 is_502_error = '502' in error_message
                 is_safety_error = any(keyword in error_message.lower() for keyword in [
                     'safety_settings', 'safetysettings', 'harm', 'block', 'safety'
-                ]) or ("400" in error_message and not is_multimodal_unsupported)
+                ]) or ("400" in error_message and not is_multimodal_unsupported) or gemini_error_message_indicates_safety(error_message)
 
                 if is_502_error or is_safety_error or is_empty_content:
                      if is_empty_content:
@@ -641,7 +638,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
                 self.logger.warning(f"Gemini高质量翻译出错 ({log_attempt}): {e}")
 
-                if "finish_reason: 2" in error_message or "finish_reason is 2" in error_message or "SAFETY" in error_message.upper():
+                if gemini_error_message_indicates_safety(error_message):
                     self.logger.warning("检测到Gemini安全策略拦截。正在重试...")
                     send_images = False # 显式确保降级
                 

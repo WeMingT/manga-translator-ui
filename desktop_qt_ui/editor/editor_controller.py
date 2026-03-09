@@ -31,7 +31,13 @@ from .desktop_ui_geometry import get_polygon_center
 
 # 添加项目根目录到路径以便导入path_manager
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from manga_translator.utils.path_manager import find_inpainted_path, find_json_path
+from manga_translator.utils.path_manager import (
+    find_inpainted_path,
+    find_json_path,
+    find_work_image_path,
+    get_inpainted_path,
+    resolve_original_image_path,
+)
 
 
 class EditorController(QObject):
@@ -507,6 +513,44 @@ class EditorController(QObject):
 
         return False
 
+    def _find_source_from_translation_map(self, image_path: str) -> Optional[str]:
+        """从 translation_map.json 中解析翻译结果对应的原图路径。"""
+        try:
+            import json
+
+            norm_path = os.path.normpath(image_path)
+            output_dir = os.path.dirname(norm_path)
+            map_path = os.path.join(output_dir, 'translation_map.json')
+            if not os.path.exists(map_path):
+                return None
+
+            with open(map_path, 'r', encoding='utf-8') as f:
+                translation_map = json.load(f)
+
+            source_path = translation_map.get(norm_path)
+            if source_path and os.path.exists(source_path):
+                return os.path.normpath(source_path)
+        except Exception as e:
+            self.logger.error(f"Error reading translation map for {image_path}: {e}")
+
+        return None
+
+    def _resolve_editor_image_paths(self, image_path: str) -> tuple[str, str]:
+        """
+        解析编辑器需要的两张图：
+        1. source_path: 逻辑原图路径（用于 JSON / 输出路径）
+        2. display_image_path: 编辑器里的原图层路径（优先使用上色/超分底图）
+        """
+        source_path = self._find_source_from_translation_map(image_path)
+        if not source_path:
+            source_path = resolve_original_image_path(image_path)
+
+        display_image_path = find_work_image_path(source_path)
+        if not display_image_path:
+            display_image_path = source_path
+
+        return os.path.normpath(source_path), os.path.normpath(display_image_path)
+
     def load_image_and_regions(self, image_path: str):
         """加载图像及其关联的区域数据，并触发后台处理"""
         # 检查是否有未导出的更改（基于快照比较，而不仅仅是撤销历史）
@@ -566,31 +610,36 @@ class EditorController(QObject):
         def load_data():
             """在后台线程加载数据"""
             try:
+                source_path, display_image_path = self._resolve_editor_image_paths(image_path)
+
                 # 1. 加载图片
-                image_resource = self.resource_manager.load_image(image_path)
+                image_resource = self.resource_manager.load_image(display_image_path)
                 image = image_resource.image
 
-                # 2. 检查是否是翻译后的图片
-                is_translated_image = self._is_translated_image(image_path)
-
-                if is_translated_image:
-                    return {'type': 'translated', 'image_path': image_path, 'image': image}
-
-                # 3. 加载JSON
+                # 2. 加载JSON
                 # 检查JSON是否存在
-                json_path = find_json_path(image_path)
+                json_path = find_json_path(source_path)
 
                 if not json_path:
                     # 如果没有JSON，作为可编辑的空白图片加载（允许用户添加编辑）
                     regions = []
                     raw_mask = None
-                    inpainted_image = image.copy()  # 使用原图作为底图
-                    inpainted_path = None
+                    inpainted_path = find_inpainted_path(source_path)
+                    inpainted_image = None
+                    if inpainted_path:
+                        try:
+                            inpainted_image = open_pil_image(inpainted_path, eager=False)
+                            if inpainted_image.size != image.size:
+                                inpainted_image = inpainted_image.resize(image.size, Image.Resampling.LANCZOS)
+                        except Exception as e:
+                            self.logger.error(f"Error loading inpainted image: {e}")
+                            inpainted_path = None
+                            inpainted_image = None
                 else:
-                    regions, raw_mask, original_size = self.file_service.load_translation_json(image_path)
+                    regions, raw_mask, original_size = self.file_service.load_translation_json(display_image_path)
     
-                    # 4. 查找和加载inpainted图片
-                    inpainted_path = find_inpainted_path(image_path)
+                    # 3. 查找和加载inpainted图片
+                    inpainted_path = find_inpainted_path(source_path)
                     inpainted_image = None
                     if inpainted_path:
                         try:
@@ -604,7 +653,8 @@ class EditorController(QObject):
 
                 return {
                     'type': 'normal',
-                    'image_path': image_path,
+                    'source_path': source_path,
+                    'display_image_path': display_image_path,
                     'image': image,
                     'regions': regions,
                     'raw_mask': raw_mask,
@@ -639,7 +689,8 @@ class EditorController(QObject):
                 self._apply_untranslated_image_to_model(result['image_path'], result['image'])
             else:
                 self._apply_loaded_data_to_model(
-                    result['image_path'],
+                    result['source_path'],
+                    result['display_image_path'],
                     result['image'],
                     result['regions'],
                     result['raw_mask'],
@@ -704,7 +755,7 @@ class EditorController(QObject):
         except Exception as e:
             self.logger.error(f"Error applying untranslated image to model: {e}")
     
-    def _apply_loaded_data_to_model(self, image_path, image, regions, raw_mask, inpainted_path, inpainted_image):
+    def _apply_loaded_data_to_model(self, source_path, display_image_path, image, regions, raw_mask, inpainted_path, inpainted_image):
         """在主线程应用加载的数据到Model"""
         try:
             # 关闭加载提示
@@ -723,7 +774,7 @@ class EditorController(QObject):
                 for i, region_data in enumerate(regions):
                     render_parameter_service.import_parameters_from_json(i, region_data)
 
-            self.model.set_source_image_path(image_path)
+            self.model.set_source_image_path(source_path)
 
             if not hasattr(self, '_user_adjusted_alpha') or not self._user_adjusted_alpha:
                 self.model.set_original_image_alpha(0.0)
@@ -1500,7 +1551,7 @@ class EditorController(QObject):
         new_region_data = region_data.copy()
         
         # 复制样式属性
-        style_keys = ['font_path', 'font_family', 'font_size', 'font_color', 'alignment', 'direction', 'bold', 'italic']
+        style_keys = ['font_path', 'font_family', 'font_size', 'font_color', 'alignment', 'direction', 'bold', 'italic', 'line_spacing', 'letter_spacing']
         for key in style_keys:
             if key in clipboard_data:
                 new_region_data[key] = clipboard_data[key]
@@ -1976,7 +2027,8 @@ class EditorController(QObject):
                 progress_callback=progress_callback,
                 success_callback=success_callback,
                 error_callback=error_callback,
-                source_image_path=source_path  # 传递原图路径用于PSD导出
+                source_image_path=source_path,  # 传递原图路径用于PSD导出
+                editor_inpainted_image=self.model.get_inpainted_image()
             )
 
         except Exception as e:
@@ -2024,7 +2076,6 @@ class EditorController(QObject):
     async def _async_save_json(self, source_path, regions, json_path):
         """异步保存JSON文件"""
         try:
-            import json
             import sys
             sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
             from services.export_service import ExportService
@@ -2051,62 +2102,37 @@ class EditorController(QObject):
                 self._apply_white_frame_center(r)
             export_service._save_regions_data_with_path(json_regions, json_path, source_path, mask, config_dict)
             
-            # 直接调用后端inpainting模块生成并保存inpainted图片
+            # 直接保存编辑器当前的修复图，不再额外走一次后端 inpainting
             try:
-                from manga_translator.utils.path_manager import get_inpainted_path
-                from PIL import Image
-                import numpy as np
-                import cv2
-                
-                # 获取原图和蒙版
-                original_image = self.model.get_image()
-                if original_image and mask is not None:
+                image_to_save = self.model.get_inpainted_image() or self.model.get_image()
+                if image_to_save is not None:
                     inpainted_path = get_inpainted_path(source_path, create_dir=True)
-                    
-                    # 转换PIL图像为numpy数组
-                    if isinstance(original_image, Image.Image):
-                        img_rgb = np.array(original_image.convert('RGB'))
+                    save_quality = config_dict.get('cli', {}).get('save_quality', 95)
+
+                    if isinstance(image_to_save, Image.Image):
+                        save_image = image_to_save.copy()
                     else:
-                        img_rgb = original_image
-                    
-                    # 直接调用后端inpainting模块
-                    try:
-                        from manga_translator.inpainting import dispatch
-                        from manga_translator.config import InpainterConfig
-                        
-                        # 获取inpainter配置
-                        inpainter_config = config_dict.get('inpainter', {})
-                        inpainter_cfg = InpainterConfig(**inpainter_config) if inpainter_config else InpainterConfig()
-                        
-                        # 获取GPU配置
-                        cli_config = config_dict.get('cli', {})
-                        use_gpu = cli_config.get('use_gpu', False)
-                        device = 'cuda' if use_gpu else 'cpu'
-                        
-                        # 执行inpainting（异步调用）
-                        self.logger.info(f"开始修复图片: {inpainter_cfg.inpainter}, device={device}")
-                        img_inpainted = await dispatch(
-                            inpainter_cfg.inpainter,
-                            img_rgb,
-                            mask,
-                            inpainter_cfg,  # 传入完整的config对象
-                            inpainting_size=inpainter_cfg.inpainting_size,
-                            device=device,
-                            verbose=False
-                        )
-                        
-                        # 保存inpainted图片
-                        inpainted_bgr = cv2.cvtColor(img_inpainted, cv2.COLOR_RGB2BGR)
-                        from manga_translator.utils import imwrite_unicode
-                        import logging
-                        manga_logger = logging.getLogger('manga_translator')
-                        imwrite_unicode(inpainted_path, inpainted_bgr, manga_logger)
-                        
-                        self.logger.info(f"已更新原图片目录下的修复图片: {inpainted_path}")
-                    except Exception as e:
-                        self.logger.warning(f"直接调用inpainting失败: {e}")
-                        import traceback
-                        self.logger.warning(traceback.format_exc())
+                        save_image = Image.fromarray(np.array(image_to_save))
+
+                    save_kwargs = {}
+                    if inpainted_path.lower().endswith(('.jpg', '.jpeg')):
+                        if save_image.mode in ('RGBA', 'LA'):
+                            save_image = save_image.convert('RGB')
+                        save_kwargs['quality'] = save_quality
+                    elif inpainted_path.lower().endswith('.webp'):
+                        save_kwargs['quality'] = save_quality
+
+                    save_image.save(inpainted_path, **save_kwargs)
+                    self.model.set_inpainted_image_path(inpainted_path)
+                    self.resource_manager.set_cache(
+                        self.CACHE_LAST_INPAINTED,
+                        np.array(save_image.convert('RGB'))
+                    )
+                    if mask is not None:
+                        mask_to_cache = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY) if len(mask.shape) == 3 else mask
+                        self.resource_manager.set_cache(self.CACHE_LAST_MASK, np.array(mask_to_cache, copy=True))
+
+                    self.logger.info(f"已更新修复图片: {inpainted_path}")
             except Exception as e:
                 self.logger.warning(f"更新inpainted图片失败: {e}")
             

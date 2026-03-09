@@ -192,14 +192,6 @@ class EditorShortcutManager(ShortcutManager):
             context_aware=True
         )
         
-        # 编辑原图快捷键 (Ctrl+E)
-        self.register_shortcut(
-            'edit_original',
-            QKeySequence("Ctrl+E"),
-            self.controller.edit_source_file,
-            context_aware=False
-        )
-        
         # 工具快捷键 Q (选择)
         self.register_shortcut(
             'tool_select',

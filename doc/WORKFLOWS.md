@@ -385,22 +385,35 @@
   - 包含文本区域、原文、翻译、位置信息
   - 替换翻译模式下包含 `mask_is_refined: true` 标志
 
+- **编辑器底图**：`manga_translator_work/editor_base/图片名.原扩展名`
+  - 保存上色/超分后的底图
+  - 仅供编辑器的“原图层”与 PSD 的原图层使用
+  - 不替代修复图，不参与后端修复结果保存
+
 - **原文 TXT**：`manga_translator_work/originals/图片名_original.txt`
   - 导出原文时生成
 
 - **翻译 TXT**：`manga_translator_work/translations/图片名_translated.txt`
   - 手动翻译后保存在此
 
-- **修复图片**：`manga_translator_work/inpainted/图片名_inpainted.png`
+- **修复图片**：`manga_translator_work/inpainted/图片名_inpainted.原扩展名`
   - 擦除文字后的图片
   - 用于 Qt 编辑器加载和编辑
+  - `保存 JSON` 会直接更新这张图，不再额外调用后端修复
+  - `导入翻译并渲染` 检测到该图时会直接复用，不再重复跑修复
 
 - **翻译结果**：`manga_translator_work/result/图片名.png`
   - 开启"输出到原图目录"功能时，翻译完成的图片输出到此目录
+  - 编辑器“导出图片”会直接使用当前修复图渲染，不再重复执行上色/超分
 
 - **PSD 文件**：`manga_translator_work/psd/图片名.psd`
   - 开启"导出可编辑 PSD"功能时，导出的分层 PSD 文件
   - 包含原图层、修复图层、可编辑文本图层
+  - 原图层优先使用 `editor_base/` 底图，修复图层优先使用当前会话修复图
+
+- **PSD 脚本**：`manga_translator_work/psd/图片名_photoshop_script.jsx`
+  - 开启"仅生成 PSD 脚本"功能时生成
+  - 不会自动启动 Photoshop，也不会直接生成 PSD
 
 - **翻译图片**：`manga_translator_work/translated_images/图片名.jpg`
   - 替换翻译模式使用：存放已翻译的图片
@@ -408,6 +421,7 @@
 
 **目录说明**：
 - `json/`：存储翻译数据的 JSON 文件
+- `editor_base/`：存储编辑器专用的上色/超分底图
 - `originals/`：存储导出的原文 TXT 文件
 - `translations/`：存储翻译后的 TXT 文件
 - `inpainted/`：存储修复后的图片（擦除文字）

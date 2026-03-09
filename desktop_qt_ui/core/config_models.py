@@ -64,6 +64,7 @@ class RenderSettings(BaseModel):
     no_hyphenation: bool = False
     font_color: Optional[str] = None
     line_spacing: Optional[float] = 1.0  # 行间距倍率，默认1.0
+    letter_spacing: Optional[float] = 1.0  # 字间距倍率，默认1.0
     font_size: Optional[int] = None
     auto_rotate_symbols: bool = True
     rtl: bool = True

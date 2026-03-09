@@ -14,6 +14,14 @@
 
 在"基础设置"标签页中，勾选 **详细日志** 选项。
 
+### 详细日志会产生什么
+
+- 日志窗口会输出更多 `DEBUG` 级别信息（检测/OCR/渲染中间过程）
+- 每次运行会生成：
+  - `result/log_时间戳.txt`（Qt UI 运行日志）
+  - `result/时间戳-图片名-目标语言-翻译器/`（中间调试文件目录）
+- 建议仅在排查问题时开启，日常使用可关闭以减少日志噪音和磁盘占用
+
 ---
 
 ## 调试文件说明
@@ -176,4 +184,39 @@
 1. 增大"遮罩扩张偏移"（默认 70，可增加到 100-150）
 2. 切换修复模型为"lama_large"（效果最好）
 3. 在可视化编辑器中手动修改蒙版
+
+---
+
+## 🧹 日志清理方法（Qt UI）
+
+当你已经排查完问题，建议定期清理旧日志与调试目录。
+
+### 方法 1：手动清理（推荐）
+
+1. 关闭 Qt UI（避免程序仍在写日志）
+2. 打开项目根目录下的 `result/`
+3. 删除不再需要的内容：
+   - `log_*.txt`（运行日志）
+   - `时间戳-图片名-目标语言-翻译器` 这类调试目录
+4. 保留你仍需回溯的问题样本目录
+
+### 方法 2：Windows PowerShell 一键清理（删除全部日志与调试目录）
+
+在项目根目录执行：
+
+```powershell
+# 删除所有日志文件
+Get-ChildItem .\result -File -Filter "log_*.txt" | Remove-Item -Force
+
+# 删除所有调试目录（目录名通常以 14 位时间戳开头）
+Get-ChildItem .\result -Directory | Where-Object { $_.Name -match '^\d{14}-' } | Remove-Item -Recurse -Force
+```
+
+### 方法 3：仅清理较旧日志（保留最近 7 天）
+
+```powershell
+$deadline = (Get-Date).AddDays(-7)
+Get-ChildItem .\result -File -Filter "log_*.txt" | Where-Object { $_.LastWriteTime -lt $deadline } | Remove-Item -Force
+Get-ChildItem .\result -Directory | Where-Object { $_.LastWriteTime -lt $deadline -and $_.Name -match '^\d{14}-' } | Remove-Item -Recurse -Force
+```
 

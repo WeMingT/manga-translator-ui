@@ -217,6 +217,8 @@ class ConcurrentPipeline:
                     else:
                         ctx.upscaled = ctx.img_colorized
 
+                    self.translator._save_editor_base_if_needed(ctx, config)
+
                     # 统一转换为 numpy
                     ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
                     
