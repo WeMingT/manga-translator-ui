@@ -30,7 +30,8 @@ class ConcurrentPipeline:
     3. 修复线程 → 处理修复队列（GPU 推理不会阻塞翻译）
     4. 渲染线程 → 翻译+修复完成后渲染出图
     
-    batch_size 控制翻译批量大小（一次翻译多少个文本块）
+    batch_size 控制翻译批量大小（一次翻译多少张图片），
+    同时也限制等待翻译的队列长度，避免 API 太慢时检测/OCR 无限堆积。
     
     使用 queue.Queue 和 threading.Lock 进行线程间通信和同步。
     """
@@ -41,7 +42,7 @@ class ConcurrentPipeline:
         
         Args:
             translator_instance: MangaTranslator实例
-            batch_size: 批量大小（一次翻译多少个文本块）
+            batch_size: 批量大小（一次翻译多少张图片）
             max_workers: 每个步骤的线程池大小
         """
         self.translator = translator_instance
@@ -55,7 +56,7 @@ class ConcurrentPipeline:
         self._render_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='RenderThread')
         
         # 线程安全的队列
-        self.translation_queue = queue.Queue()  # 翻译队列
+        self.translation_queue = queue.Queue(maxsize=max(1, batch_size))  # 翻译队列（带背压）
         self.inpaint_queue = queue.Queue()      # 修复队列
         self.render_queue = queue.Queue()       # 渲染队列
         
@@ -104,6 +105,55 @@ class ConcurrentPipeline:
                 logger.info(msg)
             except queue.Empty:
                 break
+
+    def _pop_translation_task(self, timeout: float):
+        """从翻译队列取一个任务。"""
+        image_name, config = self.translation_queue.get(timeout=timeout)
+        with self._lock:
+            ctx = self.base_contexts.get(image_name)
+        if not ctx:
+            logger.error(f"[翻译] 找不到 {image_name} 的基础上下文")
+            return None
+        return ctx, config
+
+    def _should_translate_batch(self, batch: List[tuple]):
+        """根据图片数判断当前批次是否应该立刻翻译。"""
+        if not batch:
+            return False, ""
+
+        if len(batch) >= self.batch_size:
+            return True, f"批次已满 ({len(batch)}/{self.batch_size} 张图片)"
+
+        if self.detection_ocr_done:
+            return True, f"OCR完成，翻译剩余 {len(batch)} 张图片"
+
+        return False, ""
+
+    def _enqueue_translation_task(self, image_name: str, config):
+        """
+        向翻译队列提交任务。
+        当翻译 API 过慢时，这里会形成背压，阻止检测/OCR 无限领先。
+        """
+        waited = False
+        while not self.stop_workers:
+            try:
+                self.translation_queue.put((image_name, config), timeout=0.1)
+                if waited:
+                    logger.info(
+                        f"[检测+OCR] 翻译队列恢复，继续处理: {image_name} "
+                        f"(队列: {self.translation_queue.qsize()}/{self.translation_queue.maxsize})"
+                    )
+                return
+            except queue.Full:
+                if not waited:
+                    waited = True
+                    logger.info(
+                        f"[检测+OCR] 翻译队列已满，等待翻译线程消费 "
+                        f"({self.translation_queue.qsize()}/{self.translation_queue.maxsize})"
+                    )
+                self._check_cancelled_or_raise("检测+OCR", f"等待翻译队列释放: {os.path.basename(image_name)}")
+
+        raise RuntimeError("并发流水线已停止，无法继续提交翻译任务")
 
     def _check_cancelled_or_raise(self, stage: str, detail: str = ""):
         """统一取消检查：收到取消后设置停止标记并抛出 CancelledError。"""
@@ -258,7 +308,7 @@ class ConcurrentPipeline:
                     
                     # 放入翻译队列和修复队列
                     if ctx.text_regions:
-                        self.translation_queue.put((ctx.image_name, config))
+                        self._enqueue_translation_task(ctx.image_name, config)
                         self.inpaint_queue.put((ctx.image_name, config))
                         logger.info(f"[检测+OCR] {ctx.image_name} 已加入翻译队列和修复队列 (翻译队列大小: {self.translation_queue.qsize()})")
                     else:
@@ -317,13 +367,10 @@ class ConcurrentPipeline:
                     
                     # 从队列获取任务（非阻塞）
                     try:
-                        image_name, config = self.translation_queue.get(timeout=0.1)
-                        with self._lock:
-                            ctx = self.base_contexts.get(image_name)
-                        if ctx:
+                        task = self._pop_translation_task(timeout=0.1)
+                        if task:
+                            ctx, config = task
                             batch.append((ctx, config))
-                        else:
-                            logger.error(f"[翻译] 找不到 {image_name} 的基础上下文")
                     except queue.Empty:
                         if not batch:
                             if self.detection_ocr_done and self.translation_queue.empty():
@@ -333,32 +380,21 @@ class ConcurrentPipeline:
                                 break
                             continue
                     
-                    # 收集更多图片直到达到batch_size
+                    # 收集更多图片直到达到 batch_size
                     while len(batch) < self.batch_size:
                         try:
-                            image_name, config = self.translation_queue.get(timeout=0.05)
-                            with self._lock:
-                                ctx = self.base_contexts.get(image_name)
-                            if ctx:
+                            task = self._pop_translation_task(timeout=0.05)
+                            if task:
+                                ctx, config = task
                                 batch.append((ctx, config))
-                            else:
-                                logger.error(f"[翻译] 找不到 {image_name} 的基础上下文")
                         except queue.Empty:
                             break
                     
                     # 判断是否应该翻译当前批次
-                    should_translate = False
-                    reason = ""
-                    
-                    if len(batch) >= self.batch_size:
-                        should_translate = True
-                        reason = f"批次已满 ({len(batch)}/{self.batch_size})"
-                    elif batch and self.detection_ocr_done:
-                        should_translate = True
-                        reason = f"OCR完成，翻译剩余 {len(batch)} 张图片"
-                    
+                    should_translate, reason = self._should_translate_batch(batch)
+
                     if should_translate:
-                        logger.info(f"[翻译] {reason}，开始翻译")
+                        logger.info(f"[翻译] {reason}，开始翻译 ({len(batch)} 张图片)")
                         await self._process_translation_batch(batch)
                         batch = []
                     

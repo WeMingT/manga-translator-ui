@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from typing import Optional
 
 from manga_translator import Config
+from manga_translator.custom_api_params import migrate_legacy_custom_api_params_config
 from manga_translator.utils import BASE_PATH
 
 
@@ -75,10 +76,10 @@ DEFAULT_ADMIN_SETTINGS = {
         'translator.translator_chain',
         'translator.selective_translation',
         'translator.skip_lang',
-         'translator.use_custom_api_params',  # 仅用于服务器端，Web UI 用户端不显示
+         'use_custom_api_params',  # 仅用于服务器端，Web UI 用户端不显示
          'ocr.ai_ocr_concurrency',
          'render.ai_renderer_concurrency',
-         'colorizer.ai_colorizer_concurrency',
+         'colorizer.ai_colorizer_history_pages',
          'render.gimp_font',
       ],
     'readonly_keys': [],
@@ -191,7 +192,7 @@ def load_default_config_dict() -> dict:
     if os.path.exists(SERVER_CONFIG_PATH):
         try:
             with open(SERVER_CONFIG_PATH, 'r', encoding='utf-8') as f:
-                config_dict = json.load(f)
+                config_dict = migrate_legacy_custom_api_params_config(json.load(f))
             return config_dict
         except Exception as e:
             print(f"[WARNING] Failed to load default config from {SERVER_CONFIG_PATH}: {e}")

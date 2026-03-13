@@ -69,6 +69,19 @@ class OcrService:
         self._yolo_cache = None
         
         self.logger.info(f"OCR识别服务初始化完成，使用设备: {self.device}")
+
+    @staticmethod
+    def _resolve_ocr_config(config: Any) -> Any:
+        if isinstance(config, OcrConfig):
+            return config
+        nested_ocr_config = getattr(config, 'ocr', None)
+        if isinstance(nested_ocr_config, OcrConfig):
+            return nested_ocr_config
+        if nested_ocr_config is not None and hasattr(nested_ocr_config, 'ignore_bubble'):
+            return nested_ocr_config
+        if isinstance(config, Ocr):
+            return OcrConfig(ocr=config)
+        return config
     
     def _get_current_config(self) -> OcrConfig:
         """从配置服务获取当前OCR配置"""
@@ -83,7 +96,8 @@ class OcrService:
         
         try:
             config = self.config_service.get_config()
-            ocr_config_dict = config.ocr.model_dump() if hasattr(config, 'ocr') else {}
+            resolved_ocr_config = self._resolve_ocr_config(config)
+            ocr_config_dict = resolved_ocr_config.model_dump() if hasattr(resolved_ocr_config, 'model_dump') else {}
             cli_config_dict = config.cli.model_dump() if hasattr(config, 'cli') else {}
 
             try:
@@ -302,6 +316,8 @@ class OcrService:
             raise RuntimeError("OCR后端模块不可用")
 
         config = config or self._get_current_config()
+        ocr_config = self._resolve_ocr_config(config)
+        ocr_key = ocr_config.ocr if hasattr(ocr_config, 'ocr') else ocr_config
 
         # --- FIX: Sanitize region data by ensuring all coordinates are rounded integers ---
         import copy
@@ -313,7 +329,7 @@ class OcrService:
         # --- END FIX ---
             
         if not self.model_prepared:
-            await self.prepare_model(config.ocr)
+            await self.prepare_model(ocr_key)
         
         # Convert PIL Image to numpy array if necessary
         if isinstance(image, Image.Image):
@@ -328,7 +344,7 @@ class OcrService:
             if not all_polygons:
                 return None
 
-            should_try_split = len(all_polygons) == 1 and config.ocr not in {
+            should_try_split = len(all_polygons) == 1 and ocr_key not in {
                 Ocr.mocr, Ocr.paddleocr_vl
             }
 
@@ -358,14 +374,22 @@ class OcrService:
             if not quadrilaterals:
                 return None
 
+            runtime_config = config if hasattr(config, 'cli') else None
+            if runtime_config is None and self.config_service:
+                try:
+                    runtime_config = self.config_service.get_config()
+                except Exception:
+                    runtime_config = None
+
             # Call backend OCR with all polygons from the region
             results = await dispatch_ocr(
-                config.ocr, 
+                ocr_key,
                 image, 
                 quadrilaterals, 
-                config, 
+                ocr_config,
                 self.device,
-                verbose=False
+                verbose=False,
+                runtime_config=runtime_config,
             )
             
             processing_time = asyncio.get_event_loop().time() - start_time
@@ -406,9 +430,11 @@ class OcrService:
             raise RuntimeError("OCR后端模块不可用")
 
         config = config or self._get_current_config()
-             
+        ocr_config = self._resolve_ocr_config(config)
+        ocr_key = ocr_config.ocr if hasattr(ocr_config, 'ocr') else ocr_config
+              
         if not self.model_prepared:
-            await self.prepare_model(config.ocr)
+            await self.prepare_model(ocr_key)
         
         try:
             start_time = asyncio.get_event_loop().time()
@@ -425,15 +451,23 @@ class OcrService:
             
             if not quadrilaterals:
                 return [None] * len(regions)
-            
+
+            runtime_config = config if hasattr(config, 'cli') else None
+            if runtime_config is None and self.config_service:
+                try:
+                    runtime_config = self.config_service.get_config()
+                except Exception:
+                    runtime_config = None
+             
             # 批量调用OCR
             results = await dispatch_ocr(
-                config.ocr,
+                ocr_key,
                 image,
                 quadrilaterals,
-                config,
+                ocr_config,
                 self.device,
-                verbose=False
+                verbose=False,
+                runtime_config=runtime_config,
             )
             
             processing_time = asyncio.get_event_loop().time() - start_time

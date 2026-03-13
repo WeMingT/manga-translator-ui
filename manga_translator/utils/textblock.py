@@ -39,6 +39,24 @@ LANGUAGE_ORIENTATION_PRESETS = {
     'FIL': 'h'
 }
 
+
+def _normalize_direction_token(direction):
+    if hasattr(direction, 'value'):
+        direction = direction.value
+    if not isinstance(direction, str):
+        return direction
+
+    normalized = direction.lower()
+    return {
+        'horizontal': 'h',
+        'vertical': 'v',
+        'h': 'h',
+        'v': 'v',
+        'hr': 'hr',
+        'vr': 'vr',
+        'auto': 'auto',
+    }.get(normalized, normalized)
+
 class TextBlock(object):
     """
     Object that stores a block of text made up of textlines.
@@ -457,7 +475,15 @@ class TextBlock(object):
     @property
     def direction(self):
         """Render direction determined through used language or aspect ratio."""
-        if self._direction not in ('h', 'v', 'hr', 'vr'):
+        normalized_direction = _normalize_direction_token(self._direction)
+        if normalized_direction in ('h', 'v', 'hr', 'vr'):
+            return normalized_direction
+
+        if normalized_direction != 'auto':
+            # Preserve legacy fallback behaviour for unknown custom values.
+            self._direction = normalized_direction
+
+        if normalized_direction not in ('h', 'v', 'hr', 'vr'):
             d = LANGUAGE_ORIENTATION_PRESETS.get(self.target_lang)
             if d in ('h', 'v', 'hr', 'vr'):
                 return d
@@ -494,7 +520,7 @@ class TextBlock(object):
                     return 'v'
                 else:
                     return 'h'
-        return self._direction
+        return normalized_direction
 
     @property
     def vertical(self):

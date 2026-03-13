@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from main_view_parts.theme import get_current_theme_colors
+from main_view_parts.theme import THEME_OPTIONS, get_current_theme_colors
 from utils.resource_helper import resource_path
 from utils.wheel_filter import NoWheelComboBox as QComboBox
 from widgets.file_list_view import FileListView
@@ -806,6 +806,10 @@ def create_right_panel(self) -> QWidget:
     self.progress_bar.setObjectName("translation_progress_bar")
     self.progress_bar.setProperty("progressState", "idle")
     progress_layout.addWidget(self.progress_bar)
+    self.progress_info_label = QLabel("")
+    self.progress_info_label.setObjectName("progress_info_label")
+    self.progress_info_label.setWordWrap(True)
+    progress_layout.addWidget(self.progress_info_label)
     right_splitter.addWidget(progress_container)
 
 
@@ -872,12 +876,7 @@ def populate_theme_combo(self):
     if not hasattr(self, "theme_combo"):
         return
     config = self.config_service.get_config()
-    theme_options = [
-        ("light", self._t("Light")),
-        ("dark", self._t("Dark")),
-        ("gray", self._t("Gray")),
-        ("system", self._t("Follow System")),
-    ]
+    theme_options = [(theme_key, self._t(theme_label)) for theme_key, theme_label in THEME_OPTIONS]
     self.theme_combo.blockSignals(True)
     self.theme_combo.clear()
     selected_index = 0
@@ -981,9 +980,17 @@ def on_prompt_selection_changed(self, current, previous):
 
 def open_prompt_editor(self, file_path: str):
     """弹出编辑器对话框，关闭后刷新预览。"""
-    from main_view_parts.prompt_preview import PromptEditorDialog
+    from main_view_parts.ai_colorizer_prompt_editor import (
+        AIColorizerPromptEditorDialog,
+        is_ai_colorizer_prompt_file,
+    )
 
-    dlg = PromptEditorDialog(file_path, t_func=self._t, parent=self)
+    if is_ai_colorizer_prompt_file(file_path):
+        dlg = AIColorizerPromptEditorDialog(file_path, t_func=self._t, parent=self)
+    else:
+        from main_view_parts.prompt_preview import PromptEditorDialog
+
+        dlg = PromptEditorDialog(file_path, t_func=self._t, parent=self)
     dlg.exec()
     # 编辑器关闭后刷新预览
     if dlg.get_was_modified() and hasattr(self, "prompt_preview_panel"):
@@ -992,10 +999,13 @@ def open_prompt_editor(self, file_path: str):
 
 def create_new_prompt(self):
     """弹出输入框，创建新的 YAML 提示词文件。"""
-    from PyQt6.QtWidgets import QInputDialog
-    name, ok = QInputDialog.getText(
-        self, self._t("New Prompt"),
-        self._t("Enter prompt file name (without extension):"),
+    from widgets.themed_text_input_dialog import themed_get_text
+    name, ok = themed_get_text(
+        self,
+        title=self._t("New Prompt"),
+        label=self._t("Enter prompt file name (without extension):"),
+        ok_text=self._t("OK"),
+        cancel_text=self._t("Cancel"),
     )
     if not ok or not name.strip():
         return

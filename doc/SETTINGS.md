@@ -21,7 +21,17 @@
 - **目标语言 (target_lang)**：翻译的目标语言
   - 简体中文、繁体中文、英语、日语、韩语等
 
+- **启用流式传输 (enable_streaming)**：控制是否优先使用流式翻译响应
+  - 适用于：OpenAI、Gemini、高质量翻译 OpenAI、高质量翻译 Gemini 四个翻译器
+  - 默认：开启（`true`）
+  - 开启后：优先使用统一流式传输层，实时接收增量响应；失败时自动回退到普通请求
+  - 关闭后：始终使用普通非流式请求，不再尝试流式传输
+  - 适用场景：某些代理、中转站、本地兼容层或 API 网关对流式支持不稳定时，可关闭此项提高兼容性
+
 - **不跳过目标语言文本 (no_text_lang_skip)**：不跳过已是目标语言的文本（强制翻译）
+  - 开启后：即使 OCR / 语言检测结果已经是目标语言，也会继续进入翻译流程
+  - 覆盖范围：普通批量、高质量批量、`batch_concurrent` 并发流水线
+  - 同文结果不会再因为“译文与原文相同”而被后处理阶段误判为已跳过
 
 - **自定义提示词 (high_quality_prompt_path)**：自定义提示词文件路径
   - 适用于：OpenAI、Gemini、高质量翻译 OpenAI、高质量翻译 Gemini 四个翻译器
@@ -38,32 +48,61 @@
   - 后续翻译时会参考这些术语，保持翻译一致性
   - 特别适合长篇漫画的连续翻译，确保角色名等专有名词前后一致
 
+- **自动移除末尾句号 (remove_trailing_period)**：当原文结尾没有标点时，自动移除译文末尾额外补上的句号
+  - 适用于：主翻译流程
+  - 覆盖范围：普通批量、高质量批量、`batch_concurrent` 并发流水线
+  - 会处理的结尾符号：`。`、`.`、`．`
+  - 不会处理的情况：
+    - 原文本来就有句末标点
+    - 连续句点 / 省略号（如 `...`）
+    - 编辑器内“单独翻译”按钮
+
 - **使用自定义 API 参数 (use_custom_api_params)**：启用自定义 API 参数
-  - 适用于：OpenAI、OpenAI HQ、Gemini、Gemini HQ 四个翻译器
-  - 勾选后，程序会从 `examples/custom_api_params.json` 读取自定义参数并传递给 API
+  - 位置：Qt UI 的“通用”页
+  - 适用于：翻译、AI 识别（OCR）、AI 渲染、AI 上色
+  - 勾选后，程序会从 `examples/custom_api_params.json` 读取自定义参数并传递给已启用的 AI API
   - 点击"打开文件"按钮可自动创建并打开配置文件
   - 配置文件为标准 JSON 格式，支持实时生效（每次翻译都会重新加载）
   - 使用场景：
     - 控制 Ollama 等本地模型的特殊参数（如关闭思考模式）
     - 调整 API 的温度、最大 token 数等参数
     - 传递模型特定的配置选项
-  - 配置示例：
+  - 推荐按类型分组配置：
     ```json
     {
-      "temperature": 0.7,
-      "max_tokens": 2000
+      "translator": {
+        "thinking": {"type": "disabled"}
+      },
+      "ocr": {
+        "response_format": {"type": "json_object"}
+      },
+      "render": {
+        "quality": "high"
+      },
+      "colorizer": {
+        "size": "1536x1536"
+      }
     }
     ```
-  - DeepSeek 关闭思考模式示例：
+  - 若某个参数要同时发给所有 AI 后端，可放到 `common`：
     ```json
     {
-      "thinking": {"type": "disabled"}
+      "common": {
+        "timeout": 120
+      },
+      "translator": {
+        "thinking": {"type": "disabled"}
+      }
     }
     ```
-  - Gemini 关闭思考模式示例：
+  - 兼容旧格式：如果直接在 JSON 顶层写键，会按 `common` 通用参数处理
+  - 翻译器关闭思考模式示例：
     ```json
     {
-      "thinking_budget": 0
+      "translator": {
+        "thinking": {"type": "disabled"},
+        "thinking_budget": 0
+      }
     }
     ```
 
@@ -578,7 +617,10 @@ glossary:
 
 **自定义 API 参数路径**：
 - 默认：`examples/custom_api_params.json`
-- 用于 OpenAI / Gemini / OpenAI HQ / Gemini HQ 的额外 API 参数
+- 用于翻译、AI OCR、AI 渲染、AI 上色的额外 API 参数
+- 推荐分组键：`translator`、`ocr`、`render`、`colorizer`
+- 可选共享键：`common`
+- 旧版兼容：直接写在 JSON 顶层的键会按 `common` 处理
 
 **字体路径**：
 - 默认：`fonts` 目录

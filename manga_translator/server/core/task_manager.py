@@ -436,6 +436,8 @@ def cleanup_after_request():
                     _global_translator.all_page_translations.clear()
                 if hasattr(_global_translator, '_original_page_texts'):
                     _global_translator._original_page_texts.clear()
+                if hasattr(_global_translator, '_clear_colorizer_history'):
+                    _global_translator._clear_colorizer_history()
                 
                 # 4. 清理取消回调
                 if hasattr(_global_translator, '_cancel_check_callback'):

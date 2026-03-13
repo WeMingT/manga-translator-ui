@@ -17,6 +17,7 @@ class EditorModel(QObject):
     display_mask_type_changed = pyqtSignal(str)
     selection_changed = pyqtSignal(list)
     inpainted_image_changed = pyqtSignal(object)
+    compare_image_changed = pyqtSignal(object)
     region_display_mode_changed = pyqtSignal(str) # New signal
     source_image_path_changed = pyqtSignal(str)
     original_image_alpha_changed = pyqtSignal(float)
@@ -38,6 +39,7 @@ class EditorModel(QObject):
         self._selected_indices: List[int] = []
         self._region_display_mode: str = 'full'
         self._original_image_alpha: float = 0.0
+        self._compare_image = None
         self._active_tool: str = 'select'
         self._brush_size: int = 30
         self.controller = None
@@ -171,6 +173,13 @@ class EditorModel(QObject):
 
     def get_inpainted_image(self) -> Optional[Any]:
         return self.resource_manager.get_cache("inpainted_image")
+
+    def set_compare_image(self, image: Any):
+        self._compare_image = image
+        self.compare_image_changed.emit(image)
+
+    def get_compare_image(self) -> Optional[Any]:
+        return self._compare_image
 
     def set_region_display_mode(self, mode: str):
         """设置区域显示模式 ('full', 'text_only', 'box_only', 'none')"""

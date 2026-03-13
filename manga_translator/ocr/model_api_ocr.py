@@ -13,7 +13,13 @@ import torch
 from .common import OfflineOCR
 from ..config import OcrConfig
 from ..utils import Quadrilateral
+from ..custom_api_params import (
+    load_enabled_custom_api_params,
+    merge_openai_request_params,
+    split_gemini_request_params,
+)
 from ..utils.generic import AvgMeter
+from ..utils.retry import run_with_retry
 from .prompt_loader import (
     DEFAULT_AI_OCR_PROMPT,
     ensure_ai_ocr_prompt_file,
@@ -67,6 +73,7 @@ class BaseAPIOCR(OfflineOCR):
     DEFAULT_MODEL = ""
     BROWSER_HEADERS = {}
     PROVIDER_NAME = "API OCR"
+    SUPPORTS_RUNTIME_CONFIG = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -77,6 +84,7 @@ class BaseAPIOCR(OfflineOCR):
         self.base_url = None
         self.model_name = None
         self._client_signature = None
+        self._client_loop = None
 
         is_web_server = os.getenv("MANGA_TRANSLATOR_WEB_SERVER", "false").lower() == "true"
         if not is_web_server:
@@ -112,6 +120,7 @@ class BaseAPIOCR(OfflineOCR):
                 pass
             self.client = None
         self._client_signature = None
+        self._client_loop = None
 
     def _read_runtime_config(self):
         try:
@@ -135,18 +144,28 @@ class BaseAPIOCR(OfflineOCR):
         return api_key, base_url.rstrip("/"), model_name
 
     async def _ensure_client(self, force: bool = False):
+        current_loop = asyncio.get_running_loop()
         api_key, base_url, model_name = self._read_runtime_config()
         signature = (api_key or "", base_url, model_name)
 
-        if not force and self.client is not None and signature == self._client_signature:
+        if (
+            not force
+            and self.client is not None
+            and signature == self._client_signature
+            and self._client_loop is current_loop
+        ):
             return
 
         if self.client is not None:
-            try:
-                await self.client.close()
-            except Exception:
-                pass
+            if self._client_loop is current_loop:
+                try:
+                    await self.client.close()
+                except Exception:
+                    pass
+            else:
+                self.logger.info(f"{self.PROVIDER_NAME}: recreating API client for a new event loop.")
             self.client = None
+            self._client_loop = None
 
         self.api_key = api_key
         self.base_url = base_url
@@ -155,6 +174,7 @@ class BaseAPIOCR(OfflineOCR):
 
         if api_key:
             self.client = self._create_client(api_key=api_key, base_url=base_url)
+            self._client_loop = current_loop
 
     def _build_ocr_prompt(self, config: OcrConfig) -> str:
         ensure_ai_ocr_prompt_file()
@@ -188,6 +208,52 @@ class BaseAPIOCR(OfflineOCR):
             return max(int(getattr(config, "ai_ocr_concurrency", 1) or 1), 1)
         except (TypeError, ValueError):
             return 1
+
+    async def recognize(
+        self,
+        image: np.ndarray,
+        textlines: List[Quadrilateral],
+        config: OcrConfig,
+        verbose: bool = False,
+        runtime_config=None,
+    ) -> List[Quadrilateral]:
+        self._model_bubble_cache_key = None
+        self._model_bubble_cache_mask = None
+        self._model_bubble_no_boxes_logged = False
+        custom_api_params = load_enabled_custom_api_params(
+            runtime_config if runtime_config is not None else config,
+            self.logger,
+            target="ocr",
+        )
+        if bool(getattr(config, 'use_model_bubble_filter', False)):
+            threshold = float(getattr(config, 'model_bubble_overlap_threshold', 0.1))
+            self.logger.info(f"Model bubble filter enabled (overlap_threshold={threshold:.3f})")
+        return await self._infer(
+            image,
+            textlines,
+            config,
+            verbose,
+            runtime_config=runtime_config,
+            custom_api_params=custom_api_params,
+        )
+
+    async def _reset_client_for_retry(self, attempt_index: int, error: Exception):
+        del attempt_index, error
+        if self.client is None:
+            return
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._client_loop is current_loop and current_loop is not None:
+            try:
+                await self.client.close()
+            except Exception:
+                pass
+        self.client = None
+        self._client_loop = None
 
     async def _load_color_model(self, device: str):
         from .model_48px import OCR
@@ -303,15 +369,41 @@ class BaseAPIOCR(OfflineOCR):
             textline.bg_r = textline.bg_g = textline.bg_b = 255
             self.logger.debug(f"48px color estimation failed: {e}")
 
-    async def _recognize_single(self, img: np.ndarray, prompt_text: str) -> str:
+    async def _recognize_single(
+        self,
+        img: np.ndarray,
+        prompt_text: str,
+        runtime_config=None,
+        custom_api_params: dict | None = None,
+    ) -> str:
         await self._ensure_client()
         if not self.client or not self.api_key:
             raise RuntimeError(
                 f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env "
                 f"(or fallback {self.FALLBACK_API_KEY_ENV})."
             )
-        text = await self._request_ocr_text(img=img, prompt_text=prompt_text)
-        return self._normalize_ocr_text(text)
+
+        async def _do_request() -> str:
+            await self._ensure_client()
+            text = self._normalize_ocr_text(
+                await self._request_ocr_text(
+                    img=img,
+                    prompt_text=prompt_text,
+                    custom_api_params=custom_api_params,
+                )
+            )
+            if not text:
+                raise RuntimeError(f"{self.PROVIDER_NAME} response did not contain OCR text.")
+            return text
+
+        return await run_with_retry(
+            operation=_do_request,
+            runtime_config=runtime_config,
+            provider_name=self.PROVIDER_NAME,
+            operation_name="OCR request",
+            logger=self.logger,
+            on_retry=self._reset_client_for_retry,
+        )
 
     async def _infer(
         self,
@@ -319,6 +411,8 @@ class BaseAPIOCR(OfflineOCR):
         textlines: List[Quadrilateral],
         config: OcrConfig,
         verbose: bool = False,
+        runtime_config=None,
+        custom_api_params: dict | None = None,
     ) -> List[Quadrilateral]:
         text_height = 48
         ignore_bubble = config.ignore_bubble
@@ -352,15 +446,15 @@ class BaseAPIOCR(OfflineOCR):
         async def _process_region(idx: int, q: Quadrilateral, region_img: np.ndarray) -> Quadrilateral:
             try:
                 async with semaphore:
-                    text = await self._recognize_single(region_img, ocr_prompt)
-                    if not text:
-                        self.logger.info(f"[EMPTY] Region {idx} - No text detected")
-                        q.text = ""
-                        q.prob = 0.0
-                    else:
-                        self.logger.info(f"[OCR] Region {idx}: {text}")
-                        q.text = text
-                        q.prob = 0.9
+                    text = await self._recognize_single(
+                        region_img,
+                        ocr_prompt,
+                        runtime_config=runtime_config,
+                        custom_api_params=custom_api_params,
+                    )
+                    self.logger.info(f"[OCR] Region {idx}: {text}")
+                    q.text = text
+                    q.prob = 0.9
 
                     self._estimate_colors_48px(region_img, q)
             except Exception as e:
@@ -433,24 +527,33 @@ class ModelOpenAIOCR(BaseAPIOCR):
                 return str(content["content"])
         return "" if content is None else str(content)
 
-    async def _request_ocr_text(self, img: np.ndarray, prompt_text: str) -> str:
+    async def _request_ocr_text(
+        self,
+        img: np.ndarray,
+        prompt_text: str,
+        custom_api_params: dict | None = None,
+    ) -> str:
         image_b64 = self._encode_region_png_base64(img)
+        request_params = merge_openai_request_params(
+            {
+                "model": self.model_name,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt_text},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                            },
+                        ],
+                    }
+                ],
+            },
+            custom_api_params,
+        )
         response = await self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{image_b64}"},
-                        },
-                    ],
-                }
-            ],
-            temperature=0,
-            max_tokens=512,
+            **request_params,
         )
         if not getattr(response, "choices", None):
             return ""
@@ -494,11 +597,17 @@ class ModelGeminiOCR(BaseAPIOCR):
         parts = getattr(candidates[0].content, "parts", None) or []
         return "".join(part.text for part in parts if getattr(part, "text", None))
 
-    async def _request_ocr_text(self, img: np.ndarray, prompt_text: str) -> str:
+    async def _request_ocr_text(
+        self,
+        img: np.ndarray,
+        prompt_text: str,
+        custom_api_params: dict | None = None,
+    ) -> str:
         image_b64 = self._encode_region_png_base64(img)
-        response = await self.client.models.generate_content(
-            model=self.model_name,
-            contents=[
+        request_overrides, generation_overrides = split_gemini_request_params(custom_api_params)
+        request_kwargs = {
+            "model": self.model_name,
+            "contents": [
                 {
                     "role": "user",
                     "parts": [
@@ -512,7 +621,10 @@ class ModelGeminiOCR(BaseAPIOCR):
                     ],
                 }
             ],
-            generationConfig={"temperature": 0, "maxOutputTokens": 512},
-            safetySettings=self.SAFETY_SETTINGS,
-        )
+            "safetySettings": self.SAFETY_SETTINGS,
+        }
+        if generation_overrides:
+            request_kwargs["generationConfig"] = generation_overrides
+        request_kwargs.update(request_overrides)
+        response = await self.client.models.generate_content(**request_kwargs)
         return self._extract_gemini_text(response)

@@ -4,13 +4,11 @@ from typing import Any, Callable
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListView,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -20,7 +18,22 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from utils.wheel_filter import NoWheelComboBox as QComboBox
+from manga_translator.custom_api_params import (
+    CUSTOM_API_PARAM_SECTIONS,
+    build_custom_api_params_payload,
+    normalize_custom_api_params_payload,
+)
 from main_view_parts.theme import get_current_theme, get_current_theme_colors
+
+
+def _identity_translate(text: str, **kwargs) -> str:
+    if not kwargs:
+        return text
+    try:
+        return text.format(**kwargs)
+    except Exception:
+        return text
 
 
 def _tokens() -> dict[str, str]:
@@ -104,7 +117,6 @@ def _dialog_stylesheet() -> str:
             border-radius: 12px;
         }}
         QLineEdit,
-        QComboBox,
         QPlainTextEdit {{
             background: {t["bg_input"]};
             border: 1px solid {t["border"]};
@@ -113,47 +125,8 @@ def _dialog_stylesheet() -> str:
             padding: 7px 10px;
         }}
         QLineEdit:focus,
-        QComboBox:focus,
         QPlainTextEdit:focus {{
             border-color: {t["border_focus"]};
-        }}
-        QComboBox::drop-down {{
-            border: none;
-            width: 18px;
-        }}
-        QComboBox::down-arrow {{
-            width: 10px;
-            height: 10px;
-        }}
-        QComboBoxPrivateContainer {{
-            background: {t["bg_card"]};
-            background-color: {t["bg_card"]};
-            border: 1px solid {t["border"]};
-            border-radius: 8px;
-        }}
-        QComboBox QAbstractItemView {{
-            background: {t["bg_card"]};
-            background-color: {t["bg_card"]};
-            alternate-background-color: {t["bg_card"]};
-            color: {t["fg"]};
-            border: 1px solid {t["border"]};
-            border-radius: 8px;
-            padding: 4px;
-            outline: 0;
-            selection-background-color: {t["primary_bg"]};
-            selection-color: {t["primary_text"]};
-        }}
-        QComboBox QAbstractItemView::item {{
-            min-height: 26px;
-            padding: 4px 8px;
-            border-radius: 6px;
-            background: transparent;
-            background-color: transparent;
-        }}
-        QComboBox QAbstractItemView::item:selected {{
-            background: {t["primary_bg"]};
-            background-color: {t["primary_bg"]};
-            color: {t["primary_text"]};
         }}
         QPlainTextEdit {{
             padding: 10px;
@@ -243,8 +216,9 @@ class CustomApiParamRow(QWidget):
 
     def __init__(self, t_func: Callable[[str], str] | None = None, parent=None):
         super().__init__(parent)
-        self._t = t_func or (lambda text: text)
+        self._t = t_func or _identity_translate
         self.setObjectName("param_row")
+        self._is_placeholder_row = True
         self._setup_ui()
 
     def _setup_ui(self):
@@ -269,7 +243,6 @@ class CustomApiParamRow(QWidget):
         type_label.setObjectName("section_label")
         self.type_combo = QComboBox()
         self.type_combo.setMinimumWidth(118)
-        self.type_combo.setView(QListView())
         for label, value in [
             (self._t("String"), "string"),
             (self._t("Number"), "number"),
@@ -296,7 +269,6 @@ class CustomApiParamRow(QWidget):
         self.number_input.setFont(_monospace_font(10))
 
         self.boolean_input = QComboBox()
-        self.boolean_input.setView(QListView())
         self.boolean_input.addItem("true", True)
         self.boolean_input.addItem("false", False)
 
@@ -330,6 +302,12 @@ class CustomApiParamRow(QWidget):
         layout.addLayout(remove_col)
 
         self.type_combo.currentIndexChanged.connect(self._sync_type_editor)
+        self.key_input.textEdited.connect(self._mark_user_edited)
+        self.string_input.textEdited.connect(self._mark_user_edited)
+        self.number_input.textEdited.connect(self._mark_user_edited)
+        self.json_input.textChanged.connect(self._mark_user_edited)
+        self.type_combo.currentIndexChanged.connect(self._mark_user_edited)
+        self.boolean_input.currentIndexChanged.connect(self._mark_user_edited)
         self._sync_type_editor()
 
     def _sync_type_editor(self):
@@ -343,7 +321,12 @@ class CustomApiParamRow(QWidget):
         }
         self.value_stack.setCurrentIndex(index_map.get(current_type, 0))
 
+    def _mark_user_edited(self, *args):
+        del args
+        self._is_placeholder_row = False
+
     def set_entry(self, key: str, value: Any):
+        self._is_placeholder_row = False
         self.key_input.setText(key)
         value_type = _infer_type(value)
         combo_index = self.type_combo.findData(value_type)
@@ -361,6 +344,9 @@ class CustomApiParamRow(QWidget):
             self.json_input.setText(json.dumps(value, ensure_ascii=False))
 
         self._sync_type_editor()
+
+    def is_empty_placeholder(self) -> bool:
+        return self._is_placeholder_row and not self.key_input.text().strip()
 
     def _parse_number(self) -> int | float:
         raw = self.number_input.text().strip()
@@ -399,9 +385,12 @@ class CustomApiParamRow(QWidget):
 class CustomApiParamsEditorDialog(QDialog):
     def __init__(self, file_path: str, t_func: Callable[[str], str] | None = None, parent=None):
         super().__init__(parent)
-        self._t = t_func or (lambda text: text)
+        self._t = t_func or _identity_translate
         self._file_path = file_path
         self._original_content = ""
+        self.section_tabs: QTabWidget | None = None
+        self.section_layouts: dict[str, QVBoxLayout] = {}
+        self.section_contents: dict[str, QWidget] = {}
         self._setup_ui()
         self._load_from_disk()
 
@@ -469,34 +458,54 @@ class CustomApiParamsEditorDialog(QDialog):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(14, 12, 14, 12)
         card_layout.setSpacing(4)
-        title = QLabel(self._t("Top-level API Params"))
+        title = QLabel(self._t("Grouped API Params"))
         title.setObjectName("section_label")
-        hint = QLabel(self._t("Supports string, number, boolean, null and JSON values."))
+        hint = QLabel(
+            self._t(
+                "Parameters in each group are sent only to the matching AI backend. "
+                "Raw top-level keys are treated as common params."
+            )
+        )
         hint.setObjectName("hint_label")
         hint.setWordWrap(True)
         card_layout.addWidget(title)
         card_layout.addWidget(hint)
         page_layout.addWidget(card)
 
-        self.params_scroll = QScrollArea()
-        self.params_scroll.setWidgetResizable(True)
-        self.params_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.params_scroll_content = QWidget()
-        self.params_scroll_content.setStyleSheet("background: transparent;")
-        self.params_layout = QVBoxLayout(self.params_scroll_content)
-        self.params_layout.setContentsMargins(0, 0, 0, 0)
-        self.params_layout.setSpacing(10)
-        self.params_layout.addStretch(1)
-        self.params_scroll.setWidget(self.params_scroll_content)
-        page_layout.addWidget(self.params_scroll, 1)
+        self.section_tabs = QTabWidget()
+        for section in CUSTOM_API_PARAM_SECTIONS:
+            section_page = QWidget()
+            section_page_layout = QVBoxLayout(section_page)
+            section_page_layout.setContentsMargins(0, 0, 0, 0)
+            section_page_layout.setSpacing(8)
 
-        add_row = QHBoxLayout()
-        add_row.addStretch(1)
-        self.add_param_button = QPushButton("+ " + self._t("Add Row"))
-        self.add_param_button.setProperty("role", "soft")
-        self.add_param_button.clicked.connect(lambda: self._append_row())
-        add_row.addWidget(self.add_param_button)
-        page_layout.addLayout(add_row)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+            content = QWidget()
+            content.setStyleSheet("background: transparent;")
+            layout = QVBoxLayout(content)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(10)
+            layout.addStretch(1)
+            scroll.setWidget(content)
+
+            add_row = QHBoxLayout()
+            add_row.addStretch(1)
+            add_button = QPushButton("+ " + self._t("Add Row"))
+            add_button.setProperty("role", "soft")
+            add_button.clicked.connect(lambda _=False, s=section: self._append_row(s))
+            add_row.addWidget(add_button)
+
+            section_page_layout.addWidget(scroll, 1)
+            section_page_layout.addLayout(add_row)
+
+            self.section_contents[section] = content
+            self.section_layouts[section] = layout
+            self.section_tabs.addTab(section_page, self._section_title(section))
+
+        page_layout.addWidget(self.section_tabs, 1)
 
         self.tabs.addTab(page, self._t("Template Edit"))
 
@@ -517,24 +526,40 @@ class CustomApiParamsEditorDialog(QDialog):
 
         self.tabs.addTab(page, self._t("Raw Edit"))
 
-    def _insert_row_widget(self, row: CustomApiParamRow):
-        row.remove_requested.connect(self._remove_row)
-        insert_index = max(self.params_layout.count() - 1, 0)
-        self.params_layout.insertWidget(insert_index, row)
+    def _section_title(self, section: str) -> str:
+        if section == "common":
+            return self._t("General")
+        if section == "translator":
+            return self._t("label_translator")
+        if section == "ocr":
+            return self._t("label_ocr")
+        if section == "render":
+            return self._t("label_renderer")
+        if section == "colorizer":
+            return self._t("label_colorizer")
+        return section
 
-    def _append_row(self, key: str = "", value: Any = ""):
-        row = CustomApiParamRow(t_func=self._t, parent=self.params_scroll_content)
+    def _insert_row_widget(self, section: str, row: CustomApiParamRow):
+        row.setProperty("section_name", section)
+        row.remove_requested.connect(self._remove_row)
+        layout = self.section_layouts[section]
+        insert_index = max(layout.count() - 1, 0)
+        layout.insertWidget(insert_index, row)
+
+    def _append_row(self, section: str, key: str = "", value: Any = ""):
+        row = CustomApiParamRow(t_func=self._t, parent=self.section_contents[section])
         if key:
             row.set_entry(key, value)
-        self._insert_row_widget(row)
+        self._insert_row_widget(section, row)
         return row
 
     def _clear_rows(self):
-        while self.params_layout.count() > 1:
-            item = self.params_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        for layout in self.section_layouts.values():
+            while layout.count() > 1:
+                item = layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
 
     def _remove_row(self, row: QWidget):
         row.setParent(None)
@@ -559,14 +584,12 @@ class CustomApiParamsEditorDialog(QDialog):
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError as exc:
-            self._clear_rows()
-            self._append_row()
+            self._populate_rows({})
             self._set_status(f"{self._t('JSON format error')}: {exc}", kind="error")
             return
 
         if not isinstance(parsed, dict):
-            self._clear_rows()
-            self._append_row()
+            self._populate_rows({})
             self._set_status(self._t("JSON root must be an object"), kind="error")
             return
 
@@ -575,24 +598,33 @@ class CustomApiParamsEditorDialog(QDialog):
 
     def _populate_rows(self, data: dict[str, Any]):
         self._clear_rows()
-        if not data:
-            self._append_row()
-            return
-        for key, value in data.items():
-            self._append_row(key, value)
+        section_data = normalize_custom_api_params_payload(data)
+        for section in CUSTOM_API_PARAM_SECTIONS:
+            values = section_data.get(section) or {}
+            if not values:
+                self._append_row(section)
+                continue
+            for key, value in values.items():
+                self._append_row(section, key, value)
 
     def _collect_structured_data(self) -> dict[str, Any]:
-        data: dict[str, Any] = {}
-        row_widgets = self.params_scroll_content.findChildren(CustomApiParamRow, options=Qt.FindChildOption.FindDirectChildrenOnly)
-        if not row_widgets:
-            return {}
-
-        for row in row_widgets:
-            key, value = row.get_entry()
-            if key in data:
-                raise ValueError(self._t("Duplicate parameter name: {name}", name=key))
-            data[key] = value
-        return data
+        section_data: dict[str, dict[str, Any]] = {section: {} for section in CUSTOM_API_PARAM_SECTIONS}
+        for section in CUSTOM_API_PARAM_SECTIONS:
+            container = self.section_contents.get(section)
+            if container is None:
+                continue
+            row_widgets = container.findChildren(
+                CustomApiParamRow,
+                options=Qt.FindChildOption.FindDirectChildrenOnly,
+            )
+            for row in row_widgets:
+                if row.is_empty_placeholder():
+                    continue
+                key, value = row.get_entry()
+                if key in section_data[section]:
+                    raise ValueError(self._t("Duplicate parameter name: {name}", name=key))
+                section_data[section][key] = value
+        return build_custom_api_params_payload(section_data)
 
     def _collect_raw_data(self) -> dict[str, Any]:
         content = self.raw_editor.toPlainText().strip() or "{}"

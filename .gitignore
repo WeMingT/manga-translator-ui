@@ -93,13 +93,14 @@ logs/
 
 # Ignore user config (这是用户自己的配置，防止推送到git)
 examples/config.json
+examples/custom_api_params.json
+dict/ai_ocr_prompt.yaml
+dict/ai_renderer_prompt.yaml
+dict/ai_colorizer_prompt.yaml
 
 # Ignore filter list (用户自定义过滤列表)
 examples/filter_list.json
 examples/filter_list.txt
-
-# Ignore custom API params (用户自定义API参数配置)
-examples/custom_api_params.json
 
 # Ignore API test files (本地测试文件)
 examples/api_test_ui.py

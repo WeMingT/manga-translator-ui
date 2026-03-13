@@ -79,12 +79,13 @@ class GeminiTranslator(CommonTranslator):
         """解析配置参数"""
         # 调用父类的 parse_args 来设置通用参数（包括 attempts、post_check 等）
         super().parse_args(args)
+        translator_args = self._resolve_translator_config(args)
         
         # 同步重试次数到“总尝试次数”（首次请求 + 重试）
         self._max_total_attempts = self._resolve_max_total_attempts()
         
         # 从配置中读取RPM限制
-        max_rpm = getattr(args, 'max_requests_per_minute', 0)
+        max_rpm = self._get_config_value(translator_args, 'max_requests_per_minute', 0)
         if max_rpm > 0:
             self._MAX_REQUESTS_PER_MINUTE = max_rpm
             self.logger.info(f"Setting Gemini max requests per minute to: {max_rpm}")
@@ -96,19 +97,19 @@ class GeminiTranslator(CommonTranslator):
         # 这允许 Web 服务器为每个用户使用不同的 API Key
         need_rebuild_client = False
         
-        user_api_key = getattr(args, 'user_api_key', None)
+        user_api_key = self._get_config_value(translator_args, 'user_api_key', None)
         if user_api_key and user_api_key != self.api_key:
             self.api_key = user_api_key
             need_rebuild_client = True
             self.logger.info("[UserAPIKey] Using user-provided API key for Gemini")
         
-        user_api_base = getattr(args, 'user_api_base', None)
+        user_api_base = self._get_config_value(translator_args, 'user_api_base', None)
         if user_api_base and user_api_base != self.base_url:
             self.base_url = user_api_base
             need_rebuild_client = True
             self.logger.info(f"[UserAPIKey] Using user-provided API base: {user_api_base}")
         
-        user_api_model = getattr(args, 'user_api_model', None)
+        user_api_model = self._get_config_value(translator_args, 'user_api_model', None)
         if user_api_model:
             self.model_name = user_api_model
             # 更新全局时间戳的 key
@@ -294,32 +295,58 @@ class GeminiTranslator(CommonTranslator):
                 streamed_finish_reason = None
                 streamed_diagnostics = None
 
-                try:
-                    self._reset_stream_json_preview()
-                    # 自动尝试流式；不支持时回退普通请求
-                    def _extract_stream_finish_reason(chunk):
-                        nonlocal streamed_diagnostics
-                        streamed_diagnostics = extract_gemini_response_diagnostics(chunk)
-                        return streamed_diagnostics.get('finish_reason')
+                use_streaming = self._is_streaming_enabled(ctx)
+                if use_streaming:
+                    try:
+                        self._reset_stream_json_preview()
+                        # 自动尝试流式；不支持时回退普通请求
+                        def _extract_stream_finish_reason(chunk):
+                            nonlocal streamed_diagnostics
+                            streamed_diagnostics = extract_gemini_response_diagnostics(chunk)
+                            return streamed_diagnostics.get('finish_reason')
 
-                    streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
-                        create_stream=lambda: self.client.models.generate_content_stream(
-                            model=self.model_name,
-                            contents=contents,
-                            config=generation_config
-                        ),
-                        extract_text=_extract_gemini_stream_text,
-                        extract_finish_reason=_extract_stream_finish_reason,
-                        on_chunk=_on_stream_chunk,
-                        on_cancel=self._abort_inflight_request,
-                        poll_interval=0.2,
-                        sync_iter_in_thread=not getattr(self, '_use_curl_cffi', False),
-                    )
-                    self._finish_stream_inline()
-                except Exception as stream_error:
-                    self._finish_stream_inline()
-                    self.logger.warning(f"流式请求不可用，已回退普通请求: {stream_error}")
-                    # 使用标准 SDK（同步调用包装为异步）
+                        streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
+                            create_stream=lambda: self.client.models.generate_content_stream(
+                                model=self.model_name,
+                                contents=contents,
+                                config=generation_config
+                            ),
+                            extract_text=_extract_gemini_stream_text,
+                            extract_finish_reason=_extract_stream_finish_reason,
+                            on_chunk=_on_stream_chunk,
+                            on_cancel=self._abort_inflight_request,
+                            poll_interval=0.2,
+                            sync_iter_in_thread=not getattr(self, '_use_curl_cffi', False),
+                        )
+                        self._finish_stream_inline()
+                    except Exception as stream_error:
+                        self._finish_stream_inline()
+                        self.logger.warning(f"流式请求不可用，已回退普通请求: {stream_error}")
+                        # 使用标准 SDK（同步调用包装为异步）
+                        if getattr(self, '_use_curl_cffi', False):
+                            response = await self._await_with_cancel_polling(
+                                self.client.models.generate_content(
+                                    model=self.model_name,
+                                    contents=contents,
+                                    generation_config=generation_config,
+                                    safety_settings=None if should_retry_without_safety else self.safety_settings
+                                ),
+                                poll_interval=0.2,
+                                on_cancel=self._abort_inflight_request,
+                            )
+                        else:
+                            response = await self._await_with_cancel_polling(
+                                asyncio.to_thread(
+                                    self.client.models.generate_content,
+                                    model=self.model_name,
+                                    contents=contents,
+                                    config=generation_config
+                                ),
+                                poll_interval=0.2,
+                                on_cancel=self._abort_inflight_request,
+                            )
+                else:
+                    self.logger.info("已禁用流式传输，使用普通请求。")
                     if getattr(self, '_use_curl_cffi', False):
                         response = await self._await_with_cancel_polling(
                             self.client.models.generate_content(
@@ -508,8 +535,8 @@ class GeminiTranslator(CommonTranslator):
         """主翻译方法"""
         if not self.client:
             from .. import manga_translator
-            if hasattr(manga_translator, 'config') and hasattr(manga_translator.config, 'translator'):
-                self.parse_args(manga_translator.config.translator)
+            if hasattr(manga_translator, 'config'):
+                self.parse_args(manga_translator.config)
 
         if not queries:
             return []

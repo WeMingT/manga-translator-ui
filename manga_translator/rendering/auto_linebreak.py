@@ -708,7 +708,7 @@ def _measure_required_size(
     if horizontal:
         lines, widths = _calc_horizontal_layout(font_size, text_with_br, 99999, target_lang, hyphenate, letter_spacing=letter_spacing_multiplier)
         n = max(1, len(lines))
-        spacing_y = int(font_size * 0.01 * line_spacing_multiplier)
+        spacing_y = text_render.calc_horizontal_line_spacing_px(font_size, line_spacing_multiplier)
         required_width = max(widths) if widths else get_string_width(font_size, _normalize_no_br_text(text_with_br), letter_spacing=letter_spacing_multiplier)
         required_height = font_size * n + spacing_y * max(0, n - 1)
         return n, float(required_width), float(required_height)
@@ -721,6 +721,25 @@ def _measure_required_size(
     line_widths = [_vert_line_width(line, font_size) for line in lines]
     required_width = sum(line_widths) + spacing_x * max(0, n - 1)
     return n, float(required_width), float(required_height)
+
+
+def _measure_unwrapped_required_size(
+    text: str,
+    font_size: int,
+    horizontal: bool,
+    letter_spacing_multiplier: float = 1.0,
+) -> Tuple[int, float, float]:
+    clean_text = _normalize_no_br_text(text)
+    if not clean_text:
+        return 1, 0.0, 0.0
+
+    if horizontal:
+        required_width = get_string_width(font_size, clean_text, letter_spacing=letter_spacing_multiplier)
+        return 1, float(required_width), float(font_size)
+
+    required_height = _vert_total_height(clean_text, font_size, letter_spacing=letter_spacing_multiplier)
+    required_width = _vert_line_width(clean_text, font_size)
+    return 1, float(required_width), float(required_height)
 
 
 # ---------------------------------------------------------------------------
@@ -762,6 +781,37 @@ def solve_no_br_layout(
 
     bw = bubble_width if isinstance(bubble_width, (int, float)) and bubble_width > 0 else 1.0
     bh = bubble_height if isinstance(bubble_height, (int, float)) and bubble_height > 0 else 1.0
+
+    if force_no_wrap_single_region:
+        current_font = max(safe_min_font, min(int(seed_font_size), safe_max_font))
+        for _ in range(max(1, int(iterations))):
+            _, required_width, required_height = _measure_unwrapped_required_size(
+                clean_text,
+                current_font,
+                horizontal,
+                letter_spacing_multiplier=letter_spacing_multiplier,
+            )
+
+            if required_width <= 0 or required_height <= 0:
+                break
+
+            fit_scale = min(bw / required_width, bh / required_height)
+            if not math.isfinite(fit_scale) or fit_scale <= 0:
+                fit_scale = 1.0
+            next_font = max(safe_min_font, min(int(current_font * fit_scale), safe_max_font))
+
+            if next_font == current_font:
+                return NoBrLayoutResult(clean_text, current_font, 1, required_width, required_height)
+
+            current_font = next_font
+
+        _, required_width, required_height = _measure_unwrapped_required_size(
+            clean_text,
+            current_font,
+            horizontal,
+            letter_spacing_multiplier=letter_spacing_multiplier,
+        )
+        return NoBrLayoutResult(clean_text, current_font, 1, required_width, required_height)
 
     for _ in range(max(1, int(iterations))):
         lines = _find_best_lines_for_target_segments(

@@ -61,6 +61,7 @@
 - **移动**：拖拽文本区域到任意位置
 - **旋转**：使用旋转手柄进行 0-360° 精确旋转
 - **变形**：顶点编辑、边缘调整、自由变形
+- **新建文本框**：在画布空白处右键，选择“添加文本框”
 - **编辑形状**：选中文本框后，点击工具栏的"编辑形状"按钮，在空白区域拖动对角线增加新的蓝框
 
 > **💡 OCR 识别最佳实践**：建议在编辑器中调整文本框，确保**一个蓝框里只有一行字**，不然 48px 和 32px 可能无法正确识别到文字。
@@ -312,7 +313,27 @@
 
 **自定义 API 参数路径**：
 - 默认：`examples/custom_api_params.json`
-- 用于 OpenAI / Gemini / OpenAI HQ / Gemini HQ 的额外 API 参数
+- 用于翻译、AI OCR、AI 渲染、AI 上色的额外 API 参数
+- 推荐分组键：`translator`、`ocr`、`render`、`colorizer`
+- 可选共享键：`common`
+- 兼容旧格式：直接写在 JSON 顶层的键会按 `common` 处理
+- 示例：
+  ```json
+  {
+    "translator": {
+      "thinking": {"type": "disabled"}
+    },
+    "ocr": {
+      "response_format": {"type": "json_object"}
+    },
+    "render": {
+      "quality": "high"
+    },
+    "colorizer": {
+      "size": "1536x1536"
+    }
+  }
+  ```
 
 **字体路径**：
 - 默认：`fonts` 目录

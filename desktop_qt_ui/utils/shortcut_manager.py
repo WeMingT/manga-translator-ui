@@ -176,14 +176,6 @@ class EditorShortcutManager(ShortcutManager):
             context_aware=True
         )
         
-        # 保存快捷键 (Ctrl+W)
-        self.register_shortcut(
-            'save',
-            QKeySequence("Ctrl+W"),
-            self._handle_save,
-            context_aware=True
-        )
-        
         # 导出快捷键 (Ctrl+Q)
         self.register_shortcut(
             'export',
@@ -293,17 +285,8 @@ class EditorShortcutManager(ShortcutManager):
             if selected_regions:
                 self.controller.delete_regions(selected_regions)
     
-    def _handle_save(self, focused_widget):
-        """处理保存快捷键 (Ctrl+S)"""
-        if self.is_text_widget(focused_widget):
-            # 如果在文本框中，通常我们还是希望保存（除了特定情况）
-            # 这里我们优先执行保存操作，因为Ctrl+S通常是全局的
-            pass
-            
-        self.controller.save_json()
-    
     def _handle_export(self, focused_widget):
-        """处理导出快捷键 (Ctrl+D)"""
+        """处理导出快捷键 (Ctrl+Q)"""
         # 导出是全局操作
         self.controller.export_image()
         

@@ -4,7 +4,7 @@ Unified stylesheet generators for the Qt desktop UI.
 
 from __future__ import annotations
 
-from main_view_parts.theme_colors import get_theme_colors
+from main_view_parts.theme import get_theme_colors
 
 
 def generate_main_view_style(theme: str = "dark") -> str:
@@ -320,6 +320,11 @@ def generate_main_view_style(theme: str = "dark") -> str:
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                         stop:0 {c["cta_gradient_start"]}, stop:1 {c["cta_gradient_end"]});
             border-radius: 8px;
+        }}
+        #progress_info_label {{
+            color: {c["text_page_subtitle"]};
+            font-size: 12px;
+            padding: 0 2px 2px 2px;
         }}
 
         #settings_tabs::pane,

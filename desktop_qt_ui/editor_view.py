@@ -16,6 +16,7 @@ from editor.editor_controller import EditorController
 from editor.editor_logic import EditorLogic
 from editor.editor_model import EditorModel
 from editor.graphics_view import GraphicsView
+from editor.original_compare_view import OriginalCompareView
 from main_view_parts.theme import get_current_theme
 from services import get_i18n_manager
 from utils.shortcut_manager import EditorShortcutManager
@@ -39,6 +40,7 @@ class EditorView(QWidget):
         self.controller = controller
         self.logic = logic
         self.i18n = get_i18n_manager()
+        self._compare_mode_enabled = False
 
         # 设置controller的view引用，用于更新UI状态
         self.controller.set_view(self)
@@ -60,6 +62,7 @@ class EditorView(QWidget):
         main_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         main_splitter.setObjectName("editor_main_splitter")
         main_splitter.setHandleWidth(6)
+        self.main_splitter = main_splitter
         self.layout.addWidget(main_splitter)
 
         # --- 左侧面板 (标签页) ---
@@ -78,7 +81,6 @@ class EditorView(QWidget):
         main_splitter.setStretchFactor(0, 0)
         main_splitter.setStretchFactor(1, 1)  # 让中心画布拉伸
         main_splitter.setStretchFactor(2, 0)
-        main_splitter.setSizes([304, 860, 236])
 
         # --- 连接信号与槽 ---
         self._connect_signals()
@@ -88,6 +90,7 @@ class EditorView(QWidget):
 
         # --- 应用编辑器样式（与主页统一） ---
         self._apply_editor_style()
+        self._apply_initial_splitter_sizes()
     
     def _t(self, key: str, **kwargs) -> str:
         """翻译辅助方法"""
@@ -209,6 +212,18 @@ class EditorView(QWidget):
         # 刷新文件列表视图（强制重绘以更新拖拽提示文本）
         if hasattr(self, 'file_list') and hasattr(self.file_list, 'refresh_ui_texts'):
             self.file_list.refresh_ui_texts()
+
+    def _apply_initial_splitter_sizes(self):
+        """用左栏的实际 sizeHint 作为初始宽度，而不是写死常量。"""
+        if not hasattr(self, "main_splitter") or not hasattr(self, "left_tab_widget"):
+            return
+
+        self.left_tab_widget.ensurePolished()
+        left_width = self.left_tab_widget.sizeHint().width()
+        left_width = max(self.left_tab_widget.minimumWidth(), left_width)
+        left_width = min(self.left_tab_widget.maximumWidth(), left_width)
+
+        self.main_splitter.setSizes([left_width, 860, 236])
     
     def _on_apply_changes_clicked(self):
         """应用所有在列表中修改的译文"""
@@ -233,6 +248,7 @@ class EditorView(QWidget):
         self.model.selection_changed.connect(self.property_panel.on_selection_changed)
         # Connect model brush size changes to the property panel
         self.model.brush_size_changed.connect(self.property_panel.sync_brush_size_from_model)
+        self.model.compare_image_changed.connect(self._on_compare_image_changed)
 
         # --- View to Controller ---
         self.region_list_view.region_selected.connect(self.controller.set_selection_from_list)
@@ -252,7 +268,6 @@ class EditorView(QWidget):
         # --- Toolbar (Top) to Controller/View ---
         self.toolbar.back_requested.connect(self.back_to_main_requested)
         self.toolbar.export_requested.connect(self.controller.export_image)
-        self.toolbar.save_json_requested.connect(self.controller.save_json)
         self.toolbar.undo_requested.connect(self.controller.undo)
         self.toolbar.redo_requested.connect(self.controller.redo)
         self.toolbar.zoom_in_requested.connect(self.graphics_view.zoom_in)
@@ -266,6 +281,7 @@ class EditorView(QWidget):
 
         # --- Graphics View to Controller ---
         self.graphics_view.region_geometry_changed.connect(self.controller.update_region_geometry)
+        self.graphics_view.view_state_changed.connect(self.original_compare_view.sync_view_state)
 
         # --- Property Panel (Left Panel) to Controller ---
         self.property_panel.translated_text_modified.connect(self.controller.update_translated_text)
@@ -300,15 +316,34 @@ class EditorView(QWidget):
         """创建中心画布区域"""
         center_widget = QWidget()
         center_widget.setObjectName("editor_center_panel")
-        center_layout = QVBoxLayout(center_widget)
+        center_layout = QHBoxLayout(center_widget)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(0)
-        
+        center_layout.setSpacing(6)
+
+        self.compare_preview_container = QWidget()
+        self.compare_preview_container.setObjectName("editor_compare_preview_container")
+        compare_layout = QVBoxLayout(self.compare_preview_container)
+        compare_layout.setContentsMargins(0, 0, 0, 0)
+        compare_layout.setSpacing(0)
+        self.original_compare_view = OriginalCompareView(self)
+        self.original_compare_view.setObjectName("editor_original_compare_view")
+        compare_layout.addWidget(self.original_compare_view)
+        self.compare_preview_container.hide()
+
+        self.edit_canvas_container = QWidget()
+        self.edit_canvas_container.setObjectName("editor_edit_canvas_container")
+        edit_canvas_layout = QVBoxLayout(self.edit_canvas_container)
+        edit_canvas_layout.setContentsMargins(0, 0, 0, 0)
+        edit_canvas_layout.setSpacing(0)
+
         # 画布（滚动条已在 GraphicsView 中配置）
         self.graphics_view = GraphicsView(self.model, self)
         self.graphics_view.setObjectName("editor_graphics_view")
-        center_layout.addWidget(self.graphics_view)
-        
+        edit_canvas_layout.addWidget(self.graphics_view)
+
+        center_layout.addWidget(self.compare_preview_container, 1)
+        center_layout.addWidget(self.edit_canvas_container, 1)
+
         return center_widget
 
     def _create_right_panel(self) -> QWidget:
@@ -375,5 +410,29 @@ class EditorView(QWidget):
         apply_widget_stylesheet(self, generate_editor_style(theme))
         if hasattr(self, "graphics_view") and self.graphics_view:
             self.graphics_view.apply_theme(theme)
+        if hasattr(self, "original_compare_view") and self.original_compare_view:
+            self.original_compare_view.apply_theme(theme)
         for picker in self.findChildren(ColorPickerWidget):
             picker.refresh_theme()
+
+    @pyqtSlot(object)
+    def _on_compare_image_changed(self, image):
+        if hasattr(self, "original_compare_view") and self.original_compare_view:
+            self.original_compare_view.set_image(image)
+            if self._compare_mode_enabled:
+                self._sync_compare_view_from_main()
+
+    def _sync_compare_view_from_main(self):
+        if not hasattr(self, "graphics_view") or not hasattr(self, "original_compare_view"):
+            return
+        transform, center_scene = self.graphics_view.get_view_state()
+        if transform is None or center_scene is None:
+            return
+        self.original_compare_view.sync_view_state(transform, center_scene)
+
+    def set_compare_mode(self, enabled: bool):
+        self._compare_mode_enabled = bool(enabled)
+        if hasattr(self, "compare_preview_container") and self.compare_preview_container:
+            self.compare_preview_container.setVisible(self._compare_mode_enabled)
+        if self._compare_mode_enabled:
+            self._sync_compare_view_from_main()

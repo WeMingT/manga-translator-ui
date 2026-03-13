@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -400,6 +401,166 @@ def _make_glossary_table(entries: List[Dict[str, str]]) -> QTableWidget:
     return table
 
 
+def _normalize_person_glossary_entry(entry: Any) -> Dict[str, Any]:
+    if not isinstance(entry, dict):
+        entry = {}
+
+    nicknames = entry.get("nicknames", [])
+    if isinstance(nicknames, str):
+        nicknames = [item.strip() for item in nicknames.split(",") if item.strip()]
+    elif isinstance(nicknames, list):
+        nicknames = [str(item).strip() for item in nicknames if str(item).strip()]
+    else:
+        nicknames = []
+
+    description = str(
+        entry.get("description")
+        or entry.get("introduction")
+        or entry.get("intro")
+        or ""
+    ).strip()
+
+    return {
+        "original": str(entry.get("original", "")).strip(),
+        "translation": str(entry.get("translation", "")).strip(),
+        "nicknames": nicknames,
+        "description": description,
+    }
+
+
+def _set_person_glossary_row(table: QTableWidget, row: int, entry: Dict[str, Any]):
+    normalized = _normalize_person_glossary_entry(entry)
+    nicknames_text = ", ".join(normalized["nicknames"])
+    description_preview = normalized["description"].replace("\r\n", "\n").replace("\n", " / ")
+    values = [
+        normalized["original"],
+        normalized["translation"],
+        nicknames_text,
+        description_preview,
+    ]
+
+    for col, value in enumerate(values):
+        item = QTableWidgetItem(value)
+        item.setData(Qt.ItemDataRole.UserRole, dict(normalized))
+        table.setItem(row, col, item)
+
+
+def _get_person_glossary_row(table: QTableWidget, row: int) -> Dict[str, Any]:
+    if row < 0 or row >= table.rowCount():
+        return _normalize_person_glossary_entry({})
+
+    item = table.item(row, 0)
+    if item is not None:
+        payload = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(payload, dict):
+            return _normalize_person_glossary_entry(payload)
+
+    original = (table.item(row, 0) or QTableWidgetItem("")).text()
+    translation = (table.item(row, 1) or QTableWidgetItem("")).text()
+    nicknames_text = (table.item(row, 2) or QTableWidgetItem("")).text()
+    description = (table.item(row, 3) or QTableWidgetItem("")).text()
+    return _normalize_person_glossary_entry({
+        "original": original,
+        "translation": translation,
+        "nicknames": nicknames_text,
+        "description": description,
+    })
+
+
+def _make_person_glossary_table(entries: List[Dict[str, Any]], editable: bool = False) -> QTableWidget:
+    table = QTableWidget(len(entries), 4)
+    table.setHorizontalHeaderLabels([
+        _current_t("Original"),
+        _current_t("Translation"),
+        _current_t("Nicknames"),
+        _current_t("Introduction"),
+    ])
+    table.horizontalHeader().setStretchLastSection(True)
+    table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+    table.verticalHeader().setVisible(False)
+    table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+    table.setAlternatingRowColors(True)
+    table.setStyleSheet(_table_style(editable=editable))
+
+    for row, entry in enumerate(entries):
+        _set_person_glossary_row(table, row, entry)
+
+    row_h = 28
+    header_h = table.horizontalHeader().height() if table.horizontalHeader().isVisible() else 28
+    if not editable:
+        desired = header_h + row_h * max(len(entries), 1) + 4
+        table.setFixedHeight(min(desired, 300))
+    table.verticalHeader().setDefaultSectionSize(row_h)
+    return table
+
+
+def _normalize_reference_images(raw_items: Any) -> List[Dict[str, str]]:
+    entries: List[Dict[str, str]] = []
+    if not isinstance(raw_items, list):
+        return entries
+
+    for item in raw_items:
+        if isinstance(item, str):
+            path = item.strip()
+            if path:
+                entries.append({"path": path, "description": ""})
+            continue
+        if not isinstance(item, dict):
+            continue
+        path = str(
+            item.get("path")
+            or item.get("image_path")
+            or item.get("file")
+            or item.get("value")
+            or ""
+        ).strip()
+        description = str(
+            item.get("description")
+            or item.get("note")
+            or item.get("label")
+            or item.get("purpose")
+            or ""
+        ).strip()
+        if path or description:
+            entries.append({"path": path, "description": description})
+    return entries
+
+
+def _make_reference_images_table(entries: List[Dict[str, str]], editable: bool = False) -> QTableWidget:
+    table = QTableWidget(len(entries), 2)
+    table.setHorizontalHeaderLabels([_current_t("Path"), _current_t("Description")])
+    table.horizontalHeader().setStretchLastSection(True)
+    table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    table.verticalHeader().setVisible(False)
+    table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+    table.setAlternatingRowColors(True)
+    table.setStyleSheet(_table_style(editable=editable))
+    if not editable:
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+    for row, entry in enumerate(entries):
+        table.setItem(row, 0, QTableWidgetItem(entry.get("path", "")))
+        table.setItem(row, 1, QTableWidgetItem(entry.get("description", "")))
+
+    row_h = 28
+    header_h = table.horizontalHeader().height() if table.horizontalHeader().isVisible() else 28
+    desired = header_h + row_h * max(len(entries), 1) + 4
+    table.setFixedHeight(min(desired, 260))
+    table.verticalHeader().setDefaultSectionSize(row_h)
+    return table
+
+
+def _is_colorizer_structured(data: Any) -> bool:
+    return isinstance(data, dict) and any(
+        key in data
+        for key in ("ai_colorizer_prompt", "colorization_rules", "reference_images")
+    )
+
+
 # ─────────────────────────────────────────────────────────
 # PromptPreviewPanel  (右侧结构化预览)
 # ─────────────────────────────────────────────────────────
@@ -530,68 +691,45 @@ class PromptPreviewPanel(QWidget):
     def _is_structured(data: Any) -> bool:
         if not isinstance(data, dict):
             return False
+        if _is_colorizer_structured(data):
+            return True
         # 只要有以下任一关键字段就认为是结构化的
         return bool(
             data.get("glossary")
             or data.get("project_data")
-            or data.get("persona")
-            or data.get("character_list")
+            or data.get("style_guide")
+            or data.get("translation_rules")
         )
 
     # ─── 结构化渲染 ────────────────────────────────────
     def _render_structured(self, data: dict):
         layout = self._content_layout
 
-        # 1. Persona
-        persona = data.get("persona")
-        if persona:
-            layout.addWidget(_section_label("📋 " + self._t("Persona")))
-            layout.addWidget(_body_label(str(persona)))
-            layout.addWidget(_divider())
+        if _is_colorizer_structured(data):
+            self._render_colorizer_structured(data)
+            return
 
-        # 2. Project data
+        # 1. Project data
         project = data.get("project_data")
         if isinstance(project, dict):
             title = project.get("title")
-            if title:
-                layout.addWidget(_section_label("📚 " + self._t("Project") + f": {title}"))
-            else:
-                layout.addWidget(_section_label("📚 " + self._t("Project Data")))
-
-            # Character list
-            chars = project.get("character_list")
-            if isinstance(chars, list) and chars:
-                layout.addWidget(_dim_label(self._t("Characters") + f" ({len(chars)})"))
-                char_table = QTableWidget(len(chars), 3)
-                char_table.setHorizontalHeaderLabels([self._t("JP Name"), self._t("CN Name"), self._t("Nicknames")])
-                char_table.horizontalHeader().setStretchLastSection(True)
-                char_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-                char_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-                char_table.verticalHeader().setVisible(False)
-                char_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-                char_table.setAlternatingRowColors(True)
-                char_table.setStyleSheet(_table_style())
-                for r, ch in enumerate(chars):
-                    char_table.setItem(r, 0, QTableWidgetItem(ch.get("jp_name", "")))
-                    char_table.setItem(r, 1, QTableWidgetItem(ch.get("cn_name", "")))
-                    nicks = ch.get("nicknames", [])
-                    char_table.setItem(r, 2, QTableWidgetItem(", ".join(nicks) if isinstance(nicks, list) else str(nicks)))
-                row_h = 28
-                hdr_h = 28
-                char_table.setFixedHeight(min(hdr_h + row_h * len(chars) + 4, 260))
-                char_table.verticalHeader().setDefaultSectionSize(row_h)
-                layout.addWidget(char_table)
-
-            # Terminology (project-level)
             term = project.get("terminology")
+            has_project_content = bool(title) or (isinstance(term, dict) and term)
+            if has_project_content:
+                if title:
+                    layout.addWidget(_section_label("📚 " + self._t("Project") + f": {title}"))
+                else:
+                    layout.addWidget(_section_label("📚 " + self._t("Project Data")))
+
             if isinstance(term, dict) and term:
                 layout.addWidget(_dim_label(self._t("Terminology") + f" ({len(term)})"))
                 entries = [{"original": k, "translation": v} for k, v in term.items()]
                 layout.addWidget(_make_glossary_table(entries))
 
-            layout.addWidget(_divider())
+            if has_project_content:
+                layout.addWidget(_divider())
 
-        # 3. Style Guide
+        # 2. Style Guide
         sg = data.get("style_guide")
         if isinstance(sg, list) and sg:
             layout.addWidget(_section_label("🎨 " + self._t("Style Guide")))
@@ -599,7 +737,7 @@ class PromptPreviewPanel(QWidget):
                 layout.addWidget(_body_label("• " + str(item)))
             layout.addWidget(_divider())
 
-        # 4. Translation Rules
+        # 3. Translation Rules
         tr = data.get("translation_rules")
         if isinstance(tr, list) and tr:
             layout.addWidget(_section_label("📏 " + self._t("Translation Rules")))
@@ -607,7 +745,7 @@ class PromptPreviewPanel(QWidget):
                 layout.addWidget(_body_label("• " + str(item)))
             layout.addWidget(_divider())
 
-        # 5. Glossary (auto-extracted)
+        # 4. Glossary (auto-extracted)
         glossary = data.get("glossary")
         if isinstance(glossary, dict) and glossary:
             total = sum(len(v) for v in glossary.values() if isinstance(v, list))
@@ -634,7 +772,7 @@ class PromptPreviewPanel(QWidget):
                 tab_page = QWidget()
                 tab_lay = QVBoxLayout(tab_page)
                 tab_lay.setContentsMargins(4, 4, 4, 4)
-                tab_lay.addWidget(_make_glossary_table(entries))
+                tab_lay.addWidget(_make_person_glossary_table(entries) if cat_key == "Person" else _make_glossary_table(entries))
                 tabs.addTab(tab_page, f"{icon} {self._t(cat_key)} ({len(entries)})")
 
             # 处理非标准分类
@@ -647,18 +785,12 @@ class PromptPreviewPanel(QWidget):
                 tab_page = QWidget()
                 tab_lay = QVBoxLayout(tab_page)
                 tab_lay.setContentsMargins(4, 4, 4, 4)
-                tab_lay.addWidget(_make_glossary_table(entries))
+                tab_lay.addWidget(_make_person_glossary_table(entries) if cat_key == "Person" else _make_glossary_table(entries))
                 tabs.addTab(tab_page, f"{cat_key} ({len(entries)})")
 
             tabs.setMinimumHeight(200)
             layout.addWidget(tabs)
             layout.addWidget(_divider())
-
-        # 6. Output format
-        of = data.get("output_format")
-        if of:
-            layout.addWidget(_section_label("📤 " + self._t("Output Format")))
-            layout.addWidget(_body_label(str(of)))
 
         layout.addStretch()
 
@@ -684,6 +816,29 @@ class PromptPreviewPanel(QWidget):
     def _on_edit_clicked(self):
         if self._current_path:
             self.edit_requested.emit(self._current_path)
+
+    def _render_colorizer_structured(self, data: dict):
+        layout = self._content_layout
+
+        prompt_text = data.get("ai_colorizer_prompt")
+        if prompt_text:
+            layout.addWidget(_section_label("🖌 " + self._t("Prompt Text")))
+            layout.addWidget(_body_label(str(prompt_text)))
+            layout.addWidget(_divider())
+
+        rules = data.get("colorization_rules")
+        if isinstance(rules, list) and rules:
+            layout.addWidget(_section_label("🎨 " + self._t("Colorization Rules")))
+            for item in rules:
+                layout.addWidget(_body_label("• " + str(item)))
+            layout.addWidget(_divider())
+
+        reference_images = _normalize_reference_images(data.get("reference_images"))
+        if reference_images:
+            layout.addWidget(_section_label("🖼 " + self._t("Reference Images") + f" ({len(reference_images)})"))
+            layout.addWidget(_make_reference_images_table(reference_images, editable=False))
+
+        layout.addStretch()
 
 
 # ─────────────────────────────────────────────────────────
@@ -723,6 +878,75 @@ def _styled_text_edit(text: str = "", read_only: bool = False) -> QPlainTextEdit
 _GLOSSARY_CATEGORIES = ["Person", "Location", "Org", "Item", "Skill", "Creature"]
 
 
+class PersonGlossaryEntryDialog(QDialog):
+    def __init__(self, entry: Optional[Dict[str, Any]] = None, t_func: Callable = None, parent=None):
+        super().__init__(parent)
+        self._t = t_func or (lambda x: x)
+        self._entry = _normalize_person_glossary_entry(entry or {})
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle(self._t("Person Entry"))
+        self.setMinimumSize(520, 420)
+        self.resize(560, 460)
+        self.setStyleSheet(_dialog_style())
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(10)
+
+        title = QLabel(self._t("Person") + " · " + self._t("Edit"))
+        title.setStyleSheet(_title_style(15))
+        root.addWidget(title)
+        root.addWidget(_divider())
+
+        root.addWidget(_dim_label(self._t("Original")))
+        self._original_edit = QLineEdit(self._entry.get("original", ""))
+        self._original_edit.setStyleSheet(_line_edit_style())
+        root.addWidget(self._original_edit)
+
+        root.addWidget(_dim_label(self._t("Translation")))
+        self._translation_edit = QLineEdit(self._entry.get("translation", ""))
+        self._translation_edit.setStyleSheet(_line_edit_style())
+        root.addWidget(self._translation_edit)
+
+        root.addWidget(_dim_label(self._t("Nicknames")))
+        self._nicknames_edit = QLineEdit(", ".join(self._entry.get("nicknames", [])))
+        self._nicknames_edit.setStyleSheet(_line_edit_style())
+        root.addWidget(self._nicknames_edit)
+
+        root.addWidget(_dim_label(self._t("Introduction")))
+        self._description_edit = _styled_text_edit(self._entry.get("description", ""))
+        self._description_edit.setFixedHeight(160)
+        root.addWidget(self._description_edit, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton(self._t("Cancel"))
+        cancel_btn.setFixedWidth(100)
+        cancel_btn.setProperty("chipButton", True)
+        cancel_btn.clicked.connect(self.reject)
+
+        save_btn = QPushButton(self._t("Save"))
+        save_btn.setFixedWidth(100)
+        save_btn.setProperty("variant", "accent")
+        save_btn.clicked.connect(self.accept)
+
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(save_btn)
+        root.addLayout(btn_row)
+
+    def get_entry(self) -> Dict[str, Any]:
+        nicknames = [item.strip() for item in self._nicknames_edit.text().split(",") if item.strip()]
+        return _normalize_person_glossary_entry({
+            "original": self._original_edit.text(),
+            "translation": self._translation_edit.text(),
+            "nicknames": nicknames,
+            "description": self._description_edit.toPlainText(),
+        })
+
+
 class PromptEditorDialog(QDialog):
     """
     弹窗式编辑器，支持两种模式：
@@ -742,13 +966,11 @@ class PromptEditorDialog(QDialog):
         self._is_structured = False
         self._template_dirty = False  # 模板 tab 是否有修改
         self._free_dirty = False  # 自由 tab 是否有修改
+        self._was_saved = False
 
         # 模板编辑的控件引用
-        self._persona_edit: Optional[QPlainTextEdit] = None
         self._style_guide_edit: Optional[QPlainTextEdit] = None
         self._rules_edit: Optional[QPlainTextEdit] = None
-        self._output_format_edit: Optional[QPlainTextEdit] = None
-        self._char_table: Optional[QTableWidget] = None
         self._term_table: Optional[QTableWidget] = None
         self._title_edit = None
         self._glossary_tables: Dict[str, QTableWidget] = {}
@@ -843,20 +1065,12 @@ class PromptEditorDialog(QDialog):
 
         data = self._data
 
-        # Persona
-        persona = data.get("persona", "")
-        if persona is not None:
-            self._insert_section("persona", layout, text=str(persona))
-
         # Project title
         project = data.get("project_data")
         if isinstance(project, dict):
-            self._insert_section("project_title", layout, title=project.get("title", ""))
-
-            # Character list
-            chars = project.get("character_list", [])
-            if isinstance(chars, list):
-                self._insert_section("characters", layout, chars=chars)
+            title = str(project.get("title", "")).strip()
+            if title:
+                self._insert_section("project_title", layout, title=title)
 
             # Terminology
             term = project.get("terminology")
@@ -878,11 +1092,6 @@ class PromptEditorDialog(QDialog):
         if isinstance(glossary, dict):
             self._insert_section("glossary", layout, glossary=glossary)
 
-        # Output format
-        of = data.get("output_format")
-        if of is not None:
-            self._insert_section("output_format", layout, text=str(of))
-
         # ── "+ 添加字段" 按钮 ──
         self._add_section_btn = QPushButton("＋ " + self._t("Add Section"))
         self._add_section_btn.setProperty("chipButton", True)
@@ -899,14 +1108,11 @@ class PromptEditorDialog(QDialog):
 
     # ─── 容器创建 & 操作栏 ─────────────────────────────
     _SECTION_META = {
-        "persona":           ("📋", "Persona"),
         "project_title":     ("📚", "Project Title"),
-        "characters":        ("👤", "Characters"),
         "terminology":       ("📝", "Terminology"),
         "style_guide":       ("🎨", "Style Guide"),
         "translation_rules": ("📏", "Translation Rules"),
         "glossary":          ("📖", "Glossary"),
-        "output_format":     ("📤", "Output Format"),
     }
 
     def _make_section_container(self, key: str) -> tuple:
@@ -962,12 +1168,8 @@ class PromptEditorDialog(QDialog):
         container, body = self._make_section_container(key)
 
         # 根据 key 填充 body
-        if key == "persona":
-            self._fill_persona(body, kwargs.get("text", ""))
-        elif key == "project_title":
+        if key == "project_title":
             self._fill_project_title(body, kwargs.get("title", ""))
-        elif key == "characters":
-            self._fill_characters(body, kwargs.get("chars", []))
         elif key == "terminology":
             self._fill_terminology(body, kwargs.get("term", {}))
         elif key == "style_guide":
@@ -976,8 +1178,6 @@ class PromptEditorDialog(QDialog):
             self._fill_translation_rules(body, kwargs.get("rules", []))
         elif key == "glossary":
             self._fill_glossary(body, kwargs.get("glossary", {}))
-        elif key == "output_format":
-            self._fill_output_format(body, kwargs.get("text", ""))
 
         if idx < 0:
             # 在"添加字段"按钮之前插入（如果有的话）
@@ -995,49 +1195,10 @@ class PromptEditorDialog(QDialog):
             self._section_containers.insert(idx, (key, container))
 
     # ─── 各字段的填充方法 ──────────────────────────────
-    def _fill_persona(self, layout: QVBoxLayout, text: str = ""):
-        self._persona_edit = _styled_text_edit(text)
-        self._persona_edit.setFixedHeight(100)
-        layout.addWidget(self._persona_edit)
-
     def _fill_project_title(self, layout: QVBoxLayout, title: str = ""):
-        from PyQt6.QtWidgets import QLineEdit
         self._title_edit = QLineEdit(title)
         self._title_edit.setStyleSheet(_line_edit_style())
         layout.addWidget(self._title_edit)
-
-    def _fill_characters(self, layout: QVBoxLayout, chars: list = None):
-        if chars is None:
-            chars = []
-        self._char_table = QTableWidget(len(chars), 3)
-        self._char_table.setHorizontalHeaderLabels([self._t("JP Name"), self._t("CN Name"), self._t("Nicknames")])
-        self._char_table.horizontalHeader().setStretchLastSection(True)
-        self._char_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._char_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._char_table.verticalHeader().setVisible(False)
-        self._char_table.setAlternatingRowColors(True)
-        self._char_table.setStyleSheet(_table_style(editable=True))
-        for r, ch in enumerate(chars):
-            self._char_table.setItem(r, 0, QTableWidgetItem(ch.get("jp_name", "")))
-            self._char_table.setItem(r, 1, QTableWidgetItem(ch.get("cn_name", "")))
-            nicks = ch.get("nicknames", [])
-            nick_str = ", ".join(nicks) if isinstance(nicks, list) else str(nicks)
-            self._char_table.setItem(r, 2, QTableWidgetItem(nick_str))
-        self._char_table.verticalHeader().setDefaultSectionSize(28)
-        self._char_table.setMinimumHeight(120)
-        layout.addWidget(self._char_table)
-
-        btn_row = QHBoxLayout()
-        add_btn = QPushButton("+ " + self._t("Add Row"))
-        add_btn.setProperty("chipButton", True)
-        add_btn.clicked.connect(lambda: self._add_table_row(self._char_table, 3))
-        del_btn = QPushButton("- " + self._t("Delete Row"))
-        del_btn.setProperty("chipButton", True)
-        del_btn.clicked.connect(lambda: self._del_table_row(self._char_table))
-        btn_row.addWidget(add_btn)
-        btn_row.addWidget(del_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
 
     def _fill_terminology(self, layout: QVBoxLayout, term: dict = None):
         if term is None:
@@ -1104,7 +1265,12 @@ class PromptEditorDialog(QDialog):
             tab_lay.setContentsMargins(6, 6, 6, 6)
             tab_lay.setSpacing(6)
 
-            tbl = _make_editable_glossary_table(entries)
+            if cat_key == "Person":
+                tbl = _make_person_glossary_table(entries, editable=True)
+                tbl.itemDoubleClicked.connect(lambda item, t=tbl: self._edit_person_glossary_row(t, item.row()))
+                tab_lay.addWidget(_dim_label(self._t("Double-click a row to edit details")))
+            else:
+                tbl = _make_editable_glossary_table(entries)
             tbl.setMinimumHeight(120)
             self._glossary_tables[cat_key] = tbl
             tab_lay.addWidget(tbl)
@@ -1113,11 +1279,18 @@ class PromptEditorDialog(QDialog):
             add_btn = QPushButton("+ " + self._t("Add Row"))
             add_btn.setProperty("chipButton", True)
             _tbl = tbl
-            add_btn.clicked.connect(lambda checked=False, t=_tbl: self._add_table_row(t, 2))
+            g_btn_row.addWidget(add_btn)
+            if cat_key == "Person":
+                add_btn.clicked.connect(lambda checked=False, t=_tbl: self._add_person_glossary_row(t))
+                edit_btn = QPushButton(self._t("Edit"))
+                edit_btn.setProperty("chipButton", True)
+                edit_btn.clicked.connect(lambda checked=False, t=_tbl: self._edit_selected_person_glossary_row(t))
+                g_btn_row.addWidget(edit_btn)
+            else:
+                add_btn.clicked.connect(lambda checked=False, t=_tbl: self._add_table_row(t, 2))
             del_btn = QPushButton("- " + self._t("Delete Row"))
             del_btn.setProperty("chipButton", True)
             del_btn.clicked.connect(lambda checked=False, t=_tbl: self._del_table_row(t))
-            g_btn_row.addWidget(add_btn)
             g_btn_row.addWidget(del_btn)
             g_btn_row.addStretch()
             tab_lay.addLayout(g_btn_row)
@@ -1126,10 +1299,29 @@ class PromptEditorDialog(QDialog):
 
         layout.addWidget(glossary_tabs)
 
-    def _fill_output_format(self, layout: QVBoxLayout, text: str = ""):
-        self._output_format_edit = _styled_text_edit(text)
-        self._output_format_edit.setFixedHeight(60)
-        layout.addWidget(self._output_format_edit)
+    def _add_person_glossary_row(self, table: QTableWidget):
+        dialog = PersonGlossaryEntryDialog(t_func=self._t, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        row = table.rowCount()
+        table.insertRow(row)
+        _set_person_glossary_row(table, row, dialog.get_entry())
+        table.selectRow(row)
+
+    def _edit_selected_person_glossary_row(self, table: QTableWidget):
+        row = table.currentRow()
+        if row < 0:
+            return
+        self._edit_person_glossary_row(table, row)
+
+    def _edit_person_glossary_row(self, table: QTableWidget, row: int):
+        if row < 0:
+            return
+        dialog = PersonGlossaryEntryDialog(_get_person_glossary_row(table, row), t_func=self._t, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        _set_person_glossary_row(table, row, dialog.get_entry())
+        table.selectRow(row)
 
     # ─── 字段操作：移动 & 删除 ─────────────────────────
     def _move_section(self, container: QWidget, direction: int):
@@ -1173,12 +1365,8 @@ class PromptEditorDialog(QDialog):
         container.deleteLater()
 
         # 清空控件引用
-        if key == "persona":
-            self._persona_edit = None
-        elif key == "project_title":
+        if key == "project_title":
             self._title_edit = None
-        elif key == "characters":
-            self._char_table = None
         elif key == "terminology":
             self._term_table = None
         elif key == "style_guide":
@@ -1188,19 +1376,14 @@ class PromptEditorDialog(QDialog):
         elif key == "glossary":
             self._glossary_tables.clear()
             self._glossary_tab_widget = None
-        elif key == "output_format":
-            self._output_format_edit = None
 
     # ─── 添加字段菜单 ──────────────────────────────────
     _SECTION_DEFS = [
-        ("persona",           "📋", "Persona"),
         ("project_title",     "📚", "Project Title"),
-        ("characters",        "👤", "Characters"),
         ("terminology",       "📝", "Terminology"),
         ("style_guide",       "🎨", "Style Guide"),
         ("translation_rules", "📏", "Translation Rules"),
         ("glossary",          "📖", "Glossary"),
-        ("output_format",     "📤", "Output Format"),
     ]
 
     def _get_existing_sections(self) -> set:
@@ -1266,27 +1449,13 @@ class PromptEditorDialog(QDialog):
     def _collect_template_data(self) -> dict:
         """从模板编辑控件收集数据，合并回 self._data。"""
         data = dict(self._data) if self._data else {}
-
-        if self._persona_edit is not None:
-            data["persona"] = self._persona_edit.toPlainText()
+        data.pop("output_format", None)
+        data.pop("persona", None)
 
         if self._title_edit is not None:
             if "project_data" not in data:
                 data["project_data"] = {}
             data["project_data"]["title"] = self._title_edit.text()
-
-        if self._char_table is not None:
-            chars = []
-            for r in range(self._char_table.rowCount()):
-                jp = (self._char_table.item(r, 0) or QTableWidgetItem("")).text()
-                cn = (self._char_table.item(r, 1) or QTableWidgetItem("")).text()
-                nicks_str = (self._char_table.item(r, 2) or QTableWidgetItem("")).text()
-                nicks = [n.strip() for n in nicks_str.split(",") if n.strip()]
-                if jp or cn:
-                    chars.append({"jp_name": jp, "cn_name": cn, "nicknames": nicks})
-            if "project_data" not in data:
-                data["project_data"] = {}
-            data["project_data"]["character_list"] = chars
 
         if self._term_table is not None:
             terms = {}
@@ -1313,16 +1482,33 @@ class PromptEditorDialog(QDialog):
                 glossary = {}
             for cat_key, tbl in self._glossary_tables.items():
                 entries = []
-                for r in range(tbl.rowCount()):
-                    orig = (tbl.item(r, 0) or QTableWidgetItem("")).text()
-                    trans = (tbl.item(r, 1) or QTableWidgetItem("")).text()
-                    if orig:
-                        entries.append({"original": orig, "translation": trans})
+                if cat_key == "Person":
+                    for r in range(tbl.rowCount()):
+                        person_entry = _get_person_glossary_row(tbl, r)
+                        if person_entry["original"]:
+                            item = {
+                                "original": person_entry["original"],
+                                "translation": person_entry["translation"],
+                            }
+                            if person_entry["nicknames"]:
+                                item["nicknames"] = person_entry["nicknames"]
+                            if person_entry["description"]:
+                                item["description"] = person_entry["description"]
+                            entries.append(item)
+                else:
+                    for r in range(tbl.rowCount()):
+                        orig = (tbl.item(r, 0) or QTableWidgetItem("")).text()
+                        trans = (tbl.item(r, 1) or QTableWidgetItem("")).text()
+                        if orig:
+                            entries.append({"original": orig, "translation": trans})
                 glossary[cat_key] = entries
             data["glossary"] = glossary
 
-        if self._output_format_edit is not None:
-            data["output_format"] = self._output_format_edit.toPlainText()
+        project_data = data.get("project_data")
+        if isinstance(project_data, dict):
+            project_data.pop("character_list", None)
+            if not project_data:
+                data.pop("project_data", None)
 
         return data
 
@@ -1378,6 +1564,7 @@ class PromptEditorDialog(QDialog):
                 f.write(content)
             self._status.setText(f"✅ {self._t('Saved successfully')}")
             self._status.setStyleSheet(_status_style("success"))
+            self._was_saved = True
             self._original_content = content
             # 同步另一个 tab
             if self._is_structured and current_tab == 0:
@@ -1389,6 +1576,6 @@ class PromptEditorDialog(QDialog):
     def get_was_modified(self) -> bool:
         if self._is_structured:
             # 简单比较自由编辑内容
-            return self._free_editor.toPlainText() != self._original_content
-        return self._free_editor.toPlainText() != self._original_content
+            return self._was_saved or self._free_editor.toPlainText() != self._original_content
+        return self._was_saved or self._free_editor.toPlainText() != self._original_content
 

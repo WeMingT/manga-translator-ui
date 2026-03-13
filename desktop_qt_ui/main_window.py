@@ -1,15 +1,12 @@
 from PyQt6.QtCore import QLibraryInfo, QLocale, QTimer, Qt, QTranslator, pyqtSlot
 from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStackedWidget, QTextEdit
+from PyQt6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
 from app_logic import MainAppLogic
-from editor.editor_controller import EditorController
-from editor.editor_logic import EditorLogic
-from editor.editor_model import EditorModel
-from editor_view import EditorView
 from main_view import MainView
 from services import ServiceManager, get_config_service, get_logger, get_state_manager, get_i18n_manager
-from widgets.themed_message_box import apply_message_box_style
+from theme_registry import THEME_OPTIONS
+from widgets.themed_message_box import show_error_dialog
 
 
 class MainWindow(QMainWindow):
@@ -78,16 +75,16 @@ class MainWindow(QMainWindow):
                 initial_theme = config.app.theme_user_preference
 
         from main_view_parts.theme import set_current_theme
-
         set_current_theme(initial_theme)
         self.current_applied_theme = initial_theme
 
         # --- Logic Controllers ---
         self.app_logic = MainAppLogic()
         ServiceManager.register_service('app_logic', self.app_logic)
-        self.editor_model = EditorModel()
-        self.editor_controller = EditorController(self.editor_model)
-        self.editor_logic = EditorLogic(self.editor_controller)
+        self.editor_model = None
+        self.editor_controller = None
+        self.editor_logic = None
+        self.editor_view = None
 
     def _setup_ui(self):
         """初始化UI组件"""
@@ -100,15 +97,41 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stacked_widget)
 
         self.main_view = MainView(self.app_logic, self)
-        self.editor_view = EditorView(self.app_logic, self.editor_model, self.editor_controller, self.editor_logic, self)
 
         # 设置 app_logic 对 main_view 的引用，用于更新进度条
         self.app_logic.main_view = self.main_view
 
         self.stacked_widget.addWidget(self.main_view)
-        self.stacked_widget.addWidget(self.editor_view)
 
         self.stacked_widget.setCurrentWidget(self.main_view)
+
+    def _ensure_editor_initialized(self):
+        if self.editor_view is not None:
+            return
+
+        from editor.editor_controller import EditorController
+        from editor.editor_logic import EditorLogic
+        from editor.editor_model import EditorModel
+        from editor_view import EditorView
+
+        self.editor_model = EditorModel()
+        self.editor_controller = EditorController(self.editor_model)
+        self.editor_logic = EditorLogic(self.editor_controller)
+        self.editor_view = EditorView(
+            self.app_logic,
+            self.editor_model,
+            self.editor_controller,
+            self.editor_logic,
+            self,
+        )
+        self.stacked_widget.addWidget(self.editor_view)
+
+        self.app_logic.config_loaded.connect(self.editor_view.property_panel.repopulate_options)
+        self.app_logic.render_setting_changed.connect(self.editor_logic.on_global_render_setting_changed)
+        self.editor_view.back_to_main_requested.connect(lambda: self.stacked_widget.setCurrentWidget(self.main_view))
+
+        self.editor_view._apply_editor_style(self.current_applied_theme)
+        self.editor_view.property_panel.repopulate_options()
 
     def _create_ui_actions(self):
         """创建内部动作对象（无顶部菜单栏）"""
@@ -117,10 +140,11 @@ class MainWindow(QMainWindow):
         self.redo_action = QAction(self._t("&Redo"), self)
         self.main_view_action = QAction(self._t("Main View"), self)
         self.editor_view_action = QAction(self._t("Editor View"), self)
-        self.light_theme_action = QAction(self._t("Light"), self)
-        self.dark_theme_action = QAction(self._t("Dark"), self)
-        self.gray_theme_action = QAction(self._t("Gray"), self)
-        self.system_theme_action = QAction(self._t("Follow System"), self)
+        self.theme_actions = {}
+        for theme_key, theme_label in THEME_OPTIONS:
+            action = QAction(self._t(theme_label), self)
+            self.theme_actions[theme_key] = action
+            setattr(self, f"{theme_key}_theme_action", action)
 
     def _load_stylesheet(self):
         """加载样式表，根据配置选择主题"""
@@ -142,7 +166,7 @@ class MainWindow(QMainWindow):
                 self._apply_theme('dark')
             else:
                 config = self.config_service.get_config()
-                # 使用用户偏好（light 或 gray）
+                # 使用用户偏好（所有非 dark 主题）
                 self._apply_theme(config.app.theme_user_preference)
             return
 
@@ -182,7 +206,7 @@ class MainWindow(QMainWindow):
 
             from PyQt6.QtGui import QColor
 
-            from main_view_parts.theme_colors import get_theme_colors
+            from main_view_parts.theme import get_theme_colors, is_dark_theme
 
             hwnd = int(self.winId())
             if not hwnd:
@@ -215,7 +239,7 @@ class MainWindow(QMainWindow):
                     ctypes.sizeof(data),
                 )
 
-            is_dark_caption = theme in {"dark", "gray"}
+            is_dark_caption = is_dark_theme(theme)
             dark_mode = ctypes.c_int(1 if is_dark_caption else 0)
             result = _set_dwm_attr(DWMWA_USE_IMMERSIVE_DARK_MODE, dark_mode)
             if result != 0:
@@ -316,8 +340,8 @@ class MainWindow(QMainWindow):
             # 应用主题
             self._apply_theme(theme)
             
-            # 如果是浅色或灰色，更新用户偏好
-            if theme in ['light', 'gray']:
+            # 保存所有非 dark 主题，供“跟随系统”在浅色系统下恢复。
+            if theme != "dark":
                 config.app.theme_user_preference = theme
         
         # 保存到配置
@@ -330,7 +354,6 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         # --- MainAppLogic Connections ---
         self.app_logic.config_loaded.connect(self.main_view.set_parameters)
-        self.app_logic.config_loaded.connect(self.editor_view.property_panel.repopulate_options)
         self.app_logic.files_added.connect(self.main_view.file_list.add_files)
         self.app_logic.files_cleared.connect(self.main_view.file_list.clear)
         self.app_logic.file_removed.connect(self.main_view.file_list.remove_file)
@@ -346,30 +369,22 @@ class MainWindow(QMainWindow):
         self.main_view.theme_change_requested.connect(self._change_theme)
         self.main_view.language_change_requested.connect(self._change_language)
 
-        # --- Live-reload connection ---
-        self.app_logic.render_setting_changed.connect(self.editor_logic.on_global_render_setting_changed)
-
         # --- View to Coordinator Connections ---
         self.main_view.file_list.file_selected.connect(self.on_file_selected_from_main_list)
         self.main_view.file_list.files_dropped.connect(self.app_logic.add_files)  # 拖放文件支持
         # self.main_view.enter_editor_button.clicked.connect(self.enter_editor_mode) # Example for a dedicated button
 
-        # --- Editor related connections ---
-        self.editor_view.back_to_main_requested.connect(lambda: self.stacked_widget.setCurrentWidget(self.main_view))
-
         # --- View Switching Connections ---
         self.main_view_action.triggered.connect(lambda: self.stacked_widget.setCurrentWidget(self.main_view))
         self.editor_view_action.triggered.connect(self.switch_to_editor_view)
 
-        # --- 撤销/重做连接到编辑器controller ---
-        self.undo_action.triggered.connect(self.editor_controller.undo)
-        self.redo_action.triggered.connect(self.editor_controller.redo)
+        # --- 撤销/重做延迟转发到编辑器controller ---
+        self.undo_action.triggered.connect(self._handle_undo)
+        self.redo_action.triggered.connect(self._handle_redo)
         
         # --- 主题切换连接 ---
-        self.light_theme_action.triggered.connect(lambda: self._change_theme("light"))
-        self.dark_theme_action.triggered.connect(lambda: self._change_theme("dark"))
-        self.gray_theme_action.triggered.connect(lambda: self._change_theme("gray"))
-        self.system_theme_action.triggered.connect(lambda: self._change_theme("system"))
+        for theme_key, action in getattr(self, "theme_actions", {}).items():
+            action.triggered.connect(lambda checked=False, selected_theme=theme_key: self._change_theme(selected_theme))
 
     @pyqtSlot(str)
     def on_file_selected_from_main_list(self, file_path: str):
@@ -382,6 +397,8 @@ class MainWindow(QMainWindow):
     
     def _on_file_removed_update_editor(self, file_path: str):
         """当主页文件被移除时，更新编辑器（如果编辑器正在显示该文件）"""
+        if not self.editor_view or not self.editor_controller:
+            return
         if self.stacked_widget.currentWidget() == self.editor_view:
             # 检查当前加载的图片是否被移除
             current_image = self.editor_controller.model.get_source_image_path()
@@ -411,6 +428,8 @@ class MainWindow(QMainWindow):
     
     def _on_files_cleared_update_editor(self):
         """当文件列表被清空时，清空编辑器"""
+        if not self.editor_view or not self.editor_logic:
+            return
         if self.stacked_widget.currentWidget() == self.editor_view:
             # 如果当前在编辑器视图，清空编辑器
             self.logger.info("Files cleared. Clearing editor.")
@@ -485,14 +504,18 @@ class MainWindow(QMainWindow):
             self.main_view_action.setText(self._t("Main View"))
         if hasattr(self, 'editor_view_action'):
             self.editor_view_action.setText(self._t("Editor View"))
-        if hasattr(self, 'light_theme_action'):
-            self.light_theme_action.setText(self._t("Light"))
-        if hasattr(self, 'dark_theme_action'):
-            self.dark_theme_action.setText(self._t("Dark"))
-        if hasattr(self, 'gray_theme_action'):
-            self.gray_theme_action.setText(self._t("Gray"))
-        if hasattr(self, 'system_theme_action'):
-            self.system_theme_action.setText(self._t("Follow System"))
+        for theme_key, theme_label in THEME_OPTIONS:
+            action = getattr(self, "theme_actions", {}).get(theme_key)
+            if action is not None:
+                action.setText(self._t(theme_label))
+
+    def _handle_undo(self):
+        if self.editor_controller:
+            self.editor_controller.undo()
+
+    def _handle_redo(self):
+        if self.editor_controller:
+            self.editor_controller.redo()
     
     @pyqtSlot(list)
     def on_task_completed(self, saved_files: list):
@@ -504,17 +527,17 @@ class MainWindow(QMainWindow):
             if not saved_files:
                 return
 
-            # 创建自定义消息框，避免图片过多导致闪退
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle(self._t('Task Completed'))
-            msg_box.setText(self._t("Translation completed, {count} files saved.\n\nOpen results in editor?", count=len(saved_files)))
-            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-            
-            # 不设置图标，避免加载过多资源
-            msg_box.setIcon(QMessageBox.Icon.Question)
-            apply_message_box_style(msg_box)
-            reply = msg_box.exec()
+            from PyQt6.QtWidgets import QMessageBox
+
+            reply = show_error_dialog(
+                self,
+                self._t('Task Completed'),
+                "",
+                self._t("Translation completed, {count} files saved.\n\nOpen results in editor?", count=len(saved_files)),
+                icon=QMessageBox.Icon.Question,
+                buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                default_button=QMessageBox.StandardButton.No,
+            )
 
             if reply == QMessageBox.StandardButton.Yes:
                 self.enter_editor_mode(files_to_load=saved_files)
@@ -527,23 +550,12 @@ class MainWindow(QMainWindow):
     def _show_error_dialog(self, error_message: str):
         """弹出翻译错误提示框"""
         try:
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle(self._t("Translation Error"))
-            msg_box.setIcon(QMessageBox.Icon.Critical)
-            msg_box.setTextFormat(Qt.TextFormat.PlainText)
-            msg_box.setText(error_message)
-            msg_box.setDetailedText(error_message)
-            msg_box.setSizeGripEnabled(True)
-            msg_box.setMinimumSize(760, 560)
-            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-            apply_message_box_style(msg_box)
-            for label in msg_box.findChildren(QLabel):
-                label.setWordWrap(True)
-                label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            for text_edit in msg_box.findChildren(QTextEdit):
-                text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-                text_edit.setReadOnly(True)
-            msg_box.exec()
+            show_error_dialog(
+                self,
+                self._t("Translation Error"),
+                "",
+                error_message,
+            )
         except Exception as e:
             self.logger.error(f"_show_error_dialog error: {e}", exc_info=True)
 
@@ -552,6 +564,7 @@ class MainWindow(QMainWindow):
         Simply switches to the editor view without reloading file lists.
         Used when user manually switches views.
         """
+        self._ensure_editor_initialized()
         self.stacked_widget.setCurrentWidget(self.editor_view)
 
     def enter_editor_mode(self, file_to_load: str = None, files_to_load: list = None):
@@ -563,6 +576,8 @@ class MainWindow(QMainWindow):
         import os
 
         try:
+            self._ensure_editor_initialized()
+
             # 获取完整的文件夹树结构
             tree_structure = self.app_logic.get_folder_tree_structure()
             expanded_files = tree_structure['files']

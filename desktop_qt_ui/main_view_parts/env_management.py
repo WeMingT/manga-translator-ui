@@ -1,8 +1,11 @@
 import os
+import textwrap
 from functools import partial
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QFileDialog, QLabel, QLineEdit
+
+from widgets.themed_message_box import show_error_dialog
 
 from utils.wheel_filter import NoWheelComboBox as QComboBox
 
@@ -143,6 +146,24 @@ def _get_api_address_example(api_type: str) -> str:
     return "https://api.openai.com/v1"
 
 
+def _wrap_error_text(message: str, width: int = 60) -> str:
+    wrapped_lines: list[str] = []
+    for line in str(message or "").splitlines():
+        if not line:
+            wrapped_lines.append("")
+            continue
+        wrapped_lines.extend(
+            textwrap.wrap(
+                line,
+                width=width,
+                break_long_words=True,
+                break_on_hyphens=False,
+            )
+            or [""]
+        )
+    return "\n".join(wrapped_lines)
+
+
 def _format_test_connection_error(api_type: str, message: str) -> str:
     raw_message = str(message or "").strip()
     error_lower = raw_message.lower()
@@ -183,9 +204,15 @@ def _format_test_connection_error(api_type: str, message: str) -> str:
 
     friendly_message += f"\n\nAPI 地址示例：{_get_api_address_example(api_type)}"
     if raw_message:
-        friendly_message += f"\n\n原始错误：\n{raw_message}"
+        friendly_message += f"\n\n原始错误：\n{_wrap_error_text(raw_message)}"
 
     return friendly_message
+
+
+def _show_api_error_dialog(parent, title: str, heading: str, details: str) -> None:
+    from PyQt6.QtWidgets import QMessageBox
+
+    show_error_dialog(parent, heading or title, "", details, icon=QMessageBox.Icon.Critical)
 
 
 def _split_env_key(env_key: str) -> tuple[str, str, str]:
@@ -246,27 +273,15 @@ def _resolve_api_context(self, env_key: str, translator_key: str) -> tuple[str, 
 
 def on_open_custom_api_params_file(self):
     """打开自定义 API 参数编辑器。"""
-    import sys
+    from manga_translator.custom_api_params import ensure_custom_api_params_file, get_custom_api_params_path
 
-    if getattr(sys, "frozen", False):
-        if hasattr(sys, "_MEIPASS"):
-            config_path = os.path.join(sys._MEIPASS, "examples", "custom_api_params.json")
-        else:
-            config_path = os.path.join(os.path.dirname(sys.executable), "examples", "custom_api_params.json")
-    else:
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        config_path = os.path.join(project_root, "examples", "custom_api_params.json")
+    try:
+        config_path = ensure_custom_api_params_file(get_custom_api_params_path())
+    except Exception as e:
+        from PyQt6.QtWidgets import QMessageBox
 
-    if not os.path.exists(config_path):
-        try:
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write("{}\n")
-        except Exception as e:
-            from PyQt6.QtWidgets import QMessageBox
-
-            QMessageBox.warning(self, self._t("Error"), f"创建配置文件失败: {e}")
-            return
+        QMessageBox.warning(self, self._t("Error"), f"创建配置文件失败: {e}")
+        return
 
     try:
         from widgets.custom_api_params_editor import CustomApiParamsEditorDialog
@@ -335,10 +350,11 @@ def on_test_api_clicked(self, key: str):
             QMessageBox.information(self, self._t("Success"), self._t("API connection test successful!"))
         else:
             friendly_message = _format_test_connection_error(api_type, message)
-            QMessageBox.critical(
+            _show_api_error_dialog(
                 self,
                 self._t("Error"),
-                f"{self._t('API connection test failed')}\n\n{friendly_message}",
+                self._t("API connection test failed"),
+                friendly_message,
             )
 
     test_thread = TestThread()
@@ -410,7 +426,13 @@ def on_get_models_clicked(self, key: str):
             else:
                 QMessageBox.warning(self, self._t("Warning"), self._t("No models available"))
         else:
-            QMessageBox.critical(self, self._t("Error"), f"{self._t('Failed to get models')}: {message}")
+            friendly_message = _format_test_connection_error(model_api_type, message)
+            _show_api_error_dialog(
+                self,
+                self._t("Error"),
+                self._t("Failed to get models"),
+                friendly_message,
+            )
 
     get_models_thread = GetModelsThread()
     get_models_thread.finished_signal.connect(on_get_models_finished)
@@ -453,9 +475,16 @@ def refresh_preset_list(self, deleted_preset_name: str = None):
 
 def on_add_preset_clicked(self):
     """添加新预设。"""
-    from PyQt6.QtWidgets import QInputDialog, QMessageBox
+    from PyQt6.QtWidgets import QMessageBox
+    from widgets.themed_text_input_dialog import themed_get_text
 
-    preset_name, ok = QInputDialog.getText(self, self._t("Add Preset"), self._t("Enter preset name:"))
+    preset_name, ok = themed_get_text(
+        self,
+        title=self._t("Add Preset"),
+        label=self._t("Enter preset name:"),
+        ok_text=self._t("OK"),
+        cancel_text=self._t("Cancel"),
+    )
 
     if ok and preset_name:
         preset_name = preset_name.strip()

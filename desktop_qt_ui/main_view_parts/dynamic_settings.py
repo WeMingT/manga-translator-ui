@@ -120,13 +120,19 @@ def _get_fixed_prompt_editor_spec(self, full_key: str):
 
 
 def _open_fixed_prompt_editor(self, full_key: str):
-    from widgets.simple_prompt_editor_dialog import SimplePromptEditorDialog
-
     spec = _get_fixed_prompt_editor_spec(self, full_key)
     if not spec:
         return
 
     abs_path = spec["ensure_func"](spec["hint"])
+    if full_key == "colorizer.ai_colorizer_prompt_path":
+        from main_view_parts.ai_colorizer_prompt_editor import AIColorizerPromptEditorDialog
+
+        dialog = AIColorizerPromptEditorDialog(abs_path, t_func=self._t, parent=self)
+        dialog.exec()
+        return
+
+    from widgets.simple_prompt_editor_dialog import SimplePromptEditorDialog
     dialog = SimplePromptEditorDialog(
         abs_path,
         title_text=spec["label"],
@@ -708,10 +714,9 @@ def _create_param_widgets(self, data, parent_layout, prefix=""):
         # 跳过这些选项，因为已经用下拉框替代或不需要在UI中显示
         # realcugan_model 将通过 upscale_ratio 动态下拉框处理
         # gimp_font 已废弃，使用 font_path 代替
-        # translator.attempts 隐藏，始终与 cli.attempts 同步
         # replace_translation 和 replace_translation_mode 通过工作流模式下拉框控制
         # app 配置组的字段：last_open_dir, last_output_path, favorite_folders, current_preset 是内部状态，不显示在UI中
-        if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export", "cli.colorize_only", "cli.upscale_only", "cli.inpaint_only", "cli.replace_translation", "cli.replace_translation_mode", "upscale.realcugan_model", "render.gimp_font", "render.font_path", "translator.high_quality_prompt_path", "translator.attempts", "app.last_open_dir", "app.last_output_path", "app.favorite_folders", "app.current_preset"]:
+        if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export", "cli.colorize_only", "cli.upscale_only", "cli.inpaint_only", "cli.replace_translation", "cli.replace_translation_mode", "upscale.realcugan_model", "render.gimp_font", "render.font_path", "translator.high_quality_prompt_path", "app.last_open_dir", "app.last_output_path", "app.favorite_folders", "app.current_preset"]:
             continue
 
         label_text = key
@@ -848,7 +853,7 @@ def _create_param_widgets(self, data, parent_layout, prefix=""):
 
         elif isinstance(value, bool):
             # 特殊处理：use_custom_api_params 需要添加"打开文件"按钮
-            if full_key == "translator.use_custom_api_params":
+            if full_key == "use_custom_api_params":
                 container = QWidget()
                 container_layout = QHBoxLayout(container)
                 container_layout.setContentsMargins(0, 0, 0, 0)

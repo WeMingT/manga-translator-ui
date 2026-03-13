@@ -10,12 +10,17 @@ from PIL import Image
 from .common import CommonColorizer
 from .prompt_loader import (
     DEFAULT_AI_COLORIZER_PROMPT,
+    build_ai_colorizer_prompt_payload,
     ensure_ai_colorizer_prompt_file,
-    load_ai_colorizer_prompt_file,
 )
 from ..utils.ai_image_preprocess import normalize_ai_image, prepare_square_ai_image, restore_square_ai_image
+from ..custom_api_params import (
+    load_enabled_custom_api_params,
+    split_gemini_request_params,
+)
 from ..utils.openai_image_interface import request_openai_image_with_fallback
 from ..utils import get_logger
+from ..utils.retry import run_with_retry
 
 
 OPENAI_BROWSER_HEADERS = {
@@ -131,18 +136,101 @@ class BaseAPIColorizer(CommonColorizer):
             self.client = self._create_client(api_key=api_key, base_url=base_url)
             self._client_loop = current_loop
 
-    def _build_colorizer_prompt(self) -> str:
+    def _build_colorizer_request(self, image: Image.Image, kwargs) -> tuple[str, list[dict[str, bytes | str]]]:
         ensure_ai_colorizer_prompt_file()
-        return load_ai_colorizer_prompt_file(None) or DEFAULT_AI_COLORIZER_PROMPT
+        image_path = kwargs.get("image_name") or getattr(image, "name", None)
+        payload = build_ai_colorizer_prompt_payload(
+            None,
+            image_path=image_path,
+        )
+
+        reference_images: list[dict[str, bytes | str]] = []
+        for ref in payload.get("reference_images", []):
+            if not ref.resolved_path:
+                self.logger.warning(f"{self.PROVIDER_NAME}: reference image not found: {ref.path}")
+                continue
+            try:
+                with Image.open(ref.resolved_path) as reference_image:
+                    reference_rgb = reference_image.convert("RGB")
+                reference_images.append(
+                    {
+                        "kind": "prompt_reference",
+                        "label": ref.description or os.path.basename(ref.path) or ref.path,
+                        "image_bytes": self._image_to_png_bytes(reference_rgb),
+                    }
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    f"{self.PROVIDER_NAME}: failed to load reference image {ref.resolved_path}: {exc}"
+                )
+
+        prompt_text = payload.get("prompt_text") or DEFAULT_AI_COLORIZER_PROMPT
+        history_images = kwargs.get("colorizer_history_images") or []
+        if history_images:
+            for idx, history_image in enumerate(history_images, start=1):
+                try:
+                    reference_images.append(
+                        {
+                            "kind": "history_reference",
+                            "label": f"Previously colorized page {idx}",
+                            "image_bytes": self._image_to_png_bytes(self._to_rgb_image(history_image)),
+                        }
+                    )
+                except Exception as exc:
+                    self.logger.warning(
+                        f"{self.PROVIDER_NAME}: failed to serialize history page {idx}: {exc}"
+                    )
+
+            prompt_text = (
+                f"{prompt_text}\n\n"
+                "Previously colorized pages are attached separately. Use them only to keep cross-page palette, "
+                "character colors, materials, and lighting consistent. Do not change the current page composition."
+            ).strip()
+
+        prompt_text = self._append_multi_image_prompt_guidance(prompt_text, reference_images)
+        return prompt_text, reference_images
 
     def _resolve_concurrency(self, kwargs) -> int:
-        config = kwargs.get("config")
-        colorizer_config = getattr(config, "colorizer", None) if config is not None else None
-        try:
-            return max(int(getattr(colorizer_config, "ai_colorizer_concurrency", 1) or 1), 1)
-        except (TypeError, ValueError):
-            return 1
+        del kwargs
+        return 1
 
+    def _append_multi_image_prompt_guidance(
+        self,
+        prompt_text: str,
+        reference_images: list[dict[str, bytes | str]],
+    ) -> str:
+        if not reference_images:
+            return prompt_text
+
+        lines = [
+            (prompt_text or "").strip(),
+            "",
+            "Input image order:",
+            "1. Target manga page to colorize. Use this image for composition, panel layout, line art, and page content.",
+        ]
+        history_indices: list[int] = []
+        for idx, ref in enumerate(reference_images, start=2):
+            label = str(ref.get("label") or f"Reference image {idx - 1}").strip()
+            kind = str(ref.get("kind") or "").strip().lower()
+            if kind == "prompt_reference":
+                role_text = label or "general reference"
+                lines.append(f"{idx}. Prompt-file reference image. Role/purpose: {role_text}.")
+            elif kind == "history_reference":
+                history_indices.append(idx)
+            else:
+                role_text = label or "general reference"
+                lines.append(f"{idx}. Reference image. Role/purpose: {role_text}.")
+        if history_indices:
+            history_ranges = ", ".join(_format_contiguous_index_ranges(history_indices))
+            lines.append(f"{history_ranges}. Previously colorized history pages for cross-page consistency.")
+        lines.extend(
+            [
+                "",
+                "Use image 1 as the only page to colorize. Use images 2 and above only as reference images for palette, character consistency, materials, and lighting.",
+                "If a later image is marked as a previously colorized page, use it mainly for cross-page consistency.",
+            ]
+        )
+        return "\n".join(lines).strip()
     def _to_rgb_image(self, image) -> Image.Image:
         if not isinstance(image, Image.Image):
             image = Image.fromarray(np.asarray(image).astype(np.uint8))
@@ -161,6 +249,24 @@ class BaseAPIColorizer(CommonColorizer):
 
     def _load_image_from_bytes(self, payload: bytes) -> Image.Image:
         return Image.open(io.BytesIO(payload)).convert("RGB")
+
+    async def _reset_client_for_retry(self, attempt_index: int, error: Exception):
+        del attempt_index, error
+        if self.client is None:
+            return
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._client_loop is current_loop and current_loop is not None:
+            try:
+                await self.client.close()
+            except Exception:
+                pass
+        self.client = None
+        self._client_loop = None
 
     def _extract_gemini_image(self, response) -> Optional[Image.Image]:
         raw = getattr(response, "raw", None) or {}
@@ -188,11 +294,38 @@ class BaseAPIColorizer(CommonColorizer):
         image = self._to_rgb_image(image)
         original_size = image.size
         request_image, restore_info = prepare_square_ai_image(image)
-        prompt_text = self._build_colorizer_prompt()
+        prompt_text, reference_images = self._build_colorizer_request(image, kwargs)
         semaphore = _get_colorizer_semaphore(self.PROVIDER_NAME, self._resolve_concurrency(kwargs))
+        runtime_config = kwargs.get("config")
+        custom_api_params = load_enabled_custom_api_params(
+            runtime_config,
+            self.logger,
+            target="colorizer",
+        )
 
         async with semaphore:
-            result_image = await self._request_colorized_image(image=request_image, prompt_text=prompt_text)
+            async def _do_request() -> Image.Image:
+                await self._ensure_client()
+                if not self.client or not self.api_key:
+                    raise RuntimeError(
+                        f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env "
+                        f"(or fallback {self.FALLBACK_API_KEY_ENV})."
+                    )
+                return await self._request_colorized_image(
+                    image=request_image,
+                    prompt_text=prompt_text,
+                    reference_images=reference_images,
+                    custom_api_params=custom_api_params,
+                )
+
+            result_image = await run_with_retry(
+                operation=_do_request,
+                runtime_config=runtime_config,
+                provider_name=self.PROVIDER_NAME,
+                operation_name="colorization request",
+                logger=self.logger,
+                on_retry=self._reset_client_for_retry,
+            )
 
         result_image = restore_square_ai_image(self._to_rgb_image(result_image), restore_info)
         if result_image.size != original_size:
@@ -202,7 +335,13 @@ class BaseAPIColorizer(CommonColorizer):
     def _create_client(self, api_key: str, base_url: str):
         raise NotImplementedError
 
-    async def _request_colorized_image(self, image: Image.Image, prompt_text: str) -> Image.Image:
+    async def _request_colorized_image(
+        self,
+        image: Image.Image,
+        prompt_text: str,
+        reference_images: list[dict[str, bytes | str]],
+        custom_api_params: dict | None = None,
+    ) -> Image.Image:
         raise NotImplementedError
 
 
@@ -230,7 +369,13 @@ class OpenAIColorizer(BaseAPIColorizer):
             stream_timeout=300.0,
         )
 
-    async def _request_colorized_image(self, image: Image.Image, prompt_text: str) -> Image.Image:
+    async def _request_colorized_image(
+        self,
+        image: Image.Image,
+        prompt_text: str,
+        reference_images: list[dict[str, bytes | str]],
+        custom_api_params: dict | None = None,
+    ) -> Image.Image:
         return await request_openai_image_with_fallback(
             session=self.client.session,
             base_url=self.base_url,
@@ -244,6 +389,8 @@ class OpenAIColorizer(BaseAPIColorizer):
             fetch_remote_image=self._fetch_image_from_url,
             provider_name=self.PROVIDER_NAME,
             logger=self.logger,
+            extra_images=reference_images,
+            extra_request_params=custom_api_params,
         )
 
 
@@ -277,32 +424,76 @@ class GeminiColorizer(BaseAPIColorizer):
             stream_timeout=300.0,
         )
 
-    async def _request_colorized_image(self, image: Image.Image, prompt_text: str) -> Image.Image:
+    async def _request_colorized_image(
+        self,
+        image: Image.Image,
+        prompt_text: str,
+        reference_images: list[dict[str, bytes | str]],
+        custom_api_params: dict | None = None,
+    ) -> Image.Image:
         image_b64 = base64.b64encode(self._image_to_png_bytes(image)).decode("ascii")
-        response = await self.client.models.generate_content(
-            model=self.model_name,
-            contents=[
+        parts = [
+            {"text": prompt_text},
+            {"text": "Target image to colorize:"},
+            {
+                "inlineData": {
+                    "mimeType": "image/png",
+                    "data": image_b64,
+                }
+            },
+        ]
+        for idx, ref in enumerate(reference_images, start=1):
+            parts.append({"text": f"Reference image {idx}: {ref.get('label') or f'Reference {idx}'}"})
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(ref["image_bytes"]).decode("ascii"),
+                    }
+                }
+            )
+        request_overrides, generation_overrides = split_gemini_request_params(custom_api_params)
+        generation_config = {
+            "responseModalities": ["TEXT", "IMAGE"],
+        }
+        generation_config.update(generation_overrides)
+        request_kwargs = {
+            "model": self.model_name,
+            "contents": [
                 {
                     "role": "user",
-                    "parts": [
-                        {"text": prompt_text},
-                        {
-                            "inlineData": {
-                                "mimeType": "image/png",
-                                "data": image_b64,
-                            }
-                        },
-                    ],
+                    "parts": parts,
                 }
             ],
-            generationConfig={
-                "temperature": 0.2,
-                "maxOutputTokens": 8192,
-                "responseModalities": ["TEXT", "IMAGE"],
-            },
-            safetySettings=self.SAFETY_SETTINGS,
-        )
+            "generationConfig": generation_config,
+            "safetySettings": self.SAFETY_SETTINGS,
+        }
+        request_kwargs.update(request_overrides)
+        response = await self.client.models.generate_content(**request_kwargs)
         image_result = self._extract_gemini_image(response)
         if image_result is None:
             raise RuntimeError("Gemini colorization response did not contain an image.")
         return image_result
+
+
+def _format_contiguous_index_ranges(indices: list[int]) -> list[str]:
+    if not indices:
+        return []
+
+    sorted_indices = sorted(set(indices))
+    ranges: list[str] = []
+    start = prev = sorted_indices[0]
+    for current in sorted_indices[1:]:
+        if current == prev + 1:
+            prev = current
+            continue
+        ranges.append(_format_index_range(start, prev))
+        start = prev = current
+    ranges.append(_format_index_range(start, prev))
+    return ranges
+
+
+def _format_index_range(start: int, end: int) -> str:
+    if start == end:
+        return str(start)
+    return f"{start}-{end}"

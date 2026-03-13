@@ -323,14 +323,6 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
         if key in config_dict:
             config_for_translate[key] = config_dict[key]
     
-    # 将 CLI 配置中的 attempts 复制到 translator 配置中（像 UI 一样）
-    if 'translator' in config_for_translate:
-        translator_config = config_for_translate['translator'].copy()
-        cli_attempts = cli_config.get('attempts', -1)
-        translator_config['attempts'] = cli_attempts
-        config_for_translate['translator'] = translator_config
-        logger.info(f"Setting translator attempts to: {cli_attempts} (from CLI config)")
-    
     manga_config = Config(**config_for_translate)
     
     # 准备批量数据（像 UI 一样）
@@ -515,62 +507,16 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                 import gc
                 pass
         else:
-            # ✅ 非并发模式：按批次加载和处理图片，避免一次性加载所有图片到内存
-            print("⏳ 开始批量翻译（按批次加载图片以节省内存）...")
+            # ✅ 非并发模式：直接把路径交给后端，由后端按 batch_size 控制加载
+            print("⏳ 开始批量翻译（由后端按批次加载图片）...")
             logger.info(f"开始批量翻译，save_info={save_info}")
-            
-            # 前端分批加载的批次大小（用于内存管理）
-            frontend_batch_size = 10  # 每次最多加载10张图片到内存
-            total_frontend_batches = (total_images + frontend_batch_size - 1) // frontend_batch_size
-            
-            processed_images_count = 0  # 已处理的图片总数
-            
-            for frontend_batch_num in range(total_frontend_batches):
-                batch_start = frontend_batch_num * frontend_batch_size
-                batch_end = min(batch_start + frontend_batch_size, total_images)
-                current_batch_paths = file_paths_with_configs[batch_start:batch_end]
-                
-                # 加载当前批次的图片（静默加载，不显示前端批次信息）
-                images_with_configs = []
-                for file_path, config in current_batch_paths:
-                    try:
-                        with open(file_path, 'rb') as f:
-                            image = open_pil_image(f, eager=True)
-                        image.name = file_path
-                        images_with_configs.append((image, config))
-                    except Exception as e:
-                        logger.error(f"Failed to load image {file_path}: {e}")
-                        print(f"❌ 无法加载: {os.path.basename(file_path)} - {e}")
-                        # 创建一个错误上下文
-                        from manga_translator.utils import Context
-                        error_ctx = Context()
-                        error_ctx.image_name = file_path
-                        error_ctx.translation_error = str(e)
-                        all_contexts.append(error_ctx)
-                
-                if images_with_configs:
-                    # 传递全局偏移量给后端，让后端显示正确的全局图片编号
-                    batch_contexts = await translator.translate_batch(
-                        images_with_configs, 
-                        save_info=save_info,
-                        global_offset=processed_images_count,  # 传递已处理的图片数
-                        global_total=total_images  # 传递总图片数
-                    )
-                    all_contexts.extend(batch_contexts)
-                    processed_images_count += len(images_with_configs)
-                    
-                    # ✅ 批次处理完成后，立即清理图片对象
-                    for image, _ in images_with_configs:
-                        if hasattr(image, 'close'):
-                            try:
-                                image.close()
-                            except:
-                                pass
-                    images_with_configs.clear()
-                    
-                    # 强制垃圾回收
-                    import gc
-                    pass
+            if total_images > 0:
+                all_contexts = await translator.translate_batch(
+                    file_paths_with_configs,
+                    save_info=save_info,
+                    global_offset=0,
+                    global_total=total_images
+                )
         contexts = all_contexts
         
         # 统计结果（像 UI 一样）

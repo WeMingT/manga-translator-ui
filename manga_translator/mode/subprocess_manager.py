@@ -108,11 +108,6 @@ def worker_translate_batch(
             if key in config_dict:
                 config_for_translate[key] = config_dict[key]
         
-        if 'translator' in config_for_translate:
-            translator_config = config_for_translate['translator'].copy()
-            translator_config['attempts'] = cli_config.get('attempts', -1)
-            config_for_translate['translator'] = translator_config
-        
         manga_config = Config(**config_for_translate)
         
         # 准备保存信息

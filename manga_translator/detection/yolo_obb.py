@@ -1,21 +1,21 @@
 """
 YOLO 辅助检测器
-使用原生 PyTorch checkpoint 进行推理。
+使用 Ultralytics YOLO 运行时进行推理。
 """
 
 import os
 from typing import Any, List, Optional, Tuple
 
-import cv2
 import numpy as np
 import torch
+from ultralytics import YOLO
 
 from .common import OfflineDetector
 from ..utils import Quadrilateral, build_det_rearrange_plan, det_rearrange_patch_array
 
 
 class YOLOOBBDetector(OfflineDetector):
-    """YOLO 辅助检测器 - 基于原生 PyTorch checkpoint"""
+    """YOLO 辅助检测器 - 基于 Ultralytics YOLO 运行时"""
 
     _MODEL_FILENAME = "ysgyolo_yolo26_2.0.pt"
     _SOURCE_CHECKPOINT_FILENAME = "ysgyolo_yolo26_2.0.pt"
@@ -48,7 +48,7 @@ class YOLOOBBDetector(OfflineDetector):
         self.using_cuda = False
         self.device = "cpu"
         self.torch_device = torch.device("cpu")
-        self.model: Optional[torch.nn.Module] = None
+        self.model: Optional[Any] = None
 
     def _check_downloaded(self) -> bool:
         return os.path.exists(self._get_file_path(self._MODEL_FILENAME))
@@ -60,6 +60,18 @@ class YOLOOBBDetector(OfflineDetector):
             np.empty((0,), dtype=np.float32),
             np.empty((0,), dtype=np.int32),
         )
+
+    @staticmethod
+    def _to_numpy(data: Any) -> np.ndarray:
+        if isinstance(data, np.ndarray):
+            return data
+        if hasattr(data, "detach"):
+            data = data.detach()
+        if hasattr(data, "cpu"):
+            data = data.cpu()
+        if hasattr(data, "numpy"):
+            return data.numpy()
+        return np.asarray(data)
 
     def _resolve_device(self, device: str) -> torch.device:
         requested = (device or "cpu").lower()
@@ -76,7 +88,7 @@ class YOLOOBBDetector(OfflineDetector):
     async def _load(self, device: str):
         model_path = self._get_file_path(self._MODEL_FILENAME)
         if not os.path.exists(model_path):
-            raise FileNotFoundError(f"YOLO PyTorch checkpoint 不存在: {model_path}")
+            raise FileNotFoundError(f"YOLO OBB 模型不存在: {model_path}")
 
         self.torch_device = self._resolve_device(device)
         self.device = str(self.torch_device)
@@ -86,160 +98,14 @@ class YOLOOBBDetector(OfflineDetector):
         if not os.path.exists(load_path):
             load_path = model_path
 
-        checkpoint = torch.load(load_path, map_location="cpu", weights_only=False)
-        if isinstance(checkpoint, dict):
-            model = checkpoint.get("ema") or checkpoint.get("model")
-            if model is None:
-                raise TypeError(f"YOLO OBB checkpoint 结构不支持: {type(checkpoint)}")
-        else:
-            model = checkpoint
-        if not isinstance(model, torch.nn.Module):
-            raise TypeError(f"YOLO OBB checkpoint 未解析出 torch.nn.Module: {type(model)}")
-        model = model.float().eval()
-        for param in model.parameters():
-            param.requires_grad_(False)
-        model.to(self.torch_device)
+        model = self.model or YOLO(load_path, task="obb")
+        model.to(str(self.torch_device))
         self.model = model
 
         self.logger.info(f"YOLO OBB: {self.torch_device.type.upper()} 模式加载成功")
 
     async def _unload(self):
         self.model = None
-
-    def letterbox(
-        self,
-        img: np.ndarray,
-        new_shape: Tuple[int, int] = (1600, 1600),
-        color: Tuple[int, int, int] = (0, 0, 0),
-    ) -> Tuple[np.ndarray, float, Tuple[float, float]]:
-        """
-        调整图像大小并添加边框（保持宽高比）
-
-        Returns:
-            resized_img: 调整后的图像
-            gain: 缩放比例
-            (pad_w, pad_h): 左/上 padding
-        """
-        if img is None or img.size == 0:
-            self.logger.error("YOLO OBB letterbox: 输入图片为空")
-            raise ValueError("输入图片为空")
-
-        shape = img.shape[:2]
-        if shape[0] == 0 or shape[1] == 0:
-            self.logger.error(f"YOLO OBB letterbox: 输入图片尺寸无效: {shape}")
-            raise ValueError(f"输入图片尺寸无效: {shape}")
-
-        gain = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-        new_unpad_w = int(round(shape[1] * gain))
-        new_unpad_h = int(round(shape[0] * gain))
-
-        if new_unpad_w <= 0 or new_unpad_h <= 0:
-            self.logger.error(
-                f"YOLO OBB letterbox: 计算的新尺寸无效: {new_unpad_w}x{new_unpad_h}, "
-                f"gain={gain}, 原始shape={shape}"
-            )
-            raise ValueError(f"计算的新尺寸无效: {new_unpad_w}x{new_unpad_h}")
-
-        if (new_unpad_w, new_unpad_h) != (shape[1], shape[0]):
-            img = cv2.resize(img, (new_unpad_w, new_unpad_h), interpolation=cv2.INTER_LINEAR)
-
-        dw = new_shape[1] - new_unpad_w
-        dh = new_shape[0] - new_unpad_h
-        left = 0
-        top = 0
-        right = dw
-        bottom = dh
-
-        img = cv2.copyMakeBorder(
-            img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
-        )
-
-        assert img.shape[0] == new_shape[0] and img.shape[1] == new_shape[1], (
-            f"Letterbox failed: expected {new_shape}, got {img.shape[:2]}"
-        )
-        return img, gain, (float(left), float(top))
-
-    def preprocess(self, img: np.ndarray) -> Tuple[torch.Tensor, float, Tuple[float, float]]:
-        """预处理图像"""
-        if img is None or img.size == 0:
-            self.logger.error("YOLO OBB预处理: 输入图片为空或无效")
-            raise ValueError("输入图片为空或无效")
-
-        if len(img.shape) < 2:
-            self.logger.error(f"YOLO OBB预处理: 输入图片维度不正确: {img.shape}")
-            raise ValueError(f"输入图片维度不正确: {img.shape}")
-
-        if len(img.shape) == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-            self.logger.debug(f"YOLO OBB: 灰度图转RGB, shape={img.shape}")
-        elif len(img.shape) == 3:
-            if img.shape[2] == 4:
-                img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
-                self.logger.debug(f"YOLO OBB: RGBA转RGB, shape={img.shape}")
-            elif img.shape[2] == 3:
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            else:
-                self.logger.error(f"YOLO OBB: 不支持的图像通道数: {img.shape}")
-                raise ValueError(f"Unsupported image shape: {img.shape}")
-        else:
-            self.logger.error(f"YOLO OBB: 不支持的图像维度: {img.shape}")
-            raise ValueError(f"Unsupported image shape: {img.shape}")
-
-        img_resized, gain, pad = self.letterbox(img, new_shape=(self.input_size, self.input_size))
-        blob = img_resized.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
-        blob = np.ascontiguousarray(blob)
-        tensor = torch.from_numpy(blob)
-
-        self.logger.debug(
-            f"YOLO OBB预处理完成: blob shape={tuple(tensor.shape)}, dtype={tensor.dtype}"
-        )
-        return tensor, gain, pad
-
-    def scale_boxes(self, img1_shape, boxes, img0_shape, gain, pad, xywh=False):
-        """将边界框从 img1_shape 缩放到 img0_shape（移除 letterbox 影响）"""
-        pad_w, pad_h = pad
-
-        boxes[:, 0] -= pad_w
-        boxes[:, 1] -= pad_h
-        if not xywh:
-            boxes[:, 2] -= pad_w
-            boxes[:, 3] -= pad_h
-
-        boxes[:, :4] /= gain
-
-        if xywh:
-            boxes[:, 0] = np.clip(boxes[:, 0], 0, img0_shape[1])
-            boxes[:, 1] = np.clip(boxes[:, 1], 0, img0_shape[0])
-        else:
-            boxes[:, 0] = np.clip(boxes[:, 0], 0, img0_shape[1])
-            boxes[:, 1] = np.clip(boxes[:, 1], 0, img0_shape[0])
-            boxes[:, 2] = np.clip(boxes[:, 2], 0, img0_shape[1])
-            boxes[:, 3] = np.clip(boxes[:, 3], 0, img0_shape[0])
-        return boxes
-
-    def xywhr2xyxyxyxy(self, rboxes: np.ndarray) -> np.ndarray:
-        """将旋转边界框从 xywhr 转换为四角点"""
-        ctr = rboxes[:, :2]
-        w = rboxes[:, 2:3]
-        h = rboxes[:, 3:4]
-        angle = rboxes[:, 4:5]
-
-        cos_value = np.cos(angle)
-        sin_value = np.sin(angle)
-
-        vec1_x = w / 2 * cos_value
-        vec1_y = w / 2 * sin_value
-        vec2_x = -h / 2 * sin_value
-        vec2_y = h / 2 * cos_value
-
-        vec1 = np.concatenate([vec1_x, vec1_y], axis=-1)
-        vec2 = np.concatenate([vec2_x, vec2_y], axis=-1)
-
-        pt1 = ctr + vec1 + vec2
-        pt2 = ctr + vec1 - vec2
-        pt3 = ctr - vec1 - vec2
-        pt4 = ctr - vec1 + vec2
-        return np.stack([pt1, pt2, pt3, pt4], axis=1)
 
     def xyxy2xyxyxyxy(self, boxes: np.ndarray) -> np.ndarray:
         """将轴对齐框从 xyxy 转换为四角点"""
@@ -302,98 +168,41 @@ class YOLOOBBDetector(OfflineDetector):
 
         return boxes[keep], scores[keep], class_ids[keep]
 
-    def _normalize_outputs(self, outputs: Any) -> np.ndarray:
-        if isinstance(outputs, (list, tuple)):
-            if not outputs:
-                return np.empty((0, 6), dtype=np.float32)
-            outputs = outputs[0]
-
-        if isinstance(outputs, torch.Tensor):
-            outputs = outputs.detach().cpu().numpy()
-        elif not isinstance(outputs, np.ndarray):
-            raise TypeError(f"YOLO OBB输出类型不支持: {type(outputs)}")
-
-        if outputs.ndim == 3 and outputs.shape[0] == 1:
-            outputs = outputs[0]
-        if outputs.ndim != 2:
-            raise ValueError(f"YOLO OBB输出形状异常: {outputs.shape}")
-        return outputs
-
-    def postprocess(
+    def _extract_prediction_arrays(
         self,
-        outputs: Any,
-        img_shape: Tuple[int, int],
-        gain: float,
-        pad: Tuple[float, float],
-        conf_threshold: float,
+        raw_result: Any,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        后处理模型输出
-
-        Returns:
-            boxes_corners: (N, 4, 2)
-            scores: (N,)
-            class_ids: (N,)
-        """
-        predictions = self._normalize_outputs(outputs)
-        if len(predictions) == 0:
+        if raw_result is None:
             return self._empty_results()
 
-        scores: np.ndarray
-        class_ids: np.ndarray
-
-        if predictions.shape[1] == 6:
-            x = predictions.copy()
-            x = x[x[:, 4] > conf_threshold]
-            if x.shape[0] == 0:
-                return self._empty_results()
-
-            boxes_xyxy = self.scale_boxes(
-                (self.input_size, self.input_size),
-                x[:, :4].copy(),
-                img_shape,
-                gain,
-                pad,
-                xywh=False,
-            )
-            scores = x[:, 4].astype(np.float32)
-            class_ids = np.rint(x[:, 5]).astype(np.int32)
-            boxes_corners = self.xyxy2xyxyxyxy(boxes_xyxy)
+        obb = getattr(raw_result, "obb", None)
+        if obb is not None:
+            boxes_corners = self._to_numpy(getattr(obb, "xyxyxyxy", np.empty((0, 4, 2), dtype=np.float32)))
+            scores = self._to_numpy(getattr(obb, "conf", np.empty((0,), dtype=np.float32)))
+            class_ids = self._to_numpy(getattr(obb, "cls", np.empty((0,), dtype=np.int32)))
         else:
-            if predictions.shape[1] == 7:
-                box = predictions[:, :4]
-                conf = predictions[:, 4:5]
-                j = predictions[:, 5:6]
-                angle = predictions[:, 6:7]
-                x = np.concatenate((box, conf, j, angle), axis=1)
-            else:
-                nc = len(self.class_id_to_label)
-                if predictions.shape[1] < 4 + nc + 1:
-                    self.logger.warning(f"YOLO OBB输出格式异常: {predictions.shape}")
-                    return self._empty_results()
-                box = predictions[:, :4]
-                cls = predictions[:, 4 : 4 + nc]
-                angle = predictions[:, -1:]
-                conf = np.max(cls, axis=1, keepdims=True)
-                j = np.argmax(cls, axis=1, keepdims=True).astype(np.float32)
-                x = np.concatenate((box, conf, j, angle), axis=1)
-
-            x = x[x[:, 4] > conf_threshold]
-            if x.shape[0] == 0:
+            boxes = getattr(raw_result, "boxes", None)
+            if boxes is None:
                 return self._empty_results()
+            boxes_xyxy = self._to_numpy(getattr(boxes, "xyxy", np.empty((0, 4), dtype=np.float32)))
+            if boxes_xyxy.ndim == 1:
+                boxes_xyxy = boxes_xyxy.reshape(-1, 4)
+            if boxes_xyxy.size == 0:
+                return self._empty_results()
+            boxes_corners = self.xyxy2xyxyxyxy(boxes_xyxy.astype(np.float32))
+            scores = self._to_numpy(getattr(boxes, "conf", np.empty((len(boxes_xyxy),), dtype=np.float32)))
+            class_ids = self._to_numpy(getattr(boxes, "cls", np.empty((len(boxes_xyxy),), dtype=np.int32)))
 
-            boxes_to_scale = self.scale_boxes(
-                (self.input_size, self.input_size),
-                x[:, :4].copy(),
-                img_shape,
-                gain,
-                pad,
-                xywh=True,
-            )
-            boxes_xywhr = np.concatenate((boxes_to_scale, x[:, -1:]), axis=-1)
-            scores = x[:, 4].astype(np.float32)
-            class_ids = np.rint(x[:, 5]).astype(np.int32)
-            boxes_corners = self.xywhr2xyxyxyxy(boxes_xywhr)
+        boxes_corners = np.asarray(boxes_corners, dtype=np.float32)
+        if boxes_corners.ndim == 2 and boxes_corners.shape[1] == 8:
+            boxes_corners = boxes_corners.reshape(-1, 4, 2)
+        elif boxes_corners.ndim != 3 or boxes_corners.shape[1:] != (4, 2):
+            return self._empty_results()
+
+        scores = np.asarray(scores, dtype=np.float32).reshape(-1)
+        class_ids = np.asarray(class_ids, dtype=np.int32).reshape(-1)
+        if len(boxes_corners) == 0 or len(scores) != len(boxes_corners) or len(class_ids) != len(boxes_corners):
+            return self._empty_results()
 
         valid_class_ids = np.array(list(self.class_id_to_label.keys()), dtype=np.int32)
         valid_cls_mask = np.isin(class_ids, valid_class_ids)
@@ -407,23 +216,36 @@ class YOLOOBBDetector(OfflineDetector):
         if len(boxes_corners) == 0:
             return self._empty_results()
 
-        img_h, img_w = img_shape
-        boxes_corners[:, :, 0] = np.clip(boxes_corners[:, :, 0], 0, img_w)
-        boxes_corners[:, :, 1] = np.clip(boxes_corners[:, :, 1], 0, img_h)
         return boxes_corners.astype(np.float32), scores.astype(np.float32), class_ids.astype(np.int32)
 
-    def _run_model(self, blob: torch.Tensor) -> Any:
+    def _predict_patch(
+        self,
+        image: np.ndarray,
+        conf_threshold: float,
+        iou_threshold: float,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         if self.model is None:
             raise RuntimeError("YOLO OBB 模型未加载")
 
-        blob = blob.to(self.torch_device)
-        with torch.inference_mode():
-            return self.model(blob)
+        results = self.model.predict(
+            source=image,
+            imgsz=int(self.input_size),
+            conf=float(conf_threshold),
+            iou=float(max(0.01, min(iou_threshold, 0.95))),
+            device=str(self.torch_device),
+            verbose=False,
+        )
+        if isinstance(results, list):
+            raw_result = results[0] if results else None
+        else:
+            raw_result = next(iter(results), None)
+        return self._extract_prediction_arrays(raw_result)
 
     def _rearrange_detect_unified(
         self,
         image: np.ndarray,
         text_threshold: float,
+        iou_threshold: float,
         verbose: bool = False,
         result_path_fn=None,
         rearrange_plan: Optional[dict] = None,
@@ -475,26 +297,15 @@ class YOLOOBBDetector(OfflineDetector):
                 continue
 
             try:
-                blob, gain, pad = self.preprocess(patch)
-            except Exception as e:
-                self.logger.error(f"YOLO OBB patch {ii} 预处理失败: {e}")
-                continue
-
-            try:
-                outputs = self._run_model(blob)
+                boxes, scores, class_ids = self._predict_patch(
+                    patch,
+                    conf_threshold=text_threshold,
+                    iou_threshold=iou_threshold,
+                )
             except Exception as e:
                 self.logger.error(f"YOLO OBB patch {ii} 推理失败: {e}")
-                self.logger.error(f"Patch shape: {patch.shape}, blob shape: {tuple(blob.shape)}")
+                self.logger.error(f"Patch shape: {patch.shape}")
                 continue
-
-            patch_shape = patch.shape[:2]
-            boxes, scores, class_ids = self.postprocess(
-                outputs,
-                patch_shape,
-                gain,
-                pad,
-                text_threshold,
-            )
 
             if len(boxes) > 0:
                 all_boxes.append(boxes)
@@ -634,30 +445,24 @@ class YOLOOBBDetector(OfflineDetector):
         if rearrange_plan is not None:
             self.logger.info("YOLO OBB: 检测到长图，使用统一切割逻辑")
             boxes_corners, scores, class_ids = self._rearrange_detect_unified(
-                image, text_threshold, verbose, result_path_fn, rearrange_plan=rearrange_plan
+                image, text_threshold, box_threshold, verbose, result_path_fn, rearrange_plan=rearrange_plan
             )
         else:
             try:
-                blob, gain, pad = self.preprocess(image)
-            except Exception as e:
-                self.logger.error(f"YOLO OBB预处理失败: {e}, 输入图像shape={image.shape}")
-                raise
-
-            try:
-                outputs = self._run_model(blob)
+                boxes_corners, scores, class_ids = self._predict_patch(
+                    image,
+                    conf_threshold=text_threshold,
+                    iou_threshold=box_threshold,
+                )
             except Exception as e:
                 self.logger.error(f"YOLO OBB推理失败: {e}")
-                self.logger.error(f"输入 blob shape: {tuple(blob.shape)}, dtype: {blob.dtype}")
+                self.logger.error(f"输入图像 shape: {image.shape}, dtype: {image.dtype}")
                 self.logger.error(f"当前 device: {self.device}")
                 raise
 
-            boxes_corners, scores, class_ids = self.postprocess(
-                outputs,
-                img_shape,
-                gain,
-                pad,
-                text_threshold,
-            )
+            if len(boxes_corners) > 0:
+                boxes_corners[:, :, 0] = np.clip(boxes_corners[:, :, 0], 0, img_shape[1])
+                boxes_corners[:, :, 1] = np.clip(boxes_corners[:, :, 1], 0, img_shape[0])
 
         textlines = []
         for corners, score, class_id in zip(boxes_corners, scores, class_ids):

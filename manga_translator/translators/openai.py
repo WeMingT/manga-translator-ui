@@ -61,12 +61,13 @@ class OpenAITranslator(CommonTranslator):
         """解析配置参数"""
         # 调用父类的 parse_args 来设置通用参数（包括 attempts、post_check 等）
         super().parse_args(args)
+        translator_args = self._resolve_translator_config(args)
         
         # 同步重试次数到"总尝试次数"（首次请求 + 重试）
         self._max_total_attempts = self._resolve_max_total_attempts()
         
         # 从配置中读取RPM限制
-        max_rpm = getattr(args, 'max_requests_per_minute', 0)
+        max_rpm = self._get_config_value(translator_args, 'max_requests_per_minute', 0)
         if max_rpm > 0:
             self._MAX_REQUESTS_PER_MINUTE = max_rpm
             self.logger.info(f"Setting OpenAI max requests per minute to: {max_rpm}")
@@ -77,19 +78,19 @@ class OpenAITranslator(CommonTranslator):
         # 从配置中读取用户级 API Key（优先于环境变量）
         need_rebuild_client = False
         
-        user_api_key = getattr(args, 'user_api_key', None)
+        user_api_key = self._get_config_value(translator_args, 'user_api_key', None)
         if user_api_key and user_api_key != self.api_key:
             self.api_key = user_api_key
             need_rebuild_client = True
             self.logger.info("[UserAPIKey] Using user-provided API key")
         
-        user_api_base = getattr(args, 'user_api_base', None)
+        user_api_base = self._get_config_value(translator_args, 'user_api_base', None)
         if user_api_base and user_api_base != self.base_url:
             self.base_url = user_api_base
             need_rebuild_client = True
             self.logger.info(f"[UserAPIKey] Using user-provided API base: {user_api_base}")
         
-        user_api_model = getattr(args, 'user_api_model', None)
+        user_api_model = self._get_config_value(translator_args, 'user_api_model', None)
         if user_api_model:
             self.model = user_api_model
             self.logger.info(f"[UserAPIKey] Using user-provided model: {user_api_model}")
@@ -265,24 +266,34 @@ class OpenAITranslator(CommonTranslator):
                     self._emit_stream_json_preview("[OpenAI Stream]", _full_text, source_texts=texts)
 
                 streamed_text = None
+                streamed_finish_reason = None
                 response = None
-                try:
-                    self._reset_stream_json_preview()
-                    stream_params = dict(api_params)
-                    stream_params["stream"] = True
-                    streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
-                        create_stream=lambda: self.client.chat.completions.create(**stream_params),
-                        extract_text=_extract_openai_stream_text,
-                        extract_finish_reason=_extract_openai_stream_finish_reason,
-                        on_chunk=_on_stream_chunk,
-                        on_cancel=self._abort_inflight_request,
-                        poll_interval=0.2,
-                        sync_iter_in_thread=False,
-                    )
-                    self._finish_stream_inline()
-                except Exception as stream_error:
-                    self._finish_stream_inline()
-                    self.logger.warning(f"流式请求不可用，已回退普通请求: {stream_error}")
+                use_streaming = self._is_streaming_enabled(ctx)
+                if use_streaming:
+                    try:
+                        self._reset_stream_json_preview()
+                        stream_params = dict(api_params)
+                        stream_params["stream"] = True
+                        streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
+                            create_stream=lambda: self.client.chat.completions.create(**stream_params),
+                            extract_text=_extract_openai_stream_text,
+                            extract_finish_reason=_extract_openai_stream_finish_reason,
+                            on_chunk=_on_stream_chunk,
+                            on_cancel=self._abort_inflight_request,
+                            poll_interval=0.2,
+                            sync_iter_in_thread=False,
+                        )
+                        self._finish_stream_inline()
+                    except Exception as stream_error:
+                        self._finish_stream_inline()
+                        self.logger.warning(f"流式请求不可用，已回退普通请求: {stream_error}")
+                        response = await self._await_with_cancel_polling(
+                            self.client.chat.completions.create(**api_params),
+                            poll_interval=0.2,
+                            on_cancel=self._abort_inflight_request,
+                        )
+                else:
+                    self.logger.info("已禁用流式传输，使用普通请求。")
                     response = await self._await_with_cancel_polling(
                         self.client.chat.completions.create(**api_params),
                         poll_interval=0.2,

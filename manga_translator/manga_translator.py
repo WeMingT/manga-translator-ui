@@ -43,6 +43,7 @@ from .utils.path_manager import (
     find_json_path,
     get_work_image_path,
 )
+from .utils.translation_text import remove_trailing_period_if_needed
 
 from .detection import dispatch as dispatch_detection, prepare as prepare_detection, unload as unload_detection
 from .upscaling import dispatch as dispatch_upscaling, prepare as prepare_upscaling, unload as unload_upscaling
@@ -230,6 +231,7 @@ class MangaTranslator:
         self.context_size = params.get('context_size', 0)
         self.all_page_translations = []
         self._original_page_texts = []  # 存储原文页面数据，用于并发模式下的上下文
+        self._colorizer_history_images = []  # 存储最近已上色页面，用于 AI 上色历史参考
 
         # 调试图片管理相关属性
         self._current_image_context = None  # 存储当前处理图片的上下文信息
@@ -288,6 +290,7 @@ class MangaTranslator:
         self.save_mask = not params.get('no_save_mask', False)
         self.template = params.get('template', False)
         self.attempts = params.get('attempts', -1)
+        self._attempts_override_provided = 'attempts' in params
         self.save_quality = params.get('save_quality', 100)
         self.skip_no_text = params.get('skip_no_text', False)
         self.generate_and_export = params.get('generate_and_export', False)
@@ -375,6 +378,16 @@ class MangaTranslator:
         
         # Return the single result
         return results[0] if results else Context()
+
+    def _apply_runtime_cli_overrides(self, config: Config) -> Config:
+        if (
+            config is not None
+            and self._attempts_override_provided
+            and hasattr(config, 'cli')
+            and hasattr(config.cli, 'attempts')
+        ):
+            config.cli.attempts = self.attempts
+        return config
 
     def _calculate_output_path(self, image_path: str, save_info: dict) -> str:
         """
@@ -1141,19 +1154,79 @@ class MangaTranslator:
 
         return ctx
 
+    def _get_ai_colorizer_history_pages(self, config: Config) -> int:
+        colorizer_config = getattr(config, 'colorizer', None)
+        try:
+            return max(int(getattr(colorizer_config, 'ai_colorizer_history_pages', 0) or 0), 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _should_use_ai_colorizer_history(self, config: Config) -> bool:
+        colorizer_config = getattr(config, 'colorizer', None)
+        colorizer_type = getattr(colorizer_config, 'colorizer', None)
+        return (
+            self._get_ai_colorizer_history_pages(config) > 0
+            and colorizer_type in {Colorizer.openai_colorizer, Colorizer.gemini_colorizer}
+        )
+
+    def _get_colorizer_history_images(self, config: Config) -> list[Image.Image]:
+        if not self._should_use_ai_colorizer_history(config):
+            return []
+
+        history_pages = self._get_ai_colorizer_history_pages(config)
+        if history_pages <= 0 or not self._colorizer_history_images:
+            return []
+        return list(self._colorizer_history_images[-history_pages:])
+
+    def _append_colorizer_history_image(self, config: Config, image) -> None:
+        if not self._should_use_ai_colorizer_history(config) or image is None:
+            return
+
+        if not isinstance(image, Image.Image):
+            image = Image.fromarray(np.asarray(image).astype(np.uint8))
+
+        history_image = image.convert("RGB").copy()
+        self._colorizer_history_images.append(history_image)
+
+        history_pages = self._get_ai_colorizer_history_pages(config)
+        if history_pages <= 0 or len(self._colorizer_history_images) <= history_pages:
+            return
+
+        stale_images = self._colorizer_history_images[:-history_pages]
+        self._colorizer_history_images = self._colorizer_history_images[-history_pages:]
+        for stale_image in stale_images:
+            if hasattr(stale_image, 'close'):
+                try:
+                    stale_image.close()
+                except Exception:
+                    pass
+
+    def _clear_colorizer_history(self) -> None:
+        for history_image in self._colorizer_history_images:
+            if hasattr(history_image, 'close'):
+                try:
+                    history_image.close()
+                except Exception:
+                    pass
+        self._colorizer_history_images = []
+
     async def _run_colorizer(self, config: Config, ctx: Context):
         current_time = time.time()
         self._model_usage_timestamps[("colorizer", config.colorizer.colorizer)] = current_time
-        #todo: im pretty sure the ctx is never used. does it need to be passed in?
-        return await dispatch_colorization(
+        colorizer_kwargs = dict(ctx)
+        colorizer_kwargs["colorizer_history_images"] = self._get_colorizer_history_images(config)
+
+        result = await dispatch_colorization(
             config.colorizer.colorizer,
             colorization_size=config.colorizer.colorization_size,
             denoise_sigma=config.colorizer.denoise_sigma,
             device=self.device,
             image=ctx.input,
             config=config,
-            **ctx
+            **colorizer_kwargs
         )
+        self._append_colorizer_history_image(config, result)
+        return result
 
     async def _run_upscaling(self, config: Config, ctx: Context):
         current_time = time.time()
@@ -1694,6 +1767,88 @@ class MangaTranslator:
         
         logger.debug('[MEMORY] Batch cleanup completed')
 
+    def _build_image_load_error_context(self, image_name: str, error: Exception, config: Config = None) -> Context:
+        ctx = Context()
+        ctx.image_name = image_name
+        ctx.text_regions = []
+        ctx.success = False
+        ctx.translation_error = str(error)
+        ctx.error = ctx.translation_error
+        if config is not None:
+            ctx.config = config
+        return ctx
+
+    def _format_pipeline_error_message(self, stage: str, error: Exception) -> str:
+        stage_labels = {
+            "preprocessing": "预处理",
+            "ocr": "OCR",
+            "colorizing": "上色",
+            "rendering": "渲染",
+        }
+        raw_message = str(error).strip() or repr(error)
+        stage_label = stage_labels.get(stage, stage or "处理")
+        return f"{stage_label}失败: {raw_message}"
+
+    def _build_stage_error_context(
+        self,
+        image,
+        error: Exception,
+        config: Config = None,
+        stage: str = "",
+    ) -> Context:
+        image_name = getattr(image, "name", None) if image is not None else None
+        ctx = Context()
+        if image is not None:
+            ctx.input = image
+        if image_name:
+            ctx.image_name = image_name
+        ctx.text_regions = []
+        ctx.success = False
+        ctx.translation_error = self._format_pipeline_error_message(stage, error)
+        ctx.error = ctx.translation_error
+        if config is not None:
+            ctx.config = config
+        return ctx
+
+    def _mark_context_failure(self, ctx: Context, error: Exception, stage: str = "") -> Context:
+        if ctx is None:
+            ctx = Context()
+        if ctx.text_regions is None:
+            ctx.text_regions = []
+        if not getattr(ctx, "image_name", None):
+            input_image = getattr(ctx, "input", None)
+            input_name = getattr(input_image, "name", None) if input_image is not None else None
+            if input_name:
+                ctx.image_name = input_name
+        ctx.success = False
+        ctx.translation_error = self._format_pipeline_error_message(stage, error)
+        ctx.error = ctx.translation_error
+        return ctx
+
+    def _materialize_batch_inputs(self, batch_items: List[tuple]) -> tuple[list[tuple], list[Context]]:
+        """
+        Lazily load path-based items so batching stays under backend control.
+        """
+        loaded_items: list[tuple] = []
+        load_errors: list[Context] = []
+
+        for image_or_path, config in batch_items:
+            if isinstance(image_or_path, str):
+                image_path = image_or_path
+                try:
+                    with open(image_path, 'rb') as f:
+                        image = open_pil_image(f, eager=True)
+                    image.name = image_path
+                    loaded_items.append((image, config))
+                except Exception as exc:
+                    logger.error(f"加载图片失败 {image_path}: {exc}")
+                    load_errors.append(self._build_image_load_error_context(image_path, exc, config))
+                continue
+
+            loaded_items.append((image_or_path, config))
+
+        return loaded_items, load_errors
+
     # Background models cleanup job.
     async def _detector_cleanup_job(self):
         logger.info(f"Model cleanup job started with models_ttl={self.models_ttl} seconds")
@@ -1744,7 +1899,15 @@ class MangaTranslator:
             primary_ocr_engine = config.ocr.ocr
             ocr_name = primary_ocr_engine.value if hasattr(primary_ocr_engine, 'value') else primary_ocr_engine
             logger.info(f"Running primary OCR with: {ocr_name}")
-            textlines = await dispatch_ocr(primary_ocr_engine, ctx.img_rgb, ctx.textlines, config.ocr, self.device, self.verbose)
+            textlines = await dispatch_ocr(
+                primary_ocr_engine,
+                ctx.img_rgb,
+                ctx.textlines,
+                config.ocr,
+                self.device,
+                self.verbose,
+                runtime_config=config,
+            )
 
             # --- BEGIN: HYBRID OCR LOGIC ---
             if config.ocr.use_hybrid_ocr:
@@ -1767,7 +1930,15 @@ class MangaTranslator:
                     
                     secondary_ocr_name = secondary_ocr_engine.value if hasattr(secondary_ocr_engine, 'value') else secondary_ocr_engine
                     logger.info(f"Running secondary OCR with: {secondary_ocr_name}")
-                    secondary_results = await dispatch_ocr(secondary_ocr_engine, ctx.img_rgb, failed_textlines, secondary_config, self.device, self.verbose)
+                    secondary_results = await dispatch_ocr(
+                        secondary_ocr_engine,
+                        ctx.img_rgb,
+                        failed_textlines,
+                        secondary_config,
+                        self.device,
+                        self.verbose,
+                        runtime_config=config,
+                    )
                     
                     # Merge the results back into the original list
                     for i, result_tl in zip(failed_indices, secondary_results):
@@ -2103,11 +2274,11 @@ class MangaTranslator:
 
     def _build_prev_context(self, use_original_text=False, current_page_index=None, batch_index=None, batch_original_texts=None):
         """
-        跳过句子数为0的页面，取最近 context_size 个非空页面，拼成：
-        <|1|>句子
-        <|2|>句子
-        ...
-        的格式；如果没有任何非空页面，返回空串。
+        跳过句子数为0的页面，取最近 context_size 个非空页面，构造成历史多轮对话：
+        - user: 过去发送给 AI 的文本请求（不附带图片）
+        - assistant: 过去 AI 返回的单行 JSON 结果
+
+        最终返回 JSON 数组字符串；如果没有任何非空页面，返回空串。
 
         Args:
             use_original_text: 是否使用原文而不是译文作为上下文（当前未使用）
@@ -2139,15 +2310,46 @@ class MangaTranslator:
             return ""
         tail = non_empty_pages[-pages_used:]
 
-        # 拼接翻译结果作为上下文
-        lines = []
+        # 构造成历史 user / assistant 多轮消息
+        history_turns = []
         for page in tail:
-            for sent in page.values():
-                if sent.strip():
-                    lines.append(sent.strip())
+            page_pairs = []
+            for original_text, translated_text in page.items():
+                original_clean = (original_text or "").replace('\n', ' ').replace('\ufffd', '').strip()
+                translated_clean = (translated_text or "").strip()
+                if original_clean and translated_clean:
+                    page_pairs.append((original_clean, translated_clean))
 
-        numbered = [f"<|{i+1}|>{s}" for i, s in enumerate(lines)]
-        return "Here are the previous translation results for reference:\n" + "\n".join(numbered)
+            if not page_pairs:
+                continue
+
+            input_data = [
+                {"id": index + 1, "text": original_text}
+                for index, (original_text, _) in enumerate(page_pairs)
+            ]
+            output_data = {
+                "translations": [
+                    {"id": index + 1, "translation": translated_text}
+                    for index, (_, translated_text) in enumerate(page_pairs)
+                ]
+            }
+            user_prompt = (
+                "Please translate the following manga text regions:\n\n"
+                "All texts to translate (JSON Array):\n"
+                + json.dumps(input_data, ensure_ascii=False, separators=(',', ':'))
+                + "\n\nCRITICAL: Provide translations in the exact same order as the input array. "
+                + "Follow the OUTPUT FORMAT specified in the System Prompt."
+            )
+            assistant_response = json.dumps(output_data, ensure_ascii=False, separators=(',', ':'))
+            history_turns.append({
+                "user": user_prompt,
+                "assistant": assistant_response,
+            })
+
+        if not history_turns:
+            return ""
+
+        return json.dumps(history_turns, ensure_ascii=False, separators=(',', ':'))
 
     async def _dispatch_with_context(self, config: Config, texts: list[str], ctx: Context):
         # Attach config to context for translators that need it
@@ -2180,11 +2382,11 @@ class MangaTranslator:
             from .translators.openai import OpenAITranslator
             translator = OpenAITranslator()
 
-            translator.parse_args(config.translator)
+            translator.parse_args(config)
             translator.set_prev_context(prev_ctx)
 
             if pages_used > 0:
-                context_count = prev_ctx.count("<|")
+                context_count = prev_ctx.count('"translation"')
                 logger.info(f"Carrying {pages_used} pages of context, {context_count} sentences as translation reference")
             if skipped > 0:
                 logger.warning(f"Skipped {skipped} pages with no sentences")
@@ -2540,6 +2742,12 @@ class MangaTranslator:
                 if not (config.render and config.render.disable_auto_wrap):
                     region.translation = re.sub(r'(\[BR\]|<br>|【BR】)', ' ', region.translation, flags=re.IGNORECASE)
 
+                region.translation = remove_trailing_period_if_needed(
+                    region.text,
+                    region.translation,
+                    bool(getattr(config.translator, 'remove_trailing_period', False)),
+                )
+
         # 过滤逻辑（简化版本，保留主要过滤条件）
         new_text_regions = []
         for region in ctx.text_regions:
@@ -2554,8 +2762,7 @@ class MangaTranslator:
                     should_filter = True
                     filter_reason = "Numeric translation"
                 elif not config.translator.translator == Translator.original:
-                    text_equal = region.text.lower().strip() == region.translation.lower().strip()
-                    if text_equal:
+                    if self._should_filter_identical_translation(config, region):
                         should_filter = True
                         filter_reason = "Translation identical to original"
 
@@ -2658,13 +2865,13 @@ class MangaTranslator:
         # manga2eng currently only supports horizontal left to right rendering
         elif (config.render.renderer == Renderer.manga2Eng or config.render.renderer == Renderer.manga2EngPillow) and ctx.text_regions and LANGUAGE_ORIENTATION_PRESETS.get(ctx.text_regions[0].target_lang) == 'h':
             if config.render.renderer == Renderer.manga2EngPillow:
-                output = await dispatch_eng_render_pillow(render_base_img, ctx.img_rgb, ctx.text_regions, fallback_font_path, config.render.line_spacing)
+                output = await dispatch_eng_render_pillow(render_base_img, ctx.img_rgb, ctx.text_regions, fallback_font_path)
             else:
                 output = await dispatch_eng_render(render_base_img, ctx.img_rgb, ctx.text_regions, fallback_font_path, config.render.line_spacing)
         else:
             # Request debug image for balloon_fill mode when verbose
             need_debug_img = self.verbose and config.render.layout_mode == 'balloon_fill'
-            result = await dispatch_rendering(render_base_img, ctx.text_regions, fallback_font_path, config, ctx.img_rgb, return_debug_img=need_debug_img, skip_font_scaling=skip_font_scaling)
+            result = await dispatch_rendering(render_base_img, ctx.text_regions, config, ctx.img_rgb, return_debug_img=need_debug_img, skip_font_scaling=skip_font_scaling)
             
             # Handle debug image if returned
             if need_debug_img and isinstance(result, tuple):
@@ -2894,6 +3101,11 @@ class MangaTranslator:
         if self.filter_text_enabled:
             from .utils.text_filter import load_filter_list
             load_filter_list(force_reload=True)
+
+        images_with_configs = [
+            (image, self._apply_runtime_cli_overrides(config))
+            for image, config in images_with_configs
+        ]
         
         batch_size = batch_size or self.batch_size
         
@@ -3026,38 +3238,6 @@ class MangaTranslator:
         logger.info(f'Starting batch translation: {len(images_with_configs)} images, batch size: {batch_size}')
         logger.info(f'[阶段] 批量翻译任务启动')
         
-        # ✅ 修复：如果 images_with_configs 中包含文件路径字符串（并发模式格式），需要先加载图片
-        # 这种情况发生在：用户启用并发模式，但因为特殊模式（如仅上色）导致并发被禁用
-        needs_image_loading = False
-        if images_with_configs:
-            first_item = images_with_configs[0]
-            if isinstance(first_item, tuple):
-                first_image = first_item[0]
-                # 检查是否是字符串路径
-                if isinstance(first_image, str):
-                    needs_image_loading = True
-                    logger.info("检测到文件路径格式，将先加载图片...")
-        
-        if needs_image_loading:
-            from PIL import Image as PILImage
-            loaded_images_with_configs = []
-            for item in images_with_configs:
-                if isinstance(item, tuple):
-                    file_path, config = item
-                    try:
-                        # 加载图片
-                        with open(file_path, 'rb') as f:
-                            image = open_pil_image(f, eager=True)
-                        image.name = file_path  # 保存文件路径
-                        loaded_images_with_configs.append((image, config))
-                    except Exception as e:
-                        logger.error(f"加载图片失败 {file_path}: {e}")
-                        continue
-                else:
-                    loaded_images_with_configs.append(item)
-            images_with_configs = loaded_images_with_configs
-            logger.info(f"成功加载 {len(images_with_configs)} 张图片")
-        
         # Start the background cleanup job once if not already started.
         if self._detector_cleanup_task is None:
             self._detector_cleanup_task = asyncio.create_task(self._detector_cleanup_job())
@@ -3076,19 +3256,24 @@ class MangaTranslator:
                 self._check_cancelled()  # 检查取消标志
 
                 batch_end = min(batch_start + batch_size, total_images)
-                current_batch_images = images_with_configs[batch_start:batch_end]
+                current_batch_items = images_with_configs[batch_start:batch_end]
 
                 # 计算全局图片编号（考虑前端分批加载的偏移量）
                 global_batch_start = global_offset + batch_start + 1
                 global_batch_end = global_offset + batch_end
                 global_batch_num = (global_offset + batch_start) // batch_size + 1
                 global_total_batches = (display_total + batch_size - 1) // batch_size
+                progress_state = f"batch:{global_batch_start}:{global_batch_end}:{display_total}"
                 
                 logger.info(f"Processing rolling batch {global_batch_num}/{global_total_batches} (images {global_batch_start}-{global_batch_end})")
                 logger.info(f'[阶段] 开始处理批次 {global_batch_num}/{global_total_batches}')
-                
-                # 报告批次进度给前端
-                await self._report_progress(f"batch:{global_batch_start}:{global_batch_end}:{display_total}")
+
+                current_batch_images, load_error_contexts = self._materialize_batch_inputs(current_batch_items)
+                if load_error_contexts:
+                    results.extend(load_error_contexts)
+                if not current_batch_images:
+                    await self._report_progress(progress_state)
+                    continue
 
                 # --- 阶段1: 预处理（检测、OCR、文本行合并） ---
                 
@@ -3335,12 +3520,8 @@ class MangaTranslator:
                             ctx.image_name = image.name
                         preprocessed_contexts.append((ctx, config))
                     except Exception as e:
-                        logger.error(f"Error pre-processing image {i+1} in batch: {e}")
-                        ctx = Context()
-                        ctx.input = image
-                        ctx.text_regions = []
-                        if hasattr(image, 'name'):
-                            ctx.image_name = image.name
+                        logger.error(f"Error pre-processing image {i+1} in batch: {e}", exc_info=True)
+                        ctx = self._build_stage_error_context(image, e, config, stage='preprocessing')
                         preprocessed_contexts.append((ctx, config))
 
                 # --- 阶段2: 翻译 ---
@@ -3367,6 +3548,9 @@ class MangaTranslator:
                 if is_template_save_mode:
                     logger.info("Template+SaveText mode: Skipping rendering, exporting original text only.")
                     for ctx, config in translated_contexts:
+                        if getattr(ctx, 'translation_error', None):
+                            results.append(ctx)
+                            continue
                         await self._handle_template_and_save_text(ctx, config)
                         # ✅ 标记成功（导出原文完成）
                         ctx.success = True
@@ -3390,6 +3574,9 @@ class MangaTranslator:
                 if self.generate_and_export:
                     logger.info("'Generate and Export' mode enabled. Skipping rendering.")
                     for ctx, config in translated_contexts:
+                        if getattr(ctx, 'translation_error', None):
+                            results.append(ctx)
+                            continue
                         await self._handle_generate_and_export(ctx, config)
                         # ✅ 标记成功（导出翻译完成）
                         ctx.success = True
@@ -3414,6 +3601,9 @@ class MangaTranslator:
                 for idx, (ctx, config) in enumerate(translated_contexts):
                     await asyncio.sleep(0)  # 检查是否被取消
                     self._check_cancelled()  # 检查取消标志
+                    if getattr(ctx, 'translation_error', None):
+                        results.append(ctx)
+                        continue
                     try:
                         if hasattr(ctx, 'input'):
                             from .utils.generic import get_image_md5
@@ -3447,7 +3637,8 @@ class MangaTranslator:
                             gc.collect()
 
                     except Exception as e:
-                        logger.error(f"Error rendering image in batch: {e}")
+                        logger.error(f"Error rendering image in batch: {e}", exc_info=True)
+                        ctx = self._mark_context_failure(ctx, e, stage='rendering')
                         results.append(ctx)
             
             finally:
@@ -4131,8 +4322,7 @@ class MangaTranslator:
                                     should_filter = True
                                     filter_reason = "Numeric translation"
                                 elif not config.translator.translator == Translator.original:
-                                    text_equal = region.text.lower().strip() == region.translation.lower().strip()
-                                    if text_equal:
+                                    if self._should_filter_identical_translation(config, region):
                                         should_filter = True
                                         filter_reason = "Translation identical to original"
 
@@ -4170,11 +4360,12 @@ class MangaTranslator:
             
             # ✅ 翻译批次完成后清理内存
             # 清理merged_ctx和batch中的临时数据
-            if 'merged_ctx' in locals() and merged_ctx:
-                merged_ctx.text_regions = None
-                merged_ctx = None
-            batch = None
-            self._cleanup_gpu_memory(aggressive=True)
+                if 'merged_ctx' in locals() and merged_ctx:
+                    merged_ctx.text_regions = None
+                    merged_ctx = None
+                batch = None
+                self._cleanup_gpu_memory(aggressive=True)
+                await self._report_progress(progress_state)
 
         return results
 
@@ -4306,8 +4497,7 @@ class MangaTranslator:
                                 should_filter = True
                                 filter_reason = "Numeric translation"
                             elif not config.translator.translator == Translator.original:
-                                text_equal = region.text.lower().strip() == region.translation.lower().strip()
-                                if text_equal:
+                                if self._should_filter_identical_translation(config, region):
                                     should_filter = True
                                     filter_reason = "Translation identical to original"
 
@@ -4408,9 +4598,9 @@ class MangaTranslator:
                 from .translators.gemini_hq import GeminiHighQualityTranslator
                 translator = GeminiHighQualityTranslator()
 
-            translator.parse_args(config.translator)
+            translator.parse_args(config)
             # 注意：-1 表示无限重试，也是有效值
-            # 这里不再覆盖 translator.attempts，让配置中的值生效
+            # 重试次数统一从 cli.attempts 解析
             
             # 传递取消检查回调给翻译器
             if self._cancel_check_callback:
@@ -4442,7 +4632,7 @@ class MangaTranslator:
             translator.set_prev_context(prev_ctx)
 
             if pages_used > 0:
-                context_count = prev_ctx.count("<|")
+                context_count = prev_ctx.count('"translation"')
                 logger.info(f"Carrying {pages_used} pages of context, {context_count} sentences as translation reference")
             if skipped > 0:
                 logger.warning(f"Skipped {skipped} pages with no sentences")
@@ -4511,6 +4701,12 @@ class MangaTranslator:
         
         # 通用错误
         return f"❌ 翻译失败：{error_msg}\n💡 建议：\n1. 检查API配置是否正确\n2. 查看完整日志以获取详细错误信息\n3. 尝试更换翻译服务"
+
+    def _should_filter_identical_translation(self, config: Config, region) -> bool:
+        """Keep identical text when no_text_lang_skip is enabled."""
+        if getattr(config.translator, 'no_text_lang_skip', False):
+            return False
+        return region.text.lower().strip() == region.translation.lower().strip()
             
     async def _apply_post_translation_processing(self, ctx: Context, config: Config) -> List:
         """
@@ -4640,6 +4836,14 @@ class MangaTranslator:
                     except Exception as e:
                         logger.error(f"Error during region retry: {e}")
                         break
+
+        for region in ctx.text_regions:
+            if region.translation:
+                region.translation = remove_trailing_period_if_needed(
+                    region.text,
+                    region.translation,
+                    bool(getattr(config.translator, 'remove_trailing_period', False)),
+                )
         
         return ctx.text_regions
 
@@ -5045,18 +5249,23 @@ class MangaTranslator:
             self._check_cancelled()  # 检查取消标志
 
             batch_end = min(batch_start + batch_size, total_images)
-            current_batch_images = images_with_configs[batch_start:batch_end]
+            current_batch_items = images_with_configs[batch_start:batch_end]
 
             # 计算全局图片编号（考虑前端分批加载的偏移量）
             global_batch_start = global_offset + batch_start + 1
             global_batch_end = global_offset + batch_end
             global_batch_num = (global_offset + batch_start) // batch_size + 1
             global_total_batches = (display_total + batch_size - 1) // batch_size
+            progress_state = f"batch:{global_batch_start}:{global_batch_end}:{display_total}"
             
             logger.info(f"Processing rolling batch {global_batch_num}/{global_total_batches} (images {global_batch_start}-{global_batch_end})")
-            
-            # 报告批次进度给前端
-            await self._report_progress(f"batch:{global_batch_start}:{global_batch_end}:{display_total}")
+
+            current_batch_images, load_error_contexts = self._materialize_batch_inputs(current_batch_items)
+            if load_error_contexts:
+                results.extend(load_error_contexts)
+            if not current_batch_images:
+                await self._report_progress(progress_state)
+                continue
 
             # 阶段一：预处理当前批次
             preprocessed_contexts = []
@@ -5075,12 +5284,8 @@ class MangaTranslator:
                         ctx.image_name = image.name
                     preprocessed_contexts.append((ctx, config))
                 except Exception as e:
-                    logger.error(f"Error pre-processing image {i+1} in batch: {e}")
-                    ctx = Context()
-                    ctx.input = image
-                    ctx.text_regions = []
-                    if hasattr(image, 'name'):
-                        ctx.image_name = image.name
+                    logger.error(f"Error pre-processing image {i+1} in batch: {e}", exc_info=True)
+                    ctx = self._build_stage_error_context(image, e, config, stage='preprocessing')
                     preprocessed_contexts.append((ctx, config))
 
             # 阶段二：翻译当前批次
@@ -5195,6 +5400,9 @@ class MangaTranslator:
             if self.generate_and_export:
                 logger.info("'Generate and Export' mode enabled. Skipping rendering.")
                 for ctx, config in preprocessed_contexts:
+                    if getattr(ctx, 'translation_error', None):
+                        results.append(ctx)
+                        continue
                     await self._handle_generate_and_export(ctx, config)
 
                     # ✅ 标记成功（导出翻译完成）
@@ -5207,6 +5415,7 @@ class MangaTranslator:
                     preprocessed_contexts=preprocessed_contexts,
                     keep_results=True
                 )
+                await self._report_progress(progress_state)
                 
                 continue # BUG FIX: Continue to the next batch instead of returning
 
@@ -5215,6 +5424,9 @@ class MangaTranslator:
                 # 检查是否被取消
                 await asyncio.sleep(0)
                 self._check_cancelled()  # 检查取消标志
+                if getattr(ctx, 'translation_error', None):
+                    results.append(ctx)
+                    continue
                 try:
                     if hasattr(ctx, 'input'):
                         from .utils.generic import get_image_md5
@@ -5268,6 +5480,7 @@ class MangaTranslator:
             )
             
             logger.debug(f'[MEMORY] Batch {batch_start//batch_size + 1} cleanup completed (kept translation history for context)')
+            await self._report_progress(progress_state)
 
         logger.info(f"High quality translation completed: processed {len(results)} images")
         return results
