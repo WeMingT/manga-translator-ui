@@ -13,6 +13,10 @@ from typing import Any, Dict, List, Optional
 from dotenv import dotenv_values, load_dotenv
 
 from core.config_models import AppSettings
+from manga_translator.colorization.prompt_loader import ensure_ai_colorizer_prompt_file
+from manga_translator.custom_api_params import ensure_custom_api_params_file, migrate_legacy_custom_api_params_config
+from manga_translator.ocr.prompt_loader import ensure_ai_ocr_prompt_file
+from manga_translator.rendering.prompt_loader import ensure_ai_renderer_prompt_file
 
 
 PRESET_SPECIAL_ENV_VARS = [
@@ -35,6 +39,49 @@ PRESET_SPECIAL_ENV_VARS = [
     "RENDER_GEMINI_MODEL",
     "RENDER_GEMINI_API_BASE",
 ]
+
+RUNTIME_API_REQUIREMENTS = {
+    "openai": {
+        "display_name": "OpenAI",
+        "accepted_env_vars": ["OPENAI_API_KEY"],
+    },
+    "openai_hq": {
+        "display_name": "OpenAI HQ",
+        "accepted_env_vars": ["OPENAI_API_KEY"],
+    },
+    "gemini": {
+        "display_name": "Gemini",
+        "accepted_env_vars": ["GEMINI_API_KEY"],
+    },
+    "gemini_hq": {
+        "display_name": "Gemini HQ",
+        "accepted_env_vars": ["GEMINI_API_KEY"],
+    },
+    "openai_ocr": {
+        "display_name": "OpenAI OCR",
+        "accepted_env_vars": ["OCR_OPENAI_API_KEY", "OPENAI_API_KEY"],
+    },
+    "gemini_ocr": {
+        "display_name": "Gemini OCR",
+        "accepted_env_vars": ["OCR_GEMINI_API_KEY", "GEMINI_API_KEY"],
+    },
+    "openai_colorizer": {
+        "display_name": "OpenAI Colorizer",
+        "accepted_env_vars": ["COLOR_OPENAI_API_KEY", "OPENAI_API_KEY"],
+    },
+    "gemini_colorizer": {
+        "display_name": "Gemini Colorizer",
+        "accepted_env_vars": ["COLOR_GEMINI_API_KEY", "GEMINI_API_KEY"],
+    },
+    "openai_renderer": {
+        "display_name": "OpenAI Renderer",
+        "accepted_env_vars": ["RENDER_OPENAI_API_KEY", "OPENAI_API_KEY"],
+    },
+    "gemini_renderer": {
+        "display_name": "Gemini Renderer",
+        "accepted_env_vars": ["RENDER_GEMINI_API_KEY", "GEMINI_API_KEY"],
+    },
+}
 
 
 @dataclass
@@ -78,6 +125,13 @@ class ConfigService(QObject):
         # Set the correct default config path
         self.default_config_path = self.get_default_config_path()
         self.user_config_path = self.get_user_config_path()
+        try:
+            ensure_custom_api_params_file(logger=self.logger)
+            ensure_ai_ocr_prompt_file()
+            ensure_ai_renderer_prompt_file()
+            ensure_ai_colorizer_prompt_file()
+        except Exception as exc:
+            self.logger.error(f"创建本地配置模板文件失败: {exc}")
         self.logger.debug(f"默认配置: {os.path.basename(self.default_config_path)}")
         self.logger.debug(f"用户配置: {os.path.basename(self.user_config_path)}")
         self.logger.debug(f"默认配置存在: {os.path.exists(self.default_config_path)}")
@@ -158,6 +212,61 @@ class ConfigService(QObject):
                 env_keys.append(key)
 
         return env_keys
+
+    @staticmethod
+    def _has_env_value(env_vars: Dict[str, str], key: str) -> bool:
+        value = env_vars.get(key, "")
+        return bool(str(value or "").strip())
+
+    def get_missing_runtime_api_requirements(
+        self,
+        config: AppSettings,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """获取当前配置下缺失的运行时 API Key 要求。"""
+        merged_env_vars = {
+            key: str(value or "")
+            for key, value in self.load_env_vars().items()
+        }
+        if env_vars:
+            for key, value in env_vars.items():
+                merged_env_vars[key] = str(value or "")
+
+        checks = [
+            ("translator", "translator", getattr(config.translator, "translator", None)),
+            ("ocr", "ocr", getattr(config.ocr, "ocr", None)),
+            ("colorizer", "colorizer", getattr(config.colorizer, "colorizer", None)),
+            ("render", "renderer", getattr(config.render, "renderer", None)),
+        ]
+
+        if bool(getattr(config.ocr, "use_hybrid_ocr", False)):
+            checks.append(("ocr", "secondary_ocr", getattr(config.ocr, "secondary_ocr", None)))
+
+        missing: List[Dict[str, Any]] = []
+        for section, setting, selected_value in checks:
+            feature_name = str(selected_value or "").strip()
+            if not feature_name:
+                continue
+
+            requirement = RUNTIME_API_REQUIREMENTS.get(feature_name)
+            if not requirement:
+                continue
+
+            accepted_env_vars = list(requirement.get("accepted_env_vars", []))
+            if any(self._has_env_value(merged_env_vars, key) for key in accepted_env_vars):
+                continue
+
+            missing.append(
+                {
+                    "section": section,
+                    "setting": setting,
+                    "selected_value": feature_name,
+                    "display_name": requirement.get("display_name", feature_name),
+                    "accepted_env_vars": accepted_env_vars,
+                }
+            )
+
+        return missing
     
     def validate_api_key(self, key: str, var_name: str, translator_name: str) -> bool:
         """验证API密钥格式"""
@@ -177,7 +286,7 @@ class ConfigService(QObject):
 
             with open(config_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                loaded_data = json.loads(content)
+                loaded_data = migrate_legacy_custom_api_params_config(json.loads(content))
 
             # 获取默认配置作为基础
             default_config = AppSettings()
@@ -675,11 +784,11 @@ class ConfigService(QObject):
         try:
             # 读取默认配置（作为模板）
             with open(self.default_config_path, 'r', encoding='utf-8') as f:
-                default_data = json.load(f)
+                default_data = migrate_legacy_custom_api_params_config(json.load(f))
             
             # 读取用户配置
             with open(self.user_config_path, 'r', encoding='utf-8') as f:
-                user_data = json.load(f)
+                user_data = migrate_legacy_custom_api_params_config(json.load(f))
             
             # 同步配置（递归处理嵌套字典）
             synced_data = self._sync_dict(default_data, user_data)

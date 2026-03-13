@@ -20,7 +20,6 @@ class EditorToolbar(QWidget):
     # --- Define signals for all actions ---
     back_requested = pyqtSignal()
     export_requested = pyqtSignal()
-    save_json_requested = pyqtSignal()
     undo_requested = pyqtSignal()
     redo_requested = pyqtSignal()
     zoom_in_requested = pyqtSignal()
@@ -58,13 +57,7 @@ class EditorToolbar(QWidget):
         self.export_button.setToolTip(self._t("Export current rendered image") + " (Ctrl+Q)")
         self.export_button.setObjectName("editor_export_button")
         layout.addWidget(self.export_button)
-        
-        self.save_json_button = QToolButton()
-        self.save_json_button.setText(self._t("Save JSON"))
-        self.save_json_button.setToolTip(self._t("Save translation data to JSON file") + " (Ctrl+W)")
-        self.save_json_button.setObjectName("editor_save_json_button")
-        layout.addWidget(self.save_json_button)
-        
+
         layout.addWidget(self._create_separator())
 
         # --- Edit Actions ---
@@ -120,14 +113,9 @@ class EditorToolbar(QWidget):
         
         self.display_mode_combo = QComboBox()
         self.display_mode_combo.setObjectName("editor_display_mode_combo")
-        self.display_mode_combo.addItems([
-            self._t("Show Text and Boxes"),
-            self._t("Show Text Only"),
-            self._t("Show Boxes Only"),
-            self._t("Show Nothing")
-        ])
-        # 设置固定宽度，不使用自适应（自适应会增加额外空间）
-        self.display_mode_combo.setFixedWidth(110)
+        self._populate_display_mode_items()
+        # 需要容纳新增的“原图对比”模式
+        self.display_mode_combo.setFixedWidth(180)
         display_mode_layout.addWidget(self.display_mode_combo)
         
         # 添加分隔符到容器内
@@ -167,14 +155,38 @@ class EditorToolbar(QWidget):
     def _connect_signals(self):
         self.back_button.clicked.connect(self.back_requested)
         self.export_button.clicked.connect(self.export_requested)
-        self.save_json_button.clicked.connect(self.save_json_requested)
         self.undo_button.clicked.connect(self.undo_requested)
         self.redo_button.clicked.connect(self.redo_requested)
         self.zoom_in_button.clicked.connect(self.zoom_in_requested)
         self.zoom_out_button.clicked.connect(self.zoom_out_requested)
         self.fit_window_button.clicked.connect(self.fit_window_requested)
-        self.display_mode_combo.currentTextChanged.connect(self.display_mode_changed)
+        self.display_mode_combo.currentIndexChanged.connect(self._emit_display_mode_changed)
         self.original_image_alpha_slider.valueChanged.connect(self.original_image_alpha_changed)
+
+    def _display_mode_definitions(self):
+        return [
+            ("full", "Show Text and Boxes"),
+            ("text_only", "Show Text Only"),
+            ("box_only", "Show Boxes Only"),
+            ("none", "Show Nothing"),
+            ("compare_original_split", "Compare with Original (Two Panels)"),
+        ]
+
+    def _populate_display_mode_items(self, selected_mode: str | None = None):
+        self.display_mode_combo.clear()
+        for mode, text_key in self._display_mode_definitions():
+            self.display_mode_combo.addItem(self._t(text_key), mode)
+
+        target_mode = selected_mode or "full"
+        mode_index = self.display_mode_combo.findData(target_mode)
+        if mode_index < 0:
+            mode_index = 0
+        self.display_mode_combo.setCurrentIndex(mode_index)
+
+    def _emit_display_mode_changed(self, index: int):
+        mode = self.display_mode_combo.itemData(index)
+        if mode:
+            self.display_mode_changed.emit(str(mode))
 
     # --- Public Slots ---
     def update_undo_redo_state(self, can_undo: bool, can_redo: bool):
@@ -206,8 +218,6 @@ class EditorToolbar(QWidget):
         self.back_button.setToolTip(self._t("Back to Main"))
         self.export_button.setText(self._t("Export Image"))
         self.export_button.setToolTip(self._t("Export current rendered image") + " (Ctrl+Q)")
-        self.save_json_button.setText(self._t("Save JSON"))
-        self.save_json_button.setToolTip(self._t("Save translation data to JSON file") + " (Ctrl+W)")
         self.undo_button.setText(self._t("Undo"))
         self.undo_button.setToolTip(self._t("Undo last operation") + " (Ctrl+Z)")
         self.redo_button.setText(self._t("Redo"))
@@ -217,16 +227,9 @@ class EditorToolbar(QWidget):
         self.fit_window_button.setText(self._t("Fit to Window"))
         
         # 刷新下拉菜单
-        current_index = self.display_mode_combo.currentIndex()
+        current_mode = self.display_mode_combo.currentData()
         self.display_mode_combo.blockSignals(True)
-        self.display_mode_combo.clear()
-        self.display_mode_combo.addItems([
-            self._t("Show Text and Boxes"),
-            self._t("Show Text Only"),
-            self._t("Show Boxes Only"),
-            self._t("Show Nothing")
-        ])
-        self.display_mode_combo.setCurrentIndex(current_index)
+        self._populate_display_mode_items(current_mode)
         self.display_mode_combo.blockSignals(False)
         
         # 刷新标签

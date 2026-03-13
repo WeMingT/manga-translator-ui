@@ -131,6 +131,7 @@ python -m manga_translator -i manga.jpg --config my_config.json
   "translator": {
     "translator": "openai_hq",
     "target_lang": "CHS",
+    "enable_streaming": true,
     "no_text_lang_skip": false,
     "high_quality_prompt_path": "dict/prompt_example.yaml",
     "max_requests_per_minute": 0
@@ -202,6 +203,7 @@ python -m manga_translator -i manga.jpg --config my_config.json
 **配置说明**：
 - 完整的配置结构请参考 `examples/config-example.json`
 - 所有参数的详细说明请参考 [设置说明文档](SETTINGS.md)
+- `translator.enable_streaming` 用于控制 OpenAI / Gemini（含 HQ）是否优先使用流式传输；设为 `false` 时将始终走普通非流式请求
 - 可以只配置需要修改的部分，其他使用默认值
 
 ### 命令行参数优先级

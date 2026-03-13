@@ -14,6 +14,12 @@ import numpy as np
 import cv2
 
 from ..utils import InfererModule, ModelWrapper, repeating_sequence, is_valuable_text
+from ..utils.retry import (
+    get_retry_attempts_from_config,
+    normalize_retry_attempts,
+    resolve_total_attempts,
+    summarize_response_text,
+)
 
 try:
     import readline
@@ -174,14 +180,14 @@ class AsyncOpenAICurlCffi:
             if response.status_code != 200:
                 print(f"[AsyncOpenAICurlCffi] Error - URL: {url}")
                 print(f"[AsyncOpenAICurlCffi] Error - Status: {response.status_code}")
-                print(f"[AsyncOpenAICurlCffi] Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                print(f"[AsyncOpenAICurlCffi] Error - Response: {summarize_response_text(response.text)}")
                 error_msg = f"API request failed with status {response.status_code}"
                 try:
                     error_data = response.json()
                     if "error" in error_data:
                         error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
                 except:
-                    error_msg = f"{error_msg}: {response.text[:500] if response.text else '(empty)'}"
+                    error_msg = f"{error_msg}: {summarize_response_text(response.text)}"
                 raise Exception(error_msg)
 
             result = response.json()
@@ -202,7 +208,10 @@ class AsyncOpenAICurlCffi:
                 ) as response:
                     if response.status_code != 200:
                         text = await response.atext()
-                        raise Exception(f"API request failed with status {response.status_code}: {text[:500] if text else '(empty)'}")
+                        raise Exception(
+                            f"API request failed with status {response.status_code}: "
+                            f"{summarize_response_text(text)}"
+                        )
 
                     async for raw_line in response.aiter_lines():
                         if isinstance(raw_line, (bytes, bytearray)):
@@ -256,14 +265,14 @@ class AsyncOpenAICurlCffi:
             if response.status_code != 200:
                 print(f"[AsyncOpenAICurlCffi] List Error - URL: {url}")
                 print(f"[AsyncOpenAICurlCffi] List Error - Status: {response.status_code}")
-                print(f"[AsyncOpenAICurlCffi] List Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                print(f"[AsyncOpenAICurlCffi] List Error - Response: {summarize_response_text(response.text)}")
                 error_msg = f"API request failed with status {response.status_code}"
                 try:
                     error_data = response.json()
                     if "error" in error_data:
                         error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
                 except:
-                    error_msg = f"{error_msg}: {response.text[:200] if response.text else '(empty)'}"
+                    error_msg = f"{error_msg}: {summarize_response_text(response.text)}"
                 raise Exception(error_msg)
 
             # 检查响应内容类型
@@ -579,25 +588,34 @@ class AsyncGeminiCurlCffi:
             if response.status_code != 200:
                 print(f"[AsyncGeminiCurlCffi] Error - URL: {url}")
                 print(f"[AsyncGeminiCurlCffi] Error - Status: {response.status_code}")
-                print(f"[AsyncGeminiCurlCffi] Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                print(f"[AsyncGeminiCurlCffi] Error - Response: {summarize_response_text(response.text)}")
                 error_msg = f"Gemini API request failed with status {response.status_code}"
                 try:
                     error_data = response.json()
                     if "error" in error_data:
                         error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
                 except:
-                    error_msg = f"{error_msg}: {response.text[:500] if response.text else '(empty response)'}"
+                    error_msg = (
+                        f"{error_msg}: "
+                        f"{summarize_response_text(response.text, empty_placeholder='(empty response)')}"
+                    )
                 raise Exception(error_msg)
 
             # 检查响应内容类型和内容
             content_type = response.headers.get('content-type', '')
             if 'application/json' not in content_type and 'text/json' not in content_type:
-                raise Exception(f"API 返回了非 JSON 响应 (Content-Type: {content_type}): {response.text[:200] if response.text else '(empty)'}")
+                raise Exception(
+                    f"API 返回了非 JSON 响应 (Content-Type: {content_type}): "
+                    f"{summarize_response_text(response.text)}"
+                )
 
             try:
                 result = response.json()
             except Exception as e:
-                raise Exception(f"无法解析 API 响应: {str(e)}。响应内容: {response.text[:200] if response.text else '(empty)'}")
+                raise Exception(
+                    f"无法解析 API 响应: {str(e)}。响应内容: "
+                    f"{summarize_response_text(response.text)}"
+                )
 
             # 转换为类似 Gemini SDK 的响应对象
             return _GeminiResponse(result)
@@ -625,7 +643,10 @@ class AsyncGeminiCurlCffi:
                 ) as response:
                     if response.status_code != 200:
                         text = await response.atext()
-                        raise Exception(f"Gemini API request failed with status {response.status_code}: {text[:500] if text else '(empty)'}")
+                        raise Exception(
+                            f"Gemini API request failed with status {response.status_code}: "
+                            f"{summarize_response_text(text)}"
+                        )
 
                     async for raw_line in response.aiter_lines():
                         if isinstance(raw_line, (bytes, bytearray)):
@@ -665,14 +686,14 @@ class AsyncGeminiCurlCffi:
             if response.status_code != 200:
                 print(f"[AsyncGeminiCurlCffi] List Error - URL: {url}")
                 print(f"[AsyncGeminiCurlCffi] List Error - Status: {response.status_code}")
-                print(f"[AsyncGeminiCurlCffi] List Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                print(f"[AsyncGeminiCurlCffi] List Error - Response: {summarize_response_text(response.text)}")
                 error_msg = f"Gemini API request failed with status {response.status_code}"
                 try:
                     error_data = response.json()
                     if "error" in error_data:
                         error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
                 except:
-                    error_msg = f"{error_msg}: {response.text[:200] if response.text else '(empty)'}"
+                    error_msg = f"{error_msg}: {summarize_response_text(response.text)}"
                 raise Exception(error_msg)
 
             # 检查响应内容类型
@@ -1291,6 +1312,7 @@ class CommonTranslator(InfererModule):
         self._max_total_attempts = -1  # 全局最大尝试次数
         self._cancel_check_callback = None  # 取消检查回调
         self._custom_api_params = {}  # 存储自定义API参数
+        self._enable_streaming = True
         self._stream_inline_last_len = 0
         self._stream_inline_buffer = ""
         self._stream_json_seen: Dict[int, str] = {}
@@ -1299,69 +1321,56 @@ class CommonTranslator(InfererModule):
         self._stream_result_pairs_printed = False
 
     def _normalize_retry_attempts(self, attempts: Any) -> int:
-        """
-        规范化重试次数配置：
-        -1: 无限重试
-         0: 不重试（仅首次请求）
-        >=1: 重试 N 次
-        其他负值会回退为 0。
-        """
-        try:
-            value = int(attempts)
-        except (TypeError, ValueError):
-            self.logger.warning(f"Invalid attempts value '{attempts}', fallback to -1 (infinite)")
-            return -1
-
-        if value == -1:
-            return -1
-        if value < -1:
-            self.logger.warning(f"Invalid attempts value '{value}', fallback to 0 (no retry)")
-            return 0
-        return value
+        return normalize_retry_attempts(attempts, logger=self.logger, default=-1)
 
     def _resolve_max_total_attempts(self) -> int:
-        """
-        将“重试次数”转换为“总尝试次数”：
-        -1 -> -1（无限）
-         0 -> 1（仅首次请求）
-         N -> N+1（首次 + N 次重试）
-        """
-        if self.attempts == -1:
-            return -1
-        return self.attempts + 1
+        return resolve_total_attempts(self.attempts)
+
+    def _resolve_translator_config(self, config: Any) -> Any:
+        if isinstance(config, dict):
+            return config.get('translator', config)
+        return getattr(config, 'translator', config)
+
+    def _get_config_value(self, config: Any, key: str, default: Any = None) -> Any:
+        if isinstance(config, dict):
+            return config.get(key, default)
+        return getattr(config, key, default)
+
+    def _is_streaming_enabled(self, ctx: Any = None) -> bool:
+        if ctx and hasattr(ctx, 'config') and ctx.config is not None:
+            translator_config = self._resolve_translator_config(ctx.config)
+            value = self._get_config_value(translator_config, 'enable_streaming', None)
+            if value is not None:
+                return bool(value)
+        return bool(getattr(self, '_enable_streaming', True))
     
     def _load_custom_api_params(self):
         """从固定目录加载自定义API参数配置文件"""
-        try:
-            from ..utils import BASE_PATH
-            import os
-            import json
-            
-            config_path = os.path.join(BASE_PATH, 'examples', 'custom_api_params.json')
-            if os.path.exists(config_path):
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    self._custom_api_params = json.load(f)
-                self.logger.info(f"已加载自定义API参数配置: {self._custom_api_params}")
-            else:
-                self.logger.warning(f"自定义API参数配置文件不存在: {config_path}")
-                self._custom_api_params = {}
-        except Exception as e:
-            self.logger.error(f"加载自定义API参数配置失败: {e}")
-            self._custom_api_params = {}
+        from ..custom_api_params import load_enabled_custom_api_params
+
+        self._custom_api_params = load_enabled_custom_api_params(
+            {"use_custom_api_params": True},
+            self.logger,
+            target="translator",
+        )
 
     def _configure_custom_api_params(self, args) -> bool:
         """
         根据配置决定是否加载自定义 API 参数，并统一日志输出格式。
         返回值表示是否启用。
         """
-        use_custom_params = getattr(args, 'use_custom_api_params', False)
+        from ..custom_api_params import is_custom_api_params_enabled, load_enabled_custom_api_params
+
+        use_custom_params = is_custom_api_params_enabled(args)
         if not use_custom_params:
             self._custom_api_params = {}
             return False
 
-        self._load_custom_api_params()
-        if self._custom_api_params:
-            self.logger.info(f"已启用自定义API参数: {self._custom_api_params}")
+        self._custom_api_params = load_enabled_custom_api_params(
+            args,
+            self.logger,
+            target="translator",
+        )
         return True
     
     def set_cancel_check_callback(self, callback):
@@ -1606,45 +1615,59 @@ class CommonTranslator(InfererModule):
 ---
 
 **FINAL INSTRUCTION:** Translate the provided text regions faithfully and follow the separate output-format requirements appended below."""
-    _PREV_CONTEXT_PREFIX = "Here are the previous translation results for reference:\n"
-    _PREV_CONTEXT_MESSAGE = (
-        "The next assistant/model message contains finalized translation results from previous pages "
-        "for reference only. Use them only to maintain consistency in terminology, tone, and character "
-        "voice. Do not translate, summarize, repeat, or comment on that history."
-    )
-
-    def _extract_prev_context_payload(self, prev_context: str) -> str:
-        """提取历史上下文正文，供多轮消息使用。"""
+    def _parse_prev_context_turns(self, prev_context: str) -> List[Dict[str, str]]:
+        """解析历史上下文，只接受新的 user/assistant JSON 轮次。"""
         payload = (prev_context or "").strip()
-        if payload.startswith(self._PREV_CONTEXT_PREFIX):
-            payload = payload[len(self._PREV_CONTEXT_PREFIX):].strip()
-        return payload
+        if not payload:
+            return []
+
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+
+        if not isinstance(data, list):
+            return []
+
+        turns: List[Dict[str, str]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            user_content = item.get("user")
+            assistant_content = item.get("assistant")
+            if isinstance(user_content, str) and isinstance(assistant_content, str):
+                turns.append({"user": user_content, "assistant": assistant_content})
+        return turns
 
     def _build_openai_context_messages(self, prev_context: str) -> List[Dict[str, Any]]:
         """将历史上下文转换为 OpenAI 多轮消息，不附带图片。"""
-        payload = self._extract_prev_context_payload(prev_context)
-        if not payload:
+        turns = self._parse_prev_context_turns(prev_context)
+        if not turns:
             self.logger.info("[Context] None")
             return []
 
-        self.logger.info(f"[Context] Length: {len(payload)} chars")
-        return [
-            {"role": "user", "content": self._PREV_CONTEXT_MESSAGE},
-            {"role": "assistant", "content": payload},
-        ]
+        total_chars = sum(len(turn["user"]) + len(turn["assistant"]) for turn in turns)
+        self.logger.info(f"[Context] Turns: {len(turns)}, Length: {total_chars} chars")
+        messages: List[Dict[str, Any]] = []
+        for turn in turns:
+            messages.append({"role": "user", "content": turn["user"]})
+            messages.append({"role": "assistant", "content": turn["assistant"]})
+        return messages
 
     def _build_gemini_context_messages(self, prev_context: str) -> List[Dict[str, Any]]:
         """将历史上下文转换为 Gemini 多轮消息，不附带图片。"""
-        payload = self._extract_prev_context_payload(prev_context)
-        if not payload:
+        turns = self._parse_prev_context_turns(prev_context)
+        if not turns:
             self.logger.info("[Context] None")
             return []
 
-        self.logger.info(f"[Context] Length: {len(payload)} chars")
-        return [
-            {"role": "user", "parts": [{"text": self._PREV_CONTEXT_MESSAGE}]},
-            {"role": "model", "parts": [{"text": payload}]},
-        ]
+        total_chars = sum(len(turn["user"]) + len(turn["assistant"]) for turn in turns)
+        self.logger.info(f"[Context] Turns: {len(turns)}, Length: {total_chars} chars")
+        messages: List[Dict[str, Any]] = []
+        for turn in turns:
+            messages.append({"role": "user", "parts": [{"text": turn["user"]}]})
+            messages.append({"role": "model", "parts": [{"text": turn["assistant"]}]})
+        return messages
 
     def _build_system_prompt_prefix(
         self,
@@ -2131,11 +2154,28 @@ class CommonTranslator(InfererModule):
             raise e
 
     def parse_args(self, config):
-        self.enable_post_translation_check = getattr(config, 'enable_post_translation_check', self.enable_post_translation_check)
-        self.post_check_repetition_threshold = getattr(config, 'post_check_repetition_threshold', self.post_check_repetition_threshold)
-        self.post_check_max_retry_attempts = getattr(config, 'post_check_max_retry_attempts', self.post_check_max_retry_attempts)
-        raw_attempts = getattr(config, 'attempts', self.attempts)
-        self.attempts = self._normalize_retry_attempts(raw_attempts)
+        translator_config = self._resolve_translator_config(config)
+        self._enable_streaming = self._get_config_value(
+            translator_config,
+            'enable_streaming',
+            self._enable_streaming,
+        )
+        self.enable_post_translation_check = getattr(
+            translator_config,
+            'enable_post_translation_check',
+            self.enable_post_translation_check,
+        )
+        self.post_check_repetition_threshold = getattr(
+            translator_config,
+            'post_check_repetition_threshold',
+            self.post_check_repetition_threshold,
+        )
+        self.post_check_max_retry_attempts = getattr(
+            translator_config,
+            'post_check_max_retry_attempts',
+            self.post_check_max_retry_attempts,
+        )
+        self.attempts = get_retry_attempts_from_config(config, logger=self.logger, fallback=-1)
         self._max_total_attempts = self._resolve_max_total_attempts()
 
     def _emit_stream_lines(self, prefix: str, text: str, width: int = 100) -> None:

@@ -14,15 +14,16 @@
   "filter_text_enabled": false,
   "kernel_size": 3,
   "mask_dilation_offset": 20,
+  "use_custom_api_params": true,
   "translator": {
     "translator": "openai",
     "target_lang": "CHS",
+    "enable_streaming": false,
     "no_text_lang_skip": false,
     "high_quality_prompt_path": "dict/prompt_example.yaml",
     "extract_glossary": false,
     "max_requests_per_minute": 0,
-    "attempts": -1,
-    "use_custom_api_params": false
+    "remove_trailing_period": false
   },
   "ocr": {
     "ocr": "48px",
@@ -38,7 +39,7 @@
     "merge_gamma": 0.8,
     "merge_sigma": 2.5,
     "merge_edge_ratio_threshold": 0.0,
-    "merge_special_require_full_wrap": false,
+    "merge_special_require_full_wrap": true,
     "ocr_vl_language_hint": "auto",
     "ocr_vl_custom_prompt": null,
     "ai_ocr_concurrency": 10,
@@ -67,7 +68,7 @@
     "disable_font_border": false,
     "disable_auto_wrap": false,
     "font_size_offset": 0,
-    "font_size_minimum": 0,
+    "font_size_minimum": 26,
     "direction": "auto",
     "uppercase": false,
     "lowercase": false,
@@ -102,7 +103,7 @@
     "colorization_size": 2048,
     "denoise_sigma": 30,
     "colorizer": "none",
-    "ai_colorizer_concurrency": 1
+    "ai_colorizer_history_pages": 0
   },
   "cli": {
     "verbose": false,
@@ -121,7 +122,7 @@
     "batch_size": 3,
     "batch_concurrent": false,
     "generate_and_export": false,
-    "colorize_only": false,
+    "colorize_only": true,
     "upscale_only": false,
     "inpaint_only": false,
     "save_to_source_dir": false,

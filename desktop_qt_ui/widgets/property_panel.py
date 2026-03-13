@@ -1,5 +1,5 @@
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIntValidator, QWheelEvent
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSlider,
     QSizePolicy,
+    QStyle,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -22,6 +23,7 @@ from PyQt6.QtWidgets import (
 from services import get_config_service, get_i18n_manager
 
 from .color_picker import ColorPickerWidget
+from .themed_text_input_dialog import themed_get_text
 # from .collapsible_frame import CollapsibleFrame  # 不再使用折叠框
 from .syntax_highlighter import HorizontalTagHighlighter
 import logging
@@ -368,17 +370,24 @@ class PropertyPanel(QWidget):
         preset_widget = QWidget()
         preset_layout = QHBoxLayout(preset_widget)
         preset_layout.setContentsMargins(0, 0, 0, 0)
-        preset_layout.setSpacing(6)
+        preset_layout.setSpacing(4)
         self.style_preset_combo = QComboBox()
         self.style_preset_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.style_preset_combo.setMinimumContentsLength(12)
         preset_layout.addWidget(self.style_preset_combo, 1)
-        self.save_style_preset_button = QPushButton(self._t("Save Style"))
+        self.save_style_preset_button = QPushButton()
+        self.save_style_preset_button.setObjectName("editor_style_preset_save_button")
         self.save_style_preset_button.setProperty("chipButton", True)
+        self.save_style_preset_button.setFixedSize(30, 30)
+        self.save_style_preset_button.setIconSize(QSize(16, 16))
         preset_layout.addWidget(self.save_style_preset_button)
-        self.delete_style_preset_button = QPushButton(self._t("Delete Style"))
+        self.delete_style_preset_button = QPushButton()
+        self.delete_style_preset_button.setObjectName("editor_style_preset_delete_button")
         self.delete_style_preset_button.setProperty("chipButton", True)
+        self.delete_style_preset_button.setFixedSize(30, 30)
+        self.delete_style_preset_button.setIconSize(QSize(16, 16))
         preset_layout.addWidget(self.delete_style_preset_button)
+        self._refresh_style_preset_action_buttons()
         self.style_preset_label = QLabel(self._t("Style Preset:"))
         style_layout.addRow(self.style_preset_label, preset_widget)
         self._refresh_style_preset_combo()
@@ -796,12 +805,8 @@ class PropertyPanel(QWidget):
         if hasattr(self, 'delete_button'):
             self.delete_button.setText(self._t("Delete"))
             self.delete_button.setToolTip(self._t("Delete") + " (Del)")
-        if hasattr(self, 'save_style_preset_button'):
-            self.save_style_preset_button.setText(self._t("Save Style"))
-            self.save_style_preset_button.setToolTip(self._t("Save current style combination"))
-        if hasattr(self, 'delete_style_preset_button'):
-            self.delete_style_preset_button.setText(self._t("Delete Style"))
-            self.delete_style_preset_button.setToolTip(self._t("Delete selected saved style"))
+        if hasattr(self, 'save_style_preset_button') or hasattr(self, 'delete_style_preset_button'):
+            self._refresh_style_preset_action_buttons()
         
         # 刷新复选框
         if hasattr(self, 'show_refined_mask_checkbox'):
@@ -895,6 +900,79 @@ class PropertyPanel(QWidget):
 
         self.style_preset_combo.setToolTip(self._t("Choose a saved style to apply"))
 
+    def _normalize_region_style_state(self, region_data):
+        if not isinstance(region_data, dict):
+            return {}
+
+        default_font_color = self.config_service.get_config().render.font_color or "#000000"
+        normalized = {}
+        font_value = region_data.get("font_path", region_data.get("font_family", ""))
+        normalized["font_family"] = "" if font_value is None else str(font_value)
+
+        font_color = region_data.get("font_color")
+        fg_colors = region_data.get("fg_colors")
+        if not font_color and isinstance(fg_colors, (list, tuple)) and len(fg_colors) == 3:
+            font_color = f"#{int(fg_colors[0]):02x}{int(fg_colors[1]):02x}{int(fg_colors[2]):02x}"
+        font_color = str(font_color or default_font_color).strip()
+        normalized["font_color"] = QColor(font_color).name() if QColor(font_color).isValid() else "#000000"
+
+        stroke_color = region_data.get("stroke_color")
+        if not stroke_color:
+            bg_color = region_data.get("bg_color")
+            bg_colors = region_data.get("bg_colors")
+            if isinstance(bg_color, (list, tuple)) and len(bg_color) == 3:
+                stroke_color = f"#{int(bg_color[0]):02x}{int(bg_color[1]):02x}{int(bg_color[2]):02x}"
+            elif isinstance(bg_colors, (list, tuple)) and len(bg_colors) == 3:
+                stroke_color = f"#{int(bg_colors[0]):02x}{int(bg_colors[1]):02x}{int(bg_colors[2]):02x}"
+        stroke_color = str(stroke_color or "#ffffff").strip()
+        normalized["stroke_color"] = QColor(stroke_color).name() if QColor(stroke_color).isValid() else "#ffffff"
+
+        try:
+            normalized["stroke_width"] = float(region_data.get("stroke_width", region_data.get("default_stroke_width", 0.07)))
+        except (TypeError, ValueError):
+            normalized["stroke_width"] = 0.07
+
+        try:
+            normalized["line_spacing"] = float(region_data.get("line_spacing", 1.0))
+        except (TypeError, ValueError):
+            normalized["line_spacing"] = 1.0
+
+        try:
+            normalized["letter_spacing"] = float(region_data.get("letter_spacing", 1.0))
+        except (TypeError, ValueError):
+            normalized["letter_spacing"] = 1.0
+
+        normalized["alignment"] = self._alignment_value_from_text(region_data.get("alignment", "auto"))
+        normalized["direction"] = self._direction_value_from_text(region_data.get("direction", "horizontal"))
+        return normalized
+
+    def _find_matching_style_preset_name(self, region_data) -> str | None:
+        normalized_region_style = self._normalize_region_style_state(region_data)
+        if not normalized_region_style:
+            return None
+
+        for name, preset_data in self._get_saved_style_presets().items():
+            if self._normalize_saved_style_preset(preset_data) == normalized_region_style:
+                return str(name)
+        return None
+
+    def _refresh_style_preset_action_buttons(self):
+        if hasattr(self, "save_style_preset_button"):
+            self.save_style_preset_button.setText("")
+            self.save_style_preset_button.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
+            )
+            self.save_style_preset_button.setToolTip(self._t("Save current style combination"))
+            self.save_style_preset_button.setAccessibleName(self._t("Save Style"))
+
+        if hasattr(self, "delete_style_preset_button"):
+            self.delete_style_preset_button.setText("")
+            self.delete_style_preset_button.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
+            )
+            self.delete_style_preset_button.setToolTip(self._t("Delete selected saved style"))
+            self.delete_style_preset_button.setAccessibleName(self._t("Delete Style"))
+
     def _alignment_value_from_text(self, text: str) -> str:
         raw_text = str(text or "").strip()
         if raw_text in {"auto", "left", "center", "right"}:
@@ -968,11 +1046,6 @@ class PropertyPanel(QWidget):
         font_value = style_data.get("font_family", style_data.get("font_path", ""))
         normalized["font_family"] = "" if font_value is None else str(font_value)
 
-        try:
-            normalized["font_size"] = max(8, int(float(style_data.get("font_size", 12))))
-        except (TypeError, ValueError):
-            normalized["font_size"] = 12
-
         font_color = str(style_data.get("font_color") or "#000000").strip()
         normalized["font_color"] = QColor(font_color).name() if QColor(font_color).isValid() else "#000000"
 
@@ -1005,15 +1078,9 @@ class PropertyPanel(QWidget):
 
     def _collect_current_style_preset(self):
         current_font = self.font_family_combo.itemData(self.font_family_combo.currentIndex())
-        font_size_text = self.font_size_input.text().strip()
-        if font_size_text.isdigit():
-            font_size = max(8, int(font_size_text))
-        else:
-            font_size = int(self.font_size_slider.value())
 
         return {
             "font_family": "" if current_font is None else str(current_font),
-            "font_size": font_size,
             "font_color": self.font_color_picker.get_color(),
             "stroke_color": self.stroke_color_picker.get_color(),
             "stroke_width": float(self.stroke_width_spinbox.value()),
@@ -1029,8 +1096,6 @@ class PropertyPanel(QWidget):
             return
 
         self._set_font_family_combo_value(normalized.get("font_family", ""))
-        self.font_size_input.setText(str(normalized.get("font_size", 12)))
-        self.font_size_slider.setValue(normalized.get("font_size", 12))
         self.font_color_picker.set_color(normalized.get("font_color", "#000000"))
         self.stroke_color_picker.set_color(normalized.get("stroke_color", "#ffffff"))
         self.stroke_width_spinbox.setValue(normalized.get("stroke_width", 0.07))
@@ -1062,7 +1127,6 @@ class PropertyPanel(QWidget):
 
         for region_index in selected_indices:
             self.font_family_changed.emit(region_index, style_data.get("font_family", ""))
-            self.font_size_changed.emit(region_index, style_data.get("font_size", 12))
             self.font_color_changed.emit(region_index, style_data.get("font_color", "#000000"))
             self.stroke_color_changed.emit(region_index, style_data.get("stroke_color", "#ffffff"))
             self.stroke_width_changed.emit(region_index, style_data.get("stroke_width", 0.07))
@@ -1080,15 +1144,16 @@ class PropertyPanel(QWidget):
 
     def _on_save_style_preset_clicked(self):
         import copy
-        from PyQt6.QtWidgets import QInputDialog, QMessageBox
+        from PyQt6.QtWidgets import QMessageBox
 
         default_name = self.style_preset_combo.currentData() or ""
-        preset_name, ok = QInputDialog.getText(
+        preset_name, ok = themed_get_text(
             self,
-            self._t("Save Style"),
-            self._t("Enter style preset name:"),
-            QLineEdit.EchoMode.Normal,
-            str(default_name),
+            title=self._t("Save Style"),
+            label=self._t("Enter style preset name:"),
+            text=str(default_name),
+            ok_text=self._t("Save"),
+            cancel_text=self._t("Cancel"),
         )
         if not ok:
             return
@@ -1217,6 +1282,7 @@ class PropertyPanel(QWidget):
             self.index_label.setText(f"多选 ({len(selected_indices)})")
             self.original_text_box.clear()
             self.translated_text_box.clear()
+            self._refresh_style_preset_combo(selected_name="")
             self.block_updates = False
 
     def clear_and_disable_selection_dependent(self):
@@ -1245,6 +1311,7 @@ class PropertyPanel(QWidget):
             self.bbox_label.setText("-")
             self.size_label.setText("-")
             self.angle_label.setText("-")
+            self._refresh_style_preset_combo(selected_name="")
         finally:
             self._set_selection_controls_blocked(False)
             self.block_updates = False
@@ -1356,6 +1423,7 @@ class PropertyPanel(QWidget):
             # --- Update Mask Checkboxes ---
             display_mask_type = self.model.get_display_mask_type()
             self.show_refined_mask_checkbox.setChecked(display_mask_type == 'refined')
+            self._refresh_style_preset_combo(selected_name=self._find_matching_style_preset_name(region_data) or "")
         finally:
             self._set_selection_controls_blocked(False)
             self.block_updates = False

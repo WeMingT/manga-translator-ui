@@ -56,7 +56,7 @@ async def dispatch(chain: TranslatorChain, queries: List[str], config: Config, u
                 #translator = get_translator(key)
             #if translator is None:
             translator = get_translator(chain.translators[flag])
-            translator.parse_args(config.translator)
+            translator.parse_args(config)
             queries = await translator.translate('auto', chain.langs[flag], queries, use_mtpe)
             flag+=1
         return queries
@@ -64,7 +64,7 @@ async def dispatch(chain: TranslatorChain, queries: List[str], config: Config, u
         args['translations'] = {}
     for key, tgt_lang in chain.chain:
         translator = get_translator(key)
-        translator.parse_args(config.translator)
+        translator.parse_args(config)
         if key.value in ["gemini_hq", "openai_hq"]:
             queries = await translator.translate('auto', tgt_lang, queries, ctx=args)
         else:

@@ -1,19 +1,23 @@
 from typing import Any, Dict, List, Optional, Union
 import os
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from manga_translator.custom_api_params import migrate_legacy_custom_api_params_config
+from theme_registry import VALID_THEME_PREFERENCES as REGISTERED_THEME_PREFERENCES
+from theme_registry import VALID_THEMES as REGISTERED_THEMES
 
 
 class TranslatorSettings(BaseModel):
     translator: str = "openai_hq"
     target_lang: str = "CHS"
+    enable_streaming: bool = True
     no_text_lang_skip: bool = False
     # 相对路径，后端会用BASE_PATH拼接（打包后=_internal，开发时=项目根目录）
     high_quality_prompt_path: Optional[str] = "dict/prompt_example.yaml"
     extract_glossary: bool = False
     max_requests_per_minute: int = 0
-    attempts: int = -1  # 翻译重试次数，-1 表示无限重试
-    use_custom_api_params: bool = False  # 是否使用自定义API参数配置文件
+    remove_trailing_period: bool = False
 
 class OcrSettings(BaseModel):
     ocr: str = "48px"
@@ -93,7 +97,7 @@ class ColorizerSettings(BaseModel):
     colorization_size: int = 576
     denoise_sigma: int = 30
     colorizer: str = "none"
-    ai_colorizer_concurrency: int = 1
+    ai_colorizer_history_pages: int = 0
 
 class CliSettings(BaseModel):
     verbose: bool = False  # 默认关闭详细日志
@@ -121,11 +125,30 @@ class CliSettings(BaseModel):
     psd_script_only: bool = False  # 仅生成JSX脚本而不执行Photoshop
     replace_translation: bool = False  # 替换翻译模式：将一张图的翻译应用到另一张生肉图上
 
+
+_LEGACY_THEME_MIGRATIONS = {
+    ("dark", "teal"): "ocean",
+    ("gray", "green"): "forest",
+    ("gray", "orange"): "sunset",
+    ("dark", "rose"): "rose",
+}
+
+_ACCENT_ONLY_THEME_FALLBACKS = {
+    "teal": "ocean",
+    "green": "forest",
+    "orange": "sunset",
+    "rose": "rose",
+}
+
+_VALID_THEMES = set(REGISTERED_THEMES)
+_VALID_THEME_PREFERENCES = set(REGISTERED_THEME_PREFERENCES)
+
+
 class AppSection(BaseModel):
     last_open_dir: str = '.'
     last_output_path: str = ""
     favorite_folders: Optional[List[str]] = None
-    theme: str = "light"  # 主题：light, dark, gray, system
+    theme: str = "light"  # 主题选项由 theme_registry.py 统一定义
     theme_user_preference: str = "light"
     ui_language: str = "auto"  # UI语言：auto(自动检测), zh_CN, en_US, ja_JP, ko_KR 等
     current_preset: str = "默认"  # 当前使用的预设名称
@@ -133,11 +156,45 @@ class AppSection(BaseModel):
     saved_colors: Optional[List[str]] = None  # 保存的常用颜色列表
     saved_style_presets: Optional[Dict[str, Dict[str, Any]]] = None  # 编辑器保存的样式组合
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_theme_variants(cls, data: Any):
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        theme_accent = normalized.get("theme_accent")
+        theme_value = normalized.get("theme")
+        theme_user_preference = normalized.get("theme_user_preference")
+
+        if theme_value == "system":
+            mapped_user_pref = _LEGACY_THEME_MIGRATIONS.get((theme_user_preference, theme_accent))
+            if mapped_user_pref:
+                normalized["theme_user_preference"] = mapped_user_pref
+            elif theme_user_preference not in _VALID_THEME_PREFERENCES and theme_accent in _ACCENT_ONLY_THEME_FALLBACKS:
+                normalized["theme_user_preference"] = _ACCENT_ONLY_THEME_FALLBACKS[theme_accent]
+        else:
+            mapped_theme = _LEGACY_THEME_MIGRATIONS.get((theme_value, theme_accent))
+            if mapped_theme:
+                normalized["theme"] = mapped_theme
+            elif theme_value not in _VALID_THEMES and theme_accent in _ACCENT_ONLY_THEME_FALLBACKS:
+                normalized["theme"] = _ACCENT_ONLY_THEME_FALLBACKS[theme_accent]
+
+            if normalized.get("theme_user_preference") not in _VALID_THEME_PREFERENCES:
+                normalized["theme_user_preference"] = normalized.get("theme", "light")
+
+        if normalized.get("theme") not in _VALID_THEMES:
+            normalized["theme"] = "light"
+        if normalized.get("theme_user_preference") not in _VALID_THEME_PREFERENCES:
+            normalized["theme_user_preference"] = "light"
+        return normalized
+
 class AppSettings(BaseModel):
     app: AppSection = Field(default_factory=AppSection)
     filter_text_enabled: bool = True  # 是否启用过滤列表
     kernel_size: int = 3
     mask_dilation_offset: int = 70
+    use_custom_api_params: bool = False  # 是否使用自定义API参数配置文件（通用）
     translator: TranslatorSettings = Field(default_factory=TranslatorSettings)
     ocr: OcrSettings = Field(default_factory=OcrSettings)
     detector: DetectorSettings = Field(default_factory=DetectorSettings)
@@ -146,3 +203,8 @@ class AppSettings(BaseModel):
     upscale: UpscaleSettings = Field(default_factory=UpscaleSettings)
     colorizer: ColorizerSettings = Field(default_factory=ColorizerSettings)
     cli: CliSettings = Field(default_factory=CliSettings)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_custom_api_params(cls, data: Any):
+        return migrate_legacy_custom_api_params_config(data)

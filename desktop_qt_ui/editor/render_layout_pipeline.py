@@ -1,5 +1,8 @@
 """渲染布局管线 — 计算 dst_points（文字渲染的目标四角点）。"""
+import logging
 from typing import Optional, Tuple
+
+logger = logging.getLogger('manga_translator')
 
 import numpy as np
 from editor import text_renderer_backend

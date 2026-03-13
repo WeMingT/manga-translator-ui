@@ -35,7 +35,7 @@ from editor.render_layout_pipeline import (
 )
 from editor.region_render_snapshot import RegionRenderSnapshot
 from main_view_parts.theme import get_current_theme
-from main_view_parts.theme_colors import get_theme_colors
+from main_view_parts.theme import get_theme_colors
 from services import get_render_parameter_service
 
 # --- 结束新增 ---
@@ -49,6 +49,7 @@ class GraphicsView(QGraphicsView):
     _layout_result_ready = pyqtSignal(list)  # 布局计算结果信号
     color_picked = pyqtSignal(str, str)  # target, hex_color
     color_pick_cancelled = pyqtSignal()
+    view_state_changed = pyqtSignal(object, object)
 
     def __init__(self, model: EditorModel, parent=None):
         super().__init__(parent)
@@ -162,6 +163,18 @@ class GraphicsView(QGraphicsView):
         # --- Mask Editing Connections ---
         self.model.active_tool_changed.connect(self._on_active_tool_changed)
         self.model.brush_size_changed.connect(self._on_brush_size_changed)
+
+    def get_view_state(self):
+        if self._image_item is None:
+            return None, None
+        center_scene = self.mapToScene(self.viewport().rect().center())
+        return QTransform(self.transform()), QPointF(center_scene)
+
+    def _emit_view_state_changed(self):
+        transform, center_scene = self.get_view_state()
+        if transform is None or center_scene is None:
+            return
+        self.view_state_changed.emit(transform, center_scene)
 
     def _scale_mask_item(self, mask_item: QGraphicsPixmapItem):
         """Helper function to scale a mask item to match the base image item."""
@@ -309,6 +322,7 @@ class GraphicsView(QGraphicsView):
         self._image_item.setOpacity(alpha)
         # 不设置场景矩形，让它自动管理
         self.fitInView(self._image_item, Qt.AspectRatioMode.KeepAspectRatio)
+        self._emit_view_state_changed()
 
         # 竞态条件修复：图片加载后，强制触发一次区域重绘和渲染数据计算
         # 以确保在文本区域先于图片加载的情况下，文本也能被正确渲染
@@ -966,6 +980,11 @@ class GraphicsView(QGraphicsView):
         """处理视图大小改变事件"""
         # 不自动适应视图，保持用户的缩放级别
         super().resizeEvent(event)
+        self._emit_view_state_changed()
+
+    def scrollContentsBy(self, dx, dy):
+        super().scrollContentsBy(dx, dy)
+        self._emit_view_state_changed()
 
     def wheelEvent(self, event):
         """处理鼠标滚轮事件以实现缩放"""
@@ -978,6 +997,7 @@ class GraphicsView(QGraphicsView):
             self.scale(zoom_out_factor, zoom_out_factor)
 
         self._update_cursor() # Update cursor size on zoom
+        self._emit_view_state_changed()
 
     @pyqtSlot(str)
     def start_color_pick(self, target: str):
@@ -1536,15 +1556,18 @@ class GraphicsView(QGraphicsView):
     @pyqtSlot()
     def zoom_in(self):
         self.scale(1.15, 1.15)
+        self._emit_view_state_changed()
 
     @pyqtSlot()
     def zoom_out(self):
         self.scale(1 / 1.15, 1 / 1.15)
+        self._emit_view_state_changed()
 
     @pyqtSlot()
     def fit_to_window(self):
         if self._image_item:
             self.fitInView(self._image_item, Qt.AspectRatioMode.KeepAspectRatio)
+            self._emit_view_state_changed()
 
     def contextMenuEvent(self, event):
         """处理右键菜单事件"""

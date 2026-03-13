@@ -11,7 +11,12 @@ from ..config import Renderer
 from ..translators.common import draw_text_boxes_on_image
 from ..utils.ai_image_preprocess import normalize_ai_image, prepare_square_ai_image, restore_square_ai_image
 from ..utils.openai_image_interface import request_openai_image_with_fallback
+from ..custom_api_params import (
+    load_enabled_custom_api_params,
+    split_gemini_request_params,
+)
 from ..utils import TextBlock, get_logger
+from ..utils.retry import run_with_retry
 from .prompt_loader import (
     DEFAULT_AI_RENDERER_PROMPT,
     ensure_ai_renderer_prompt_file,
@@ -199,6 +204,24 @@ class BaseAPIRenderer:
             raise RuntimeError(f"Failed to download rendered image: HTTP {response.status_code}")
         return Image.open(io.BytesIO(response.content)).convert("RGB")
 
+    async def _reset_client_for_retry(self, attempt_index: int, error: Exception):
+        del attempt_index, error
+        if self.client is None:
+            return
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._client_loop is current_loop and current_loop is not None:
+            try:
+                await self.client.close()
+            except Exception:
+                pass
+        self.client = None
+        self._client_loop = None
+
     def _extract_gemini_image(self, response) -> Optional[Image.Image]:
         raw = getattr(response, "raw", None) or {}
         for candidate in raw.get("candidates") or []:
@@ -238,12 +261,30 @@ class BaseAPIRenderer:
             offset_x=restore_info.offset_x,
             offset_y=restore_info.offset_y,
         )
+        custom_api_params = load_enabled_custom_api_params(config, self.logger, target="render")
         semaphore = _get_renderer_semaphore(self.PROVIDER_NAME, self._resolve_concurrency(config))
 
         async with semaphore:
-            result_image = await self._request_rendered_image(
-                image=request_image,
-                prompt_text=prompt_text,
+            async def _do_request() -> Image.Image:
+                await self.ensure_client()
+                if not self.client or not self.api_key:
+                    raise RuntimeError(
+                        f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env "
+                        f"(or fallback {self.FALLBACK_API_KEY_ENV})."
+                    )
+                return await self._request_rendered_image(
+                    image=request_image,
+                    prompt_text=prompt_text,
+                    custom_api_params=custom_api_params,
+                )
+
+            result_image = await run_with_retry(
+                operation=_do_request,
+                runtime_config=config,
+                provider_name=self.PROVIDER_NAME,
+                operation_name="render request",
+                logger=self.logger,
+                on_retry=self._reset_client_for_retry,
             )
 
         result_image = restore_square_ai_image(self._to_pil(result_image), restore_info)
@@ -254,7 +295,12 @@ class BaseAPIRenderer:
     def _create_client(self, api_key: str, base_url: str):
         raise NotImplementedError
 
-    async def _request_rendered_image(self, image: Image.Image, prompt_text: str) -> Image.Image:
+    async def _request_rendered_image(
+        self,
+        image: Image.Image,
+        prompt_text: str,
+        custom_api_params: dict | None = None,
+    ) -> Image.Image:
         raise NotImplementedError
 
 
@@ -282,7 +328,12 @@ class OpenAIRenderer(BaseAPIRenderer):
             stream_timeout=300.0,
         )
 
-    async def _request_rendered_image(self, image: Image.Image, prompt_text: str) -> Image.Image:
+    async def _request_rendered_image(
+        self,
+        image: Image.Image,
+        prompt_text: str,
+        custom_api_params: dict | None = None,
+    ) -> Image.Image:
         return await request_openai_image_with_fallback(
             session=self.client.session,
             base_url=self.base_url,
@@ -296,6 +347,7 @@ class OpenAIRenderer(BaseAPIRenderer):
             fetch_remote_image=self._fetch_image_from_url,
             provider_name=self.PROVIDER_NAME,
             logger=self.logger,
+            extra_request_params=custom_api_params,
         )
 
 
@@ -329,11 +381,21 @@ class GeminiRenderer(BaseAPIRenderer):
             stream_timeout=300.0,
         )
 
-    async def _request_rendered_image(self, image: Image.Image, prompt_text: str) -> Image.Image:
+    async def _request_rendered_image(
+        self,
+        image: Image.Image,
+        prompt_text: str,
+        custom_api_params: dict | None = None,
+    ) -> Image.Image:
         image_b64 = base64.b64encode(self._image_to_png_bytes(image)).decode("ascii")
-        response = await self.client.models.generate_content(
-            model=self.model_name,
-            contents=[
+        request_overrides, generation_overrides = split_gemini_request_params(custom_api_params)
+        generation_config = {
+            "responseModalities": ["TEXT", "IMAGE"],
+        }
+        generation_config.update(generation_overrides)
+        request_kwargs = {
+            "model": self.model_name,
+            "contents": [
                 {
                     "role": "user",
                     "parts": [
@@ -347,13 +409,11 @@ class GeminiRenderer(BaseAPIRenderer):
                     ],
                 }
             ],
-            generationConfig={
-                "temperature": 0.1,
-                "maxOutputTokens": 8192,
-                "responseModalities": ["TEXT", "IMAGE"],
-            },
-            safetySettings=self.SAFETY_SETTINGS,
-        )
+            "generationConfig": generation_config,
+            "safetySettings": self.SAFETY_SETTINGS,
+        }
+        request_kwargs.update(request_overrides)
+        response = await self.client.models.generate_content(**request_kwargs)
         image_result = self._extract_gemini_image(response)
         if image_result is None:
             raise RuntimeError("Gemini renderer response did not contain an image.")

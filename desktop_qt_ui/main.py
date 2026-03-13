@@ -46,6 +46,7 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
 from PyQt6.QtWidgets import QApplication
 from main_window import MainWindow
 from services import init_services
+from utils.resource_helper import load_icon_from_resources
 from widgets.themed_message_box import install_themed_message_boxes
 
 # 全局异常处理器，捕获未处理的异常并记录到日志
@@ -221,30 +222,27 @@ def main():
     from PyQt6.QtCore import qInstallMessageHandler
     qInstallMessageHandler(qt_message_handler)
     
-    # 设置应用程序图标（用于任务栏/Dock）
-    from PyQt6.QtGui import QIcon
-    
-    # 确定图标路径
-    if getattr(sys, 'frozen', False):
-        # 打包环境：图标在 _internal 目录下
-        exe_dir = os.path.dirname(sys.executable)
-        icon_path = os.path.join(exe_dir, '_internal', 'doc', 'images', 'icon.ico')
-    else:
-        # 开发环境
-        base_icon_dir = os.path.join(os.path.dirname(__file__), '..', 'doc', 'images')
-        # macOS 使用 .icns 文件
-        if sys.platform == 'darwin':
-            icon_path = os.path.join(base_icon_dir, 'icon.icns')
-        else:
-            icon_path = os.path.join(base_icon_dir, 'icon.ico')
-    
-    icon_path = os.path.abspath(icon_path)
     app_icon = None
-    
-    if os.path.exists(icon_path):
-        app_icon = QIcon(icon_path)
-        if not app_icon.isNull():
-            app.setWindowIcon(app_icon)
+
+    icon_candidates = []
+    if sys.platform == 'darwin':
+        icon_candidates.extend([
+            os.path.join('doc', 'images', 'icon.icns'),
+            os.path.join('doc', 'images', 'icon.png'),
+            os.path.join('doc', 'images', 'icon.ico'),
+        ])
+    else:
+        icon_candidates.extend([
+            os.path.join('doc', 'images', 'icon.ico'),
+            os.path.join('doc', 'images', 'icon.png'),
+        ])
+
+    app_icon, icon_source = load_icon_from_resources(icon_candidates)
+    if app_icon and not app_icon.isNull():
+        app.setWindowIcon(app_icon)
+        logging.info(f"UI 图标加载成功: {icon_source}")
+    else:
+        logging.warning("UI 图标加载失败：未找到可用的 icon.ico/icon.png/icon.icns")
 
     # 2. 初始化所有服务
     # 设置正确的根目录：打包后指向_internal，开发时指向项目根目录

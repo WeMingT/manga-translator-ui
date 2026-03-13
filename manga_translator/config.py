@@ -4,7 +4,9 @@ from enum import Enum
 from typing import Optional, Any, Union
 
 from omegaconf import OmegaConf
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, PrivateAttr, model_validator
+
+from manga_translator.custom_api_params import migrate_legacy_custom_api_params_config
 
 
 # TODO: Refactor
@@ -244,6 +246,8 @@ class TranslatorConfig(BaseModel):
     """Language translator to use"""
     target_lang: str = 'ENG' #todo: validate VALID_LANGUAGES #todo: convert to enum
     """Destination language"""
+    enable_streaming: bool = True
+    """Enable unified streaming transport for supported AI translators."""
     no_text_lang_skip: bool = False
     """Dont skip text that is seemingly already in the target language."""
     skip_lang: Optional[str] = None
@@ -252,8 +256,10 @@ class TranslatorConfig(BaseModel):
     """Path to a JSON file containing custom prompts for high-quality translation."""
     extract_glossary: bool = False
     """Automatically extract new terms to glossary (requires high_quality_prompt_path)"""
+    remove_trailing_period: bool = False
+    """Remove a sentence-final period from the translation when the source text has no terminal punctuation."""
     translator_chain: Optional[str] = None
-    """Output of one translator goes in another. Example: --translator-chain "openai:JPN;gemini:ENG"."""
+    """Output of one translator goes in another. Example: --translator-chain "openai:JPN;gemini:ENG"."""    
     selective_translation: Optional[str] = None
     """Select a translator based on detected language in image. Note the first translation service acts as default if the language isn\'t defined. Example: --translator-chain "openai:JPN;gemini:ENG".'"""
     
@@ -266,17 +272,9 @@ class TranslatorConfig(BaseModel):
     user_api_model: Optional[str] = None
     """User-provided model name (overrides environment variable)"""
     
-    # 重试配置
-    attempts: int = -1
-    """Retry attempts on encountered error. -1 means infinite times."""
-    
     # API请求频率限制配置
     max_requests_per_minute: int = 0
     """Maximum API requests per minute. 0 means no limit."""
-    
-    # 自定义API参数配置
-    use_custom_api_params: bool = False
-    """Use custom API parameters from examples/custom_api_params.json"""
     
     # 译后检查配置项
     enable_post_translation_check: bool = False
@@ -346,8 +344,8 @@ class ColorizerConfig(BaseModel):
     """Used by colorizer and affects color strength, range from 0 to 255 (default 30). -1 turns it off."""
     colorizer: Colorizer = Colorizer.none
     """Colorization model to use."""
-    ai_colorizer_concurrency: int = 1
-    """Maximum concurrent API requests for OpenAI Colorizer and Gemini Colorizer."""
+    ai_colorizer_history_pages: int = 0
+    """How many previously colorized pages to attach as image-only context for AI colorizers."""
 
 class CliConfig(BaseModel):
     """CLI-specific configuration options"""
@@ -449,3 +447,10 @@ class Config(BaseModel):
     """Set the convolution kernel size of the text erasure area to completely clean up text residues"""
     mask_dilation_offset: int = 20
     """By how much to extend the text mask to remove left-over text pixels of the original image."""
+    use_custom_api_params: bool = False
+    """Use custom API parameters from examples/custom_api_params.json for supported AI backends."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_custom_api_params(cls, data):
+        return migrate_legacy_custom_api_params_config(data)

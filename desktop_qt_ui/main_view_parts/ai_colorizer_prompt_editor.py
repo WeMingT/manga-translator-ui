@@ -1,0 +1,611 @@
+import json
+import os
+from typing import Callable, Dict, List, Optional
+
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import (
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHeaderView,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from main_view_parts.theme import (
+    apply_widget_stylesheet,
+    get_current_theme,
+    get_current_theme_colors,
+    repolish_widget,
+)
+from manga_translator.colorization.prompt_loader import load_ai_colorizer_prompt_template
+from widgets.filter_list_editor import _dialog_stylesheet as _base_dialog_stylesheet, _monospace_font
+from widgets.themed_text_input_dialog import themed_get_text
+
+
+def is_ai_colorizer_prompt_data(data) -> bool:
+    return isinstance(data, dict) and any(
+        key in data
+        for key in (
+            "ai_colorizer_prompt",
+            "colorizer_prompt",
+            "prompt",
+            "colorization_rules",
+            "rules",
+            "style_guide",
+            "reference_images",
+            "reference_image_paths",
+            "images",
+        )
+    )
+
+
+def is_ai_colorizer_prompt_file(file_path: str) -> bool:
+    ext = os.path.splitext(file_path)[1].lower()
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            if ext in (".yaml", ".yml"):
+                import yaml
+
+                data = yaml.safe_load(handle)
+            else:
+                data = json.load(handle)
+    except Exception:
+        return False
+    return is_ai_colorizer_prompt_data(data)
+
+
+def _dialog_stylesheet() -> str:
+    colors = get_current_theme_colors()
+    is_light = get_current_theme() == "light"
+    status_success = "#2E9D57" if is_light else "#6BCB77"
+    status_error = "#D94C4C" if is_light else "#FF7B7B"
+    return _base_dialog_stylesheet() + f"""
+        QScrollArea#editor_scroll {{
+            background: transparent;
+            border: none;
+        }}
+        QWidget#editor_scroll_content {{
+            background: transparent;
+        }}
+        QPushButton#add_section_button {{
+            border-style: dashed;
+            padding-left: 20px;
+            padding-right: 20px;
+        }}
+        QPushButton#section_icon_button {{
+            min-width: 28px;
+            max-width: 28px;
+            min-height: 24px;
+            max-height: 24px;
+            padding: 0px;
+        }}
+        QTableWidget#reference_images_table {{
+            background: {colors["bg_input"]};
+            border: 1px solid {colors["border_input"]};
+            border-radius: 8px;
+            color: {colors["text_primary"]};
+            gridline-color: {colors["divider_sub_line"]};
+            font-size: 12px;
+        }}
+        QTableWidget#reference_images_table::item {{
+            padding: 4px 8px;
+        }}
+        QTableWidget#reference_images_table::item:alternate {{
+            background: {colors["bg_surface_soft"]};
+        }}
+        QTableWidget#reference_images_table::item:selected {{
+            background: {colors["list_item_selected"]};
+            color: {colors["list_item_selected_text"]};
+        }}
+        QTableWidget#reference_images_table QHeaderView::section {{
+            background: {colors["bg_toolbar"]};
+            color: {colors["text_page_title"]};
+            font-weight: 600;
+            font-size: 11px;
+            padding: 5px 8px;
+            border: none;
+            border-bottom: 1px solid {colors["border_input"]};
+        }}
+        QLabel#status_label[statusState="default"] {{
+            color: {colors["text_muted"]};
+        }}
+        QLabel#status_label[statusState="success"] {{
+            color: {status_success};
+        }}
+        QLabel#status_label[statusState="error"] {{
+            color: {status_error};
+        }}
+    """
+
+
+def _section_label(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setObjectName("section_label")
+    return label
+
+
+def _dim_label(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setObjectName("hint_label")
+    return label
+
+
+def _divider() -> QFrame:
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setObjectName("divider")
+    return line
+
+
+def _styled_text_edit(text: str = "", read_only: bool = False) -> QPlainTextEdit:
+    editor = QPlainTextEdit(text)
+    editor.setReadOnly(read_only)
+    editor.setObjectName("monospace_editor")
+    editor.setFont(_monospace_font())
+    editor.setTabStopDistance(28)
+    return editor
+
+
+def _make_reference_images_table(
+    entries: Optional[List[Dict[str, str]]] = None,
+    *,
+    t_func: Callable = lambda x: x,
+) -> QTableWidget:
+    rows = entries or []
+    table = QTableWidget(len(rows), 2)
+    table.setObjectName("reference_images_table")
+    table.setHorizontalHeaderLabels([t_func("Path"), t_func("Description")])
+    table.horizontalHeader().setStretchLastSection(True)
+    table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    table.verticalHeader().setVisible(False)
+    table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+    table.setAlternatingRowColors(True)
+    table.verticalHeader().setDefaultSectionSize(28)
+    for row, entry in enumerate(rows):
+        table.setItem(row, 0, QTableWidgetItem(entry.get("path", "")))
+        table.setItem(row, 1, QTableWidgetItem(entry.get("description", "")))
+    return table
+
+
+class AIColorizerPromptEditorDialog(QDialog):
+    _SECTION_META = {
+        "prompt_text": "Prompt Text",
+        "colorization_rules": "Colorization Rules",
+        "reference_images": "Reference Images",
+    }
+
+    def __init__(self, file_path: str, t_func: Callable = None, parent=None):
+        super().__init__(parent)
+        self._t = t_func or (lambda x: x)
+        self._file_path = file_path
+        self._original_content = ""
+        self._data: Dict[str, object] = {}
+        self._was_saved = False
+
+        self._prompt_text_edit: Optional[QPlainTextEdit] = None
+        self._rules_edit: Optional[QPlainTextEdit] = None
+        self._reference_images_table: Optional[QTableWidget] = None
+        self._section_containers: List[tuple[str, QWidget]] = []
+
+        self._setup_ui()
+        self._load_file()
+
+    def _setup_ui(self):
+        self.setWindowTitle(self._t("Edit Prompt") + f" - {os.path.basename(self._file_path)}")
+        self.setMinimumSize(820, 580)
+        self.resize(980, 680)
+        self.setModal(True)
+        apply_widget_stylesheet(self, _dialog_stylesheet())
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(10)
+
+        header = QHBoxLayout()
+        title = QLabel(self._t("Edit Prompt"))
+        title.setObjectName("dialog_title")
+        header.addWidget(title, 1)
+        file_label = _dim_label(os.path.basename(self._file_path))
+        file_label.setObjectName("dialog_subtitle")
+        header.addWidget(file_label)
+        root.addLayout(header)
+        root.addWidget(_divider())
+
+        self._tabs = QTabWidget()
+        root.addWidget(self._tabs, 1)
+
+        self._status = _dim_label("")
+        self._status.setObjectName("status_label")
+        self._status.setProperty("statusState", "default")
+        root.addWidget(self._status)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+
+        cancel_btn = QPushButton(self._t("Cancel"))
+        cancel_btn.setFixedWidth(100)
+        cancel_btn.setProperty("chipButton", True)
+        cancel_btn.clicked.connect(self.reject)
+
+        save_btn = QPushButton(self._t("Save"))
+        save_btn.setFixedWidth(100)
+        save_btn.setProperty("variant", "accent")
+        save_btn.clicked.connect(self._save)
+
+        buttons.addWidget(cancel_btn)
+        buttons.addWidget(save_btn)
+        root.addLayout(buttons)
+
+    def _load_file(self):
+        try:
+            with open(self._file_path, "r", encoding="utf-8") as handle:
+                self._original_content = handle.read()
+        except Exception as exc:
+            self._original_content = ""
+            self._set_status(f"Error: {exc}", "error")
+
+        self._data = load_ai_colorizer_prompt_template(self._file_path)
+        self._build_template_tab()
+        self._build_raw_tab()
+        self._set_status(self._t("Loaded successfully"), "default")
+
+    def _build_template_tab(self):
+        page = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setObjectName("editor_scroll")
+
+        content = QWidget()
+        content.setObjectName("editor_scroll_content")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+
+        self._template_layout = layout
+        self._insert_section("prompt_text", text=str(self._data.get("ai_colorizer_prompt", "")))
+        self._insert_section(
+            "colorization_rules",
+            rules=self._data.get("colorization_rules", []),
+        )
+        self._insert_section(
+            "reference_images",
+            images=self._data.get("reference_images", []),
+        )
+
+        self._add_section_btn = QPushButton("+ " + self._t("Add Section"))
+        self._add_section_btn.setProperty("chipButton", True)
+        self._add_section_btn.setObjectName("add_section_button")
+        self._add_section_btn.clicked.connect(self._show_add_section_menu)
+        layout.addWidget(self._add_section_btn)
+        layout.addStretch()
+
+        scroll.setWidget(content)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(scroll)
+        self._tabs.addTab(page, self._t("Template Edit"))
+
+    def _build_raw_tab(self):
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(8, 8, 8, 8)
+        page_layout.setSpacing(6)
+        page_layout.addWidget(_dim_label(self._t("Edit the raw file content directly")))
+        self._free_editor = _styled_text_edit(self._original_content)
+        page_layout.addWidget(self._free_editor, 1)
+        self._tabs.addTab(page, self._t("Raw Edit"))
+
+    def _make_section_container(self, key: str) -> tuple[QWidget, QVBoxLayout]:
+        container = QWidget()
+        container.setProperty("sectionKey", key)
+        container.setObjectName("section_card")
+
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(_section_label(self._t(self._SECTION_META.get(key, key))))
+        header.addStretch()
+
+        btn_up = QPushButton("^")
+        btn_up.setToolTip(self._t("Move Up"))
+        btn_up.setObjectName("section_icon_button")
+        btn_up.setProperty("chipButton", True)
+        btn_up.setFixedSize(28, 24)
+        btn_up.clicked.connect(lambda: self._move_section(container, -1))
+
+        btn_down = QPushButton("v")
+        btn_down.setToolTip(self._t("Move Down"))
+        btn_down.setObjectName("section_icon_button")
+        btn_down.setProperty("chipButton", True)
+        btn_down.setFixedSize(28, 24)
+        btn_down.clicked.connect(lambda: self._move_section(container, 1))
+
+        btn_delete = QPushButton("x")
+        btn_delete.setToolTip(self._t("Delete"))
+        btn_delete.setObjectName("section_icon_button")
+        btn_delete.setProperty("variant", "danger")
+        btn_delete.setFixedSize(28, 24)
+        btn_delete.clicked.connect(lambda: self._remove_section(container, key))
+
+        header.addWidget(btn_up)
+        header.addWidget(btn_down)
+        header.addWidget(btn_delete)
+        outer.addLayout(header)
+
+        body = QVBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(6)
+        outer.addLayout(body)
+        outer.addWidget(_divider())
+        return container, body
+
+    def _insert_section(self, key: str, idx: int = -1, **kwargs):
+        container, body = self._make_section_container(key)
+        if key == "prompt_text":
+            self._fill_prompt_text(body, kwargs.get("text", ""))
+        elif key == "colorization_rules":
+            self._fill_colorization_rules(body, kwargs.get("rules", []))
+        elif key == "reference_images":
+            self._fill_reference_images(body, kwargs.get("images", []))
+
+        if idx < 0:
+            if hasattr(self, "_add_section_btn") and self._add_section_btn is not None:
+                button_index = self._template_layout.indexOf(self._add_section_btn)
+                if button_index >= 0:
+                    self._template_layout.insertWidget(button_index, container)
+                else:
+                    self._template_layout.addWidget(container)
+            else:
+                self._template_layout.addWidget(container)
+            self._section_containers.append((key, container))
+        else:
+            self._template_layout.insertWidget(idx, container)
+            self._section_containers.insert(idx, (key, container))
+
+    def _fill_prompt_text(self, layout: QVBoxLayout, text: str):
+        self._prompt_text_edit = _styled_text_edit(text)
+        self._prompt_text_edit.setFixedHeight(180)
+        layout.addWidget(self._prompt_text_edit)
+
+    def _fill_colorization_rules(self, layout: QVBoxLayout, rules: List[str]):
+        layout.addWidget(_dim_label(self._t("One rule per line")))
+        text = "\n".join(str(item) for item in rules) if isinstance(rules, list) else ""
+        self._rules_edit = _styled_text_edit(text)
+        self._rules_edit.setFixedHeight(110)
+        layout.addWidget(self._rules_edit)
+
+    def _fill_reference_images(self, layout: QVBoxLayout, images: List[Dict[str, str]]):
+        self._reference_images_table = _make_reference_images_table(images, t_func=self._t)
+        self._reference_images_table.setMinimumHeight(120)
+        layout.addWidget(self._reference_images_table)
+
+        row_buttons = QHBoxLayout()
+        add_btn = QPushButton("+ " + self._t("Add Reference Image"))
+        add_btn.setProperty("chipButton", True)
+        add_btn.clicked.connect(self._prompt_and_add_reference_image)
+
+        del_btn = QPushButton("- " + self._t("Delete Row"))
+        del_btn.setProperty("chipButton", True)
+        del_btn.clicked.connect(lambda: self._del_table_row(self._reference_images_table))
+
+        row_buttons.addWidget(add_btn)
+        row_buttons.addWidget(del_btn)
+        row_buttons.addStretch()
+        layout.addLayout(row_buttons)
+
+    def _prompt_and_add_reference_image(self):
+        if self._reference_images_table is None:
+            return
+
+        description, ok = themed_get_text(
+            self,
+            title=self._t("Reference Images"),
+            label=self._t("Description") + ":",
+            ok_text=self._t("OK"),
+            cancel_text=self._t("Cancel"),
+        )
+        if not ok:
+            return
+
+        start_dir = os.path.dirname(os.path.abspath(self._file_path)) if self._file_path else os.getcwd()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            self._t("Reference Images"),
+            start_dir,
+            "Image Files (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;All Files (*)",
+        )
+        if not file_path:
+            return
+
+        display_path = os.path.normpath(file_path)
+        try:
+            prompt_dir = os.path.dirname(os.path.abspath(self._file_path))
+            display_path = os.path.relpath(display_path, prompt_dir)
+        except ValueError:
+            pass
+
+        row = self._reference_images_table.rowCount()
+        self._reference_images_table.insertRow(row)
+        self._reference_images_table.setItem(row, 0, QTableWidgetItem(display_path.replace("\\", "/")))
+        self._reference_images_table.setItem(row, 1, QTableWidgetItem(description.strip()))
+
+    def _move_section(self, container: QWidget, direction: int):
+        index = None
+        for idx, (_, current) in enumerate(self._section_containers):
+            if current is container:
+                index = idx
+                break
+        if index is None:
+            return
+
+        new_index = index + direction
+        if new_index < 0 or new_index >= len(self._section_containers):
+            return
+
+        self._section_containers[index], self._section_containers[new_index] = (
+            self._section_containers[new_index],
+            self._section_containers[index],
+        )
+
+        self._template_layout.removeWidget(container)
+        _, other = self._section_containers[index]
+        layout_pos = self._template_layout.indexOf(other)
+        if direction < 0:
+            self._template_layout.insertWidget(layout_pos, container)
+        else:
+            self._template_layout.insertWidget(layout_pos + 1, container)
+
+    def _remove_section(self, container: QWidget, key: str):
+        self._section_containers = [(k, c) for k, c in self._section_containers if c is not container]
+        self._template_layout.removeWidget(container)
+        container.setParent(None)
+        container.deleteLater()
+
+        if key == "prompt_text":
+            self._prompt_text_edit = None
+        elif key == "colorization_rules":
+            self._rules_edit = None
+        elif key == "reference_images":
+            self._reference_images_table = None
+
+    def _show_add_section_menu(self):
+        menu = QMenu(self)
+        existing = {key for key, _ in self._section_containers}
+        has_items = False
+        for key, label in self._SECTION_META.items():
+            if key in existing:
+                continue
+            action = QAction(self._t(label), self)
+            action.triggered.connect(lambda checked=False, section_key=key: self._insert_section(section_key))
+            menu.addAction(action)
+            has_items = True
+
+        if not has_items:
+            action = QAction(self._t("All sections added"), self)
+            action.setEnabled(False)
+            menu.addAction(action)
+
+        menu.exec(self._add_section_btn.mapToGlobal(self._add_section_btn.rect().topLeft()))
+
+    @staticmethod
+    def _add_table_row(table: Optional[QTableWidget], cols: int):
+        if table is None:
+            return
+        row = table.rowCount()
+        table.insertRow(row)
+        for column in range(cols):
+            table.setItem(row, column, QTableWidgetItem(""))
+
+    @staticmethod
+    def _del_table_row(table: Optional[QTableWidget]):
+        if table is None:
+            return
+        rows = sorted({index.row() for index in table.selectedIndexes()}, reverse=True)
+        if not rows:
+            last = table.rowCount() - 1
+            if last >= 0:
+                rows = [last]
+        for row in rows:
+            table.removeRow(row)
+
+    def _collect_template_data(self) -> Dict[str, object]:
+        data: Dict[str, object] = {}
+        existing = {key for key, _ in self._section_containers}
+
+        if "prompt_text" in existing and self._prompt_text_edit is not None:
+            data["ai_colorizer_prompt"] = self._prompt_text_edit.toPlainText()
+        if "colorization_rules" in existing and self._rules_edit is not None:
+            data["colorization_rules"] = [
+                line for line in self._rules_edit.toPlainText().splitlines() if line.strip()
+            ]
+        if "reference_images" in existing and self._reference_images_table is not None:
+            images: List[Dict[str, str]] = []
+            for row in range(self._reference_images_table.rowCount()):
+                path_item = self._reference_images_table.item(row, 0) or QTableWidgetItem("")
+                desc_item = self._reference_images_table.item(row, 1) or QTableWidgetItem("")
+                path = path_item.text().strip()
+                description = desc_item.text().strip()
+                if path:
+                    images.append({"path": path, "description": description})
+            data["reference_images"] = images
+        return data
+
+    def _set_status(self, text: str, state: str = "default"):
+        self._status.setText(text)
+        self._status.setProperty("statusState", state)
+        repolish_widget(self._status)
+
+    def _serialize_structured(self, data: Dict[str, object]) -> str:
+        ext = os.path.splitext(self._file_path)[1].lower()
+        if ext in (".yaml", ".yml"):
+            try:
+                import yaml
+
+                return yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            except ImportError:
+                return json.dumps(data, indent=2, ensure_ascii=False)
+        return json.dumps(data, indent=2, ensure_ascii=False)
+
+    def _validate_raw_content(self, content: str) -> Optional[str]:
+        ext = os.path.splitext(self._file_path)[1].lower()
+        if ext == ".json":
+            try:
+                json.loads(content)
+            except json.JSONDecodeError as exc:
+                return f"JSON {self._t('Format Error')}: {exc}"
+        elif ext in (".yaml", ".yml"):
+            try:
+                import yaml
+
+                yaml.safe_load(content)
+            except ImportError:
+                return None
+            except Exception as exc:
+                return f"YAML {self._t('Format Error')}: {exc}"
+        return None
+
+    def _save(self):
+        current_tab = self._tabs.currentIndex()
+        if current_tab == 0:
+            try:
+                content = self._serialize_structured(self._collect_template_data())
+            except Exception as exc:
+                self._set_status(f"{self._t('Serialize Error')}: {exc}", "error")
+                return
+        else:
+            content = self._free_editor.toPlainText()
+            validation_error = self._validate_raw_content(content)
+            if validation_error:
+                self._set_status(validation_error, "error")
+                return
+
+        try:
+            with open(self._file_path, "w", encoding="utf-8") as handle:
+                handle.write(content)
+        except Exception as exc:
+            self._set_status(f"{self._t('Save failed')}: {exc}", "error")
+            return
+
+        self._was_saved = True
+        self._original_content = content
+        self._free_editor.setPlainText(content)
+        self._set_status(self._t("Saved successfully"), "success")
+        self.accept()
+
+    def get_was_modified(self) -> bool:
+        return self._was_saved or self._free_editor.toPlainText() != self._original_content

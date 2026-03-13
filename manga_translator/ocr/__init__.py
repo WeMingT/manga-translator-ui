@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Optional
+from typing import Any, List, Optional
 from .common import CommonOCR, OfflineOCR
 from .model_32px import Model32pxOCR
 from .model_48px import Model48pxOCR
@@ -49,6 +49,21 @@ OCRS = {
 }
 ocr_cache = {}
 
+
+def _resolve_ocr_config(config: Optional[Any]) -> Any:
+    if config is None:
+        return OcrConfig()
+    if isinstance(config, OcrConfig):
+        return config
+    nested_ocr_config = getattr(config, 'ocr', None)
+    if isinstance(nested_ocr_config, OcrConfig):
+        return nested_ocr_config
+    if nested_ocr_config is not None and hasattr(nested_ocr_config, 'ignore_bubble'):
+        return nested_ocr_config
+    if isinstance(config, Ocr):
+        return OcrConfig(ocr=config)
+    return config
+
 def get_ocr(key: Ocr, *args, **kwargs) -> CommonOCR:
     if key not in OCRS:
         raise ValueError(f'Could not find OCR for: "{key}". Choose from the following: %s' % ','.join(OCRS))
@@ -67,12 +82,29 @@ async def prepare(ocr_key: Ocr, device: str = 'cpu'):
         await ocr.download()
         await ocr.load(device)
 
-async def dispatch(ocr_key: Ocr, image: np.ndarray, regions: List[Quadrilateral], config:Optional[OcrConfig] = None, device: str = 'cpu', verbose: bool = False) -> List[Quadrilateral]:
+async def dispatch(
+    ocr_key: Ocr,
+    image: np.ndarray,
+    regions: List[Quadrilateral],
+    config: Optional[OcrConfig] = None,
+    device: str = 'cpu',
+    verbose: bool = False,
+    runtime_config=None,
+) -> List[Quadrilateral]:
     ocr = get_ocr(ocr_key)
     if isinstance(ocr, OfflineOCR):
         await ocr.load(device)
-    config = config or OcrConfig()
-    return await ocr.recognize(image, regions, config, verbose)
+    runtime_config = runtime_config or config
+    ocr_config = _resolve_ocr_config(config)
+    if getattr(ocr, "SUPPORTS_RUNTIME_CONFIG", False):
+        return await ocr.recognize(
+            image,
+            regions,
+            ocr_config,
+            verbose,
+            runtime_config=runtime_config,
+        )
+    return await ocr.recognize(image, regions, ocr_config, verbose)
 
 async def unload(ocr_key: Ocr):
     ocr = ocr_cache.pop(ocr_key, None)

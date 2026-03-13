@@ -65,6 +65,8 @@ def update_progress(self, current: int, total: int, message: str = ""):
         self.progress_bar.setValue(current)
         percentage = int((current / total) * 100) if total > 0 else 0
         self.progress_bar.setFormat(f"{current}/{total} ({percentage}%)")
+        if hasattr(self, "progress_info_label"):
+            self.progress_info_label.setText(message or f"已完成 {current}/{total}")
 
         if not getattr(self, "_progress_active", False):
             self._progress_active = True
@@ -74,6 +76,8 @@ def update_progress(self, current: int, total: int, message: str = ""):
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("0/0 (0%)")
+        if hasattr(self, "progress_info_label"):
+            self.progress_info_label.setText("")
         _set_progress_state(self, "idle")
 
 
@@ -83,6 +87,8 @@ def reset_progress(self):
     self.progress_bar.setMaximum(100)
     self.progress_bar.setValue(0)
     self.progress_bar.setFormat("0/0 (0%)")
+    if hasattr(self, "progress_info_label"):
+        self.progress_info_label.setText("")
     _set_progress_state(self, "idle")
 
 

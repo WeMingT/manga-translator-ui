@@ -36,6 +36,7 @@ from manga_translator.utils.path_manager import (
     find_json_path,
     find_work_image_path,
     get_inpainted_path,
+    get_json_path,
     resolve_original_image_path,
 )
 
@@ -210,15 +211,7 @@ class EditorController(QObject):
                     self._export_toast = None
                 except Exception as e:
                     self.logger.warning(f"Failed to close export toast: {e}")
-            
-            # 关闭"正在保存JSON"Toast（在主线程中安全关闭）
-            if hasattr(self, '_save_json_toast') and self._save_json_toast:
-                try:
-                    self._save_json_toast.close()
-                    self._save_json_toast = None
-                except Exception as e:
-                    self.logger.warning(f"Failed to close save_json toast: {e}")
-            
+
             # 显示新Toast
             if hasattr(self, 'toast_manager'):
                 if success:
@@ -414,6 +407,7 @@ class EditorController(QObject):
         self.model.set_raw_mask(None)
         self.model.set_refined_mask(None)
         self.model.set_inpainted_image(None)
+        self.model.set_compare_image(None)
         self.model.set_selection([])
 
         # 禁用导出功能（无图片时不可导出）
@@ -560,11 +554,10 @@ class EditorController(QObject):
             msg_box = QMessageBox(None)
             msg_box.setWindowTitle("未保存的编辑")
             msg_box.setText("当前图片有未保存的编辑")
-            msg_box.setInformativeText("请选择保存方式：")
+            msg_box.setInformativeText("导出图片时会同时保存 JSON。")
             
-            # 添加三个按钮
+            # 添加按钮
             export_btn = msg_box.addButton("导出图片", QMessageBox.ButtonRole.YesRole)
-            save_json_btn = msg_box.addButton("保存JSON", QMessageBox.ButtonRole.YesRole)
             cancel_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
             no_btn = msg_box.addButton("不保存", QMessageBox.ButtonRole.NoRole)
             
@@ -578,12 +571,6 @@ class EditorController(QObject):
                 return
             elif clicked_button == export_btn:
                 self.export_image()
-                # 使用QTimer延迟加载，避免阻塞UI
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(500, lambda: self._do_load_image(image_path))
-                return
-            elif clicked_button == save_json_btn:
-                self.save_json()
                 # 使用QTimer延迟加载，避免阻塞UI
                 from PyQt6.QtCore import QTimer
                 QTimer.singleShot(500, lambda: self._do_load_image(image_path))
@@ -615,6 +602,17 @@ class EditorController(QObject):
                 # 1. 加载图片
                 image_resource = self.resource_manager.load_image(display_image_path)
                 image = image_resource.image
+                compare_image = image
+
+                if os.path.normpath(source_path) != os.path.normpath(display_image_path):
+                    try:
+                        compare_resource = self.resource_manager.load_image(source_path)
+                        compare_image = compare_resource.image
+                        if compare_image.size != image.size:
+                            compare_image = compare_image.resize(image.size, Image.Resampling.LANCZOS)
+                    except Exception as compare_error:
+                        self.logger.warning(f"Error loading compare image: {compare_error}")
+                        compare_image = image
 
                 # 2. 加载JSON
                 # 检查JSON是否存在
@@ -656,6 +654,7 @@ class EditorController(QObject):
                     'source_path': source_path,
                     'display_image_path': display_image_path,
                     'image': image,
+                    'compare_image': compare_image,
                     'regions': regions,
                     'raw_mask': raw_mask,
                     'inpainted_path': inpainted_path,
@@ -692,6 +691,7 @@ class EditorController(QObject):
                     result['source_path'],
                     result['display_image_path'],
                     result['image'],
+                    result.get('compare_image'),
                     result['regions'],
                     result['raw_mask'],
                     result['inpainted_path'],
@@ -717,6 +717,7 @@ class EditorController(QObject):
             # 将翻译后的图片同时设置为原图和inpainted图
             # 这样无论原图透明度如何调整，都能看到翻译后的图
             self.model.set_image(image)
+            self.model.set_compare_image(image)
             self.model.set_inpainted_image(image)
             
             self._set_regions([])
@@ -744,6 +745,7 @@ class EditorController(QObject):
                 self.model.set_original_image_alpha(1.0)
 
             self.model.set_image(image)
+            self.model.set_compare_image(image)
             self._set_regions([])
             self.model.set_raw_mask(None)
             self.model.set_refined_mask(None)
@@ -755,7 +757,7 @@ class EditorController(QObject):
         except Exception as e:
             self.logger.error(f"Error applying untranslated image to model: {e}")
     
-    def _apply_loaded_data_to_model(self, source_path, display_image_path, image, regions, raw_mask, inpainted_path, inpainted_image):
+    def _apply_loaded_data_to_model(self, source_path, display_image_path, image, compare_image, regions, raw_mask, inpainted_path, inpainted_image):
         """在主线程应用加载的数据到Model"""
         try:
             # 关闭加载提示
@@ -780,6 +782,7 @@ class EditorController(QObject):
                 self.model.set_original_image_alpha(0.0)
 
             self.model.set_image(image)
+            self.model.set_compare_image(compare_image if compare_image is not None else image)
             self._set_regions(regions)
 
             if raw_mask is not None:
@@ -817,6 +820,7 @@ class EditorController(QObject):
             self.toast_manager.show_error(f"加载失败: {error_msg}")
         
         self.model.set_image(None)
+        self.model.set_compare_image(None)
         self.model.set_regions([])
         self.model.set_raw_mask(None)
         self.model.set_refined_mask(None)
@@ -1955,6 +1959,72 @@ class EditorController(QObject):
         except (TypeError, ValueError):
             pass
 
+    def _resolve_editor_json_path(self, source_path: str) -> str:
+        """解析编辑器当前图片对应的 JSON 路径。"""
+        json_path = find_json_path(source_path)
+        if not json_path:
+            json_path = get_json_path(source_path, create_dir=True)
+            self.logger.info(f"No existing JSON found, will create new one at: {json_path}")
+        else:
+            self.logger.info(f"Found existing JSON, will replace: {json_path}")
+        return json_path
+
+    def _save_current_inpainted_image(self, source_path: str, config_dict: dict, mask: Optional[np.ndarray]) -> None:
+        """将当前修复图同步到工作目录，确保下次打开时能复用。"""
+        try:
+            image_to_save = self.model.get_inpainted_image() or self.model.get_image()
+            if image_to_save is None:
+                return
+
+            inpainted_path = get_inpainted_path(source_path, create_dir=True)
+            save_quality = config_dict.get('cli', {}).get('save_quality', 95)
+
+            if isinstance(image_to_save, Image.Image):
+                save_image = image_to_save.copy()
+            else:
+                save_image = Image.fromarray(np.array(image_to_save))
+
+            save_kwargs = {}
+            if inpainted_path.lower().endswith(('.jpg', '.jpeg')):
+                if save_image.mode in ('RGBA', 'LA'):
+                    save_image = save_image.convert('RGB')
+                save_kwargs['quality'] = save_quality
+            elif inpainted_path.lower().endswith('.webp'):
+                save_kwargs['quality'] = save_quality
+
+            save_image.save(inpainted_path, **save_kwargs)
+            self.model.set_inpainted_image_path(inpainted_path)
+            self.resource_manager.set_cache(
+                self.CACHE_LAST_INPAINTED,
+                np.array(save_image.convert('RGB'))
+            )
+            if mask is not None:
+                mask_to_cache = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY) if len(mask.shape) == 3 else mask
+                self.resource_manager.set_cache(self.CACHE_LAST_MASK, np.array(mask_to_cache, copy=True))
+
+            self.logger.info(f"已更新修复图片: {inpainted_path}")
+        except Exception as e:
+            self.logger.warning(f"更新inpainted图片失败: {e}")
+
+    def _persist_editor_state_for_export(
+        self,
+        export_service,
+        source_path: str,
+        regions: list,
+        mask: Optional[np.ndarray],
+        config_dict: dict,
+    ) -> str:
+        """导出图片前同步当前编辑器状态到 JSON 和工作目录资源。"""
+        json_path = self._resolve_editor_json_path(source_path)
+
+        json_regions = [dict(region) for region in regions]
+        for region in json_regions:
+            self._apply_white_frame_center(region)
+        export_service._save_regions_data_with_path(json_regions, json_path, source_path, mask, config_dict)
+
+        self._save_current_inpainted_image(source_path, config_dict, mask)
+        return json_path
+
     async def _async_export_with_desktop_ui_service(self, image, regions, mask):
         """使用desktop-ui导出服务进行异步导出"""
         try:
@@ -2012,12 +2082,35 @@ class EditorController(QObject):
             from services.export_service import ExportService
             export_service = ExportService()
 
+            # 转换配置为字典
+            if hasattr(config, 'model_dump'):
+                config_dict = config.model_dump()
+            elif hasattr(config, 'dict'):
+                config_dict = config.dict()
+            else:
+                config_dict = {}
+
+            persisted_json_path = None
+            if source_path:
+                persisted_json_path = self._persist_editor_state_for_export(
+                    export_service=export_service,
+                    source_path=source_path,
+                    regions=regions,
+                    mask=mask,
+                    config_dict=config_dict,
+                )
+            else:
+                self.logger.warning("Exporting without source image path, skipped JSON persistence")
+
             def progress_callback(message):
                 pass
 
             def success_callback(message):
                 # 使用信号在主线程显示Toast
-                self._show_toast_signal.emit(f"导出成功\n{output_path}", 5000, True, output_path)
+                success_message = f"导出成功\n{output_path}"
+                if persisted_json_path:
+                    success_message += "\n已同步 JSON"
+                self._show_toast_signal.emit(success_message, 5000, True, output_path)
                 
                 # 保存导出快照，用于检测后续是否有更改
                 self._save_export_snapshot()
@@ -2029,14 +2122,6 @@ class EditorController(QObject):
                 self.logger.error(f"Export error: {message}")
                 # 使用信号在主线程显示Toast
                 self._show_toast_signal.emit(f"导出失败：{message}", 5000, False, "")
-
-            # 转换配置为字典
-            if hasattr(config, 'model_dump'):
-                config_dict = config.model_dump()
-            elif hasattr(config, 'dict'):
-                config_dict = config.model_dump()
-            else:
-                config_dict = {}
             
             # 强制开启AI断句模式，保留用户手动编辑的换行符
             if 'render' not in config_dict:
@@ -2102,118 +2187,6 @@ class EditorController(QObject):
             QTimer.singleShot(0, lambda: QMessageBox.critical(None, "导出失败", f"导出过程中发生意外错误:\n{err_msg}"))
 
     @pyqtSlot()
-    def save_json(self):
-        """保存当前翻译数据到JSON文件"""
-        try:
-            source_path = self.model.get_source_image_path()
-            if not source_path:
-                self.logger.warning("Cannot save JSON: no image loaded")
-                if hasattr(self, 'toast_manager'):
-                    self.toast_manager.show_error("保存失败：没有加载图像")
-                return
-            
-            regions = self._get_regions()
-            if regions is None:
-                regions = []
-            
-            # 查找现有的JSON文件路径
-            from manga_translator.utils.path_manager import find_json_path, get_json_path
-            json_path = find_json_path(source_path)
-            
-            # 如果找不到现有的JSON文件，使用默认路径
-            if not json_path:
-                json_path = get_json_path(source_path, create_dir=True)
-                self.logger.info(f"No existing JSON found, will create new one at: {json_path}")
-            else:
-                self.logger.info(f"Found existing JSON, will replace: {json_path}")
-            
-            # 显示开始Toast，保存引用以便后续关闭
-            self._save_json_toast = None
-            if hasattr(self, 'toast_manager'):
-                self._save_json_toast = self.toast_manager.show_info("正在保存JSON...", duration=0)
-            
-            self.async_service.submit_task(self._async_save_json(source_path, regions, json_path))
-        except Exception as e:
-            self.logger.error(f"Error during save JSON request: {e}", exc_info=True)
-            if hasattr(self, 'toast_manager'):
-                self.toast_manager.show_error("保存JSON失败")
-
-    async def _async_save_json(self, source_path, regions, json_path):
-        """异步保存JSON文件"""
-        try:
-            import sys
-            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-            from services.export_service import ExportService
-            
-            export_service = ExportService()
-            
-            # 获取配置
-            config = self.config_service.get_config()
-            if hasattr(config, 'model_dump'):
-                config_dict = config.model_dump()
-            elif hasattr(config, 'dict'):
-                config_dict = config.model_dump()
-            else:
-                config_dict = {}
-            
-            # 获取蒙版数据
-            mask = self.model.get_refined_mask()
-            if mask is None:
-                mask = self.model.get_raw_mask()
-            
-            # 保存JSON文件 - 传入source_path用于生成正确的键
-            json_regions = [dict(r) for r in regions]
-            for r in json_regions:
-                self._apply_white_frame_center(r)
-            export_service._save_regions_data_with_path(json_regions, json_path, source_path, mask, config_dict)
-            
-            # 直接保存编辑器当前的修复图，不再额外走一次后端 inpainting
-            try:
-                image_to_save = self.model.get_inpainted_image() or self.model.get_image()
-                if image_to_save is not None:
-                    inpainted_path = get_inpainted_path(source_path, create_dir=True)
-                    save_quality = config_dict.get('cli', {}).get('save_quality', 95)
-
-                    if isinstance(image_to_save, Image.Image):
-                        save_image = image_to_save.copy()
-                    else:
-                        save_image = Image.fromarray(np.array(image_to_save))
-
-                    save_kwargs = {}
-                    if inpainted_path.lower().endswith(('.jpg', '.jpeg')):
-                        if save_image.mode in ('RGBA', 'LA'):
-                            save_image = save_image.convert('RGB')
-                        save_kwargs['quality'] = save_quality
-                    elif inpainted_path.lower().endswith('.webp'):
-                        save_kwargs['quality'] = save_quality
-
-                    save_image.save(inpainted_path, **save_kwargs)
-                    self.model.set_inpainted_image_path(inpainted_path)
-                    self.resource_manager.set_cache(
-                        self.CACHE_LAST_INPAINTED,
-                        np.array(save_image.convert('RGB'))
-                    )
-                    if mask is not None:
-                        mask_to_cache = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY) if len(mask.shape) == 3 else mask
-                        self.resource_manager.set_cache(self.CACHE_LAST_MASK, np.array(mask_to_cache, copy=True))
-
-                    self.logger.info(f"已更新修复图片: {inpainted_path}")
-            except Exception as e:
-                self.logger.warning(f"更新inpainted图片失败: {e}")
-            
-            # 保存快照，标记为已保存状态
-            self._save_export_snapshot()
-            
-            # 使用信号在主线程显示Toast（_show_toast_in_main_thread会自动关闭_save_json_toast）
-            self._show_toast_signal.emit(f"JSON保存成功\n{json_path}", 3000, True, json_path)
-            
-        except Exception as e:
-            self.logger.error(f"Error during async save JSON: {e}", exc_info=True)
-            
-            # 使用信号在主线程显示Toast（_show_toast_in_main_thread会自动关闭_save_json_toast）
-            self._show_toast_signal.emit(f"保存JSON失败：{str(e)}", 3000, False, "")
-
-    @pyqtSlot()
     def edit_source_file(self):
         """加载当前翻译后图片对应的原图进行编辑"""
         current_path = self.model.get_source_image_path()
@@ -2249,17 +2222,19 @@ class EditorController(QObject):
             self.logger.error(f"Error loading source file: {e}")
 
     @pyqtSlot(str)
-    def set_display_mode(self, mode_text: str):
-        """设置文本区域的显示模式"""
-        mode_map = {
-            "文字文本框显示": "full",
-            "只显示文字": "text_only",
-            "只显示框线": "box_only",
-            "都不显示": "none"
-        }
-        mode = mode_map.get(mode_text, "full")
-        self.logger.info(f"Toolbar: Display mode changed to '{mode_text}' -> '{mode}'.")
-        self.model.set_region_display_mode(mode)
+    def set_display_mode(self, mode: str):
+        """设置编辑器显示模式。"""
+        compare_enabled = (mode == "compare_original_split")
+        region_mode = "full" if compare_enabled else mode
+        if region_mode not in {"full", "text_only", "box_only", "none"}:
+            region_mode = "full"
+
+        self.logger.info(
+            f"Toolbar: Display mode changed to '{mode}' (region mode: '{region_mode}', compare={compare_enabled})."
+        )
+        if self.view and hasattr(self.view, "set_compare_mode"):
+            self.view.set_compare_mode(compare_enabled)
+        self.model.set_region_display_mode(region_mode)
     
     def set_white_box_visible(self, visible: bool):
         """设置白框（手动调整边界）的可见性"""

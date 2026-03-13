@@ -19,8 +19,10 @@
         "cli.skip_no_text",
         "cli.save_text",
         "cli.save_quality",
+        "cli.attempts",
         "cli.batch_size",
         "cli.batch_concurrent",
+        "use_custom_api_params",
         "cli.save_to_source_dir",
         "cli.export_editable_psd",
         "cli.psd_font",
@@ -84,11 +86,11 @@
       "items": [
         "translator.translator",
         "translator.target_lang",
+        "translator.enable_streaming",
         "translator.no_text_lang_skip",
         "translator.extract_glossary",
         "translator.max_requests_per_minute",
-        "translator.use_custom_api_params",
-        "cli.attempts",
+        "translator.remove_trailing_period",
         "cli.context_size"
       ]
     },
@@ -169,7 +171,7 @@
         },
         "colorizer.colorizer",
         "colorizer.ai_colorizer_prompt_path",
-        "colorizer.ai_colorizer_concurrency",
+        "colorizer.ai_colorizer_history_pages",
         "colorizer.colorization_size",
         "colorizer.denoise_sigma"
       ]

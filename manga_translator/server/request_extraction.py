@@ -280,10 +280,6 @@ def prepare_translator_params(config: Config, workflow: str = "normal") -> dict:
             # -1 表示无限重试；0 表示不重试（仅首次请求）
             if attempts is not None and (attempts >= 0 or attempts == -1):
                 translator_params['attempts'] = attempts
-                # 将 cli.attempts 复制到 translator.attempts（与 Qt UI 保持一致）
-                # 这样翻译器的 parse_args 就能正确读取到 attempts 值
-                if hasattr(config, 'translator'):
-                    config.translator.attempts = attempts
     
     # 字体路径 - 直接传递相对路径，翻译程序会自动用 BASE_PATH 拼接
     if hasattr(config, 'render') and hasattr(config.render, 'font_path'):

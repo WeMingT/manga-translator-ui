@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union
 import cv2
 import numpy as np
 import torch
+from ultralytics import YOLO
 
 from .generic import BASE_PATH
 from .inference import ModelWrapper
@@ -58,7 +59,7 @@ class _SimpleRawResult:
 class MangaLensBubbleDetector(ModelWrapper):
     """
     Lightweight backend detector for `models/detection/mangalens.pt`.
-    Loads the serialized PyTorch checkpoint directly and runs manual postprocess.
+    Uses Ultralytics YOLO segmentation runtime and keeps local post-processing/caching.
     """
 
     _MODEL_SUB_DIR = "detection"
@@ -97,7 +98,6 @@ class MangaLensBubbleDetector(ModelWrapper):
         self.model = None
         self._session_device = "cpu"
         self._torch_device = torch.device("cpu")
-        self._provider_logged = False
         self._device_logged = False
 
         super().__init__()
@@ -233,19 +233,8 @@ class MangaLensBubbleDetector(ModelWrapper):
         if not os.path.exists(load_path):
             load_path = str(self.model_path)
 
-        checkpoint = torch.load(load_path, map_location="cpu", weights_only=False)
-        if isinstance(checkpoint, dict):
-            model = checkpoint.get("ema") or checkpoint.get("model")
-            if model is None:
-                raise TypeError(f"Unsupported bubble detector checkpoint structure: {type(checkpoint)}")
-        else:
-            model = checkpoint
-        if not isinstance(model, torch.nn.Module):
-            raise TypeError(f"Bubble detector checkpoint did not resolve to a torch.nn.Module: {type(model)}")
-        model = model.float().eval()
-        for param in model.parameters():
-            param.requires_grad_(False)
-        model.to(torch_device)
+        model = self.model or YOLO(load_path, task="segment")
+        model.to(str(torch_device))
         self.model = model
         self._torch_device = torch_device
         self._session_device = torch_device.type
@@ -328,40 +317,6 @@ class MangaLensBubbleDetector(ModelWrapper):
         return img
 
     @staticmethod
-    def _letterbox(
-        img: np.ndarray,
-        new_shape: Union[int, tuple[int, int]],
-        color: tuple[int, int, int] = (114, 114, 114),
-    ) -> tuple[np.ndarray, float, tuple[float, float], tuple[int, int]]:
-        if isinstance(new_shape, int):
-            new_shape = (new_shape, new_shape)
-
-        h0, w0 = img.shape[:2]
-        gain = min(new_shape[0] / h0, new_shape[1] / w0)
-        new_w, new_h = int(round(w0 * gain)), int(round(h0 * gain))
-        pad_w = (new_shape[1] - new_w) / 2
-        pad_h = (new_shape[0] - new_h) / 2
-
-        if (w0, h0) != (new_w, new_h):
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-        top = int(round(pad_h - 0.1))
-        bottom = int(round(pad_h + 0.1))
-        left = int(round(pad_w - 0.1))
-        right = int(round(pad_w + 0.1))
-        img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
-        return img, gain, (pad_w, pad_h), (new_h, new_w)
-
-    @staticmethod
-    def _xywh_to_xyxy(boxes: np.ndarray) -> np.ndarray:
-        out = boxes.copy()
-        out[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
-        out[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
-        out[:, 2] = boxes[:, 0] + boxes[:, 2] / 2
-        out[:, 3] = boxes[:, 1] + boxes[:, 3] / 2
-        return out
-
-    @staticmethod
     def _nms_xyxy(boxes: np.ndarray, scores: np.ndarray, iou_thres: float) -> np.ndarray:
         if len(boxes) == 0:
             return np.empty((0,), dtype=np.int32)
@@ -387,81 +342,6 @@ class MangaLensBubbleDetector(ModelWrapper):
             inds = np.where(iou <= iou_thres)[0]
             order = order[inds + 1]
         return np.asarray(keep, dtype=np.int32)
-
-    @staticmethod
-    def _scale_boxes_to_original(
-        boxes_xyxy: np.ndarray,
-        gain: float,
-        pad: tuple[float, float],
-        orig_shape: tuple[int, int],
-    ) -> np.ndarray:
-        out = boxes_xyxy.copy()
-        out[:, [0, 2]] -= pad[0]
-        out[:, [1, 3]] -= pad[1]
-        out[:, :4] /= max(gain, 1e-6)
-        h, w = orig_shape
-        out[:, 0] = np.clip(out[:, 0], 0, w)
-        out[:, 1] = np.clip(out[:, 1], 0, h)
-        out[:, 2] = np.clip(out[:, 2], 0, w)
-        out[:, 3] = np.clip(out[:, 3], 0, h)
-        return out
-
-    @staticmethod
-    def _sigmoid(x: np.ndarray) -> np.ndarray:
-        return 1.0 / (1.0 + np.exp(-np.clip(x, -50.0, 50.0)))
-
-    def _decode_masks(
-        self,
-        mask_coeff: np.ndarray,
-        protos: np.ndarray,
-        input_boxes_xyxy: np.ndarray,
-        orig_boxes_xyxy: np.ndarray,
-        input_shape: tuple[int, int],
-        unpad_shape: tuple[int, int],
-        pad: tuple[float, float],
-        orig_shape: tuple[int, int],
-    ) -> Optional[np.ndarray]:
-        if mask_coeff.size == 0:
-            return None
-
-        nm, mh, mw = protos.shape
-        proto_flat = protos.reshape(nm, -1)
-        masks = self._sigmoid(mask_coeff @ proto_flat).reshape((-1, mh, mw))
-
-        input_h, input_w = input_shape
-        unpad_h, unpad_w = unpad_shape
-        pad_w, pad_h = pad
-        top = int(round(pad_h - 0.1))
-        left = int(round(pad_w - 0.1))
-        orig_h, orig_w = orig_shape
-
-        out_masks: list[np.ndarray] = []
-        for i, m in enumerate(masks):
-            m = cv2.resize(m, (input_w, input_h), interpolation=cv2.INTER_LINEAR)
-            y1 = max(0, min(input_h, top))
-            x1 = max(0, min(input_w, left))
-            y2 = max(y1, min(input_h, y1 + unpad_h))
-            x2 = max(x1, min(input_w, x1 + unpad_w))
-            m = m[y1:y2, x1:x2]
-            if m.size == 0:
-                out_masks.append(np.zeros((orig_h, orig_w), dtype=np.uint8))
-                continue
-            m = cv2.resize(m, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
-            m = (m > 0.5).astype(np.uint8)
-
-            bx1, by1, bx2, by2 = orig_boxes_xyxy[i]
-            bx1 = max(0, min(orig_w, int(round(bx1))))
-            by1 = max(0, min(orig_h, int(round(by1))))
-            bx2 = max(bx1, min(orig_w, int(round(bx2))))
-            by2 = max(by1, min(orig_h, int(round(by2))))
-            cropped = np.zeros_like(m)
-            if bx2 > bx1 and by2 > by1:
-                cropped[by1:by2, bx1:bx2] = m[by1:by2, bx1:bx2]
-            out_masks.append(cropped)
-
-        if not out_masks:
-            return None
-        return np.stack(out_masks, axis=0)
 
     @staticmethod
     def _masks_to_polygons(mask_data: Optional[np.ndarray]) -> list[np.ndarray]:
@@ -492,33 +372,89 @@ class MangaLensBubbleDetector(ModelWrapper):
         down_scale_ratio = h / float(max(target_size, 1))
         return down_scale_ratio > 2.5 and asp_ratio > 3.0
 
-    def _run_model(self, blob: np.ndarray) -> list[np.ndarray]:
+    def _run_model(
+        self,
+        image: np.ndarray,
+        target_size: int,
+        conf_thres: float,
+        iou_thres: float,
+    ) -> Any:
         if self.model is None:
             raise RuntimeError("Bubble detector model is not loaded")
 
-        tensor = torch.from_numpy(blob).to(self._torch_device)
-        with torch.inference_mode():
-            outputs = self.model(tensor)
+        results = self.model.predict(
+            source=image,
+            imgsz=int(target_size),
+            conf=float(conf_thres),
+            iou=float(iou_thres),
+            device=str(self._torch_device),
+            retina_masks=True,
+            verbose=False,
+        )
+        if isinstance(results, list):
+            return results[0] if results else None
+        return next(iter(results), None)
 
-        if isinstance(outputs, torch.Tensor):
-            return [self._to_numpy(outputs)]
-        if isinstance(outputs, (list, tuple)):
-            if len(outputs) == 0:
-                return []
-            first = outputs[0]
-            if isinstance(first, (list, tuple)):
-                return [self._to_numpy(output) for output in first]
-            meta = outputs[1] if len(outputs) > 1 and isinstance(outputs[1], dict) else None
-            if meta is not None and isinstance(first, torch.Tensor):
-                proto = meta.get("proto")
-                if proto is not None:
-                    return [self._to_numpy(first), self._to_numpy(proto)]
-            return [self._to_numpy(output) for output in outputs if isinstance(output, torch.Tensor)]
-        raise TypeError(f"Unsupported bubble detector output type: {type(outputs)}")
+    def _extract_prediction_arrays(
+        self,
+        raw_result: Any,
+        orig_shape: tuple[int, int],
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        empty_boxes = np.empty((0, 4), dtype=np.float32)
+        empty_scores = np.empty((0,), dtype=np.float32)
+        empty_cls = np.empty((0,), dtype=np.int32)
+
+        if raw_result is None:
+            return empty_boxes, empty_scores, empty_cls, None
+
+        boxes = getattr(raw_result, "boxes", None)
+        if boxes is None:
+            return empty_boxes, empty_scores, empty_cls, None
+
+        boxes_xyxy = self._to_numpy(getattr(boxes, "xyxy", empty_boxes)).astype(np.float32)
+        if boxes_xyxy.ndim == 1:
+            boxes_xyxy = boxes_xyxy.reshape(-1, 4)
+        if boxes_xyxy.size == 0:
+            return empty_boxes, empty_scores, empty_cls, None
+
+        scores = self._to_numpy(
+            getattr(boxes, "conf", np.zeros((len(boxes_xyxy),), dtype=np.float32))
+        ).astype(np.float32).reshape(-1)
+        cls_ids = self._to_numpy(
+            getattr(boxes, "cls", np.zeros((len(boxes_xyxy),), dtype=np.int32))
+        ).astype(np.int32).reshape(-1)
+
+        orig_h, orig_w = orig_shape
+        boxes_xyxy[:, 0] = np.clip(boxes_xyxy[:, 0], 0, orig_w)
+        boxes_xyxy[:, 1] = np.clip(boxes_xyxy[:, 1], 0, orig_h)
+        boxes_xyxy[:, 2] = np.clip(boxes_xyxy[:, 2], 0, orig_w)
+        boxes_xyxy[:, 3] = np.clip(boxes_xyxy[:, 3], 0, orig_h)
+
+        mask_data = None
+        masks = getattr(raw_result, "masks", None)
+        raw_mask_data = getattr(masks, "data", None) if masks is not None else None
+        if raw_mask_data is not None:
+            mask_data = self._to_numpy(raw_mask_data)
+            if mask_data.ndim == 4 and mask_data.shape[1] == 1:
+                mask_data = mask_data[:, 0]
+            elif mask_data.ndim == 2:
+                mask_data = mask_data[None]
+            if mask_data.ndim == 3 and mask_data.shape[0] == len(boxes_xyxy):
+                if mask_data.shape[1:] != orig_shape:
+                    resized_masks = [
+                        cv2.resize(mask.astype(np.uint8), (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+                        for mask in mask_data
+                    ]
+                    mask_data = np.stack(resized_masks, axis=0) if resized_masks else None
+                if mask_data is not None:
+                    mask_data = np.where(mask_data > 0, 255, 0).astype(np.uint8)
+            else:
+                mask_data = None
+
+        return boxes_xyxy, scores, cls_ids, mask_data
 
     def _infer_single(
         self,
-        session: Any,
         img: np.ndarray,
         target_size: int,
         conf_thres: float,
@@ -528,27 +464,16 @@ class MangaLensBubbleDetector(ModelWrapper):
         if h <= 0 or w <= 0:
             return np.empty((0, 4), dtype=np.float32), np.empty((0,), dtype=np.float32), np.empty((0,), dtype=np.int32), None
 
-        img_lb, gain, pad, unpad_shape = self._letterbox(img, target_size)
-        input_h, input_w = img_lb.shape[:2]
-
-        blob = img_lb.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
-        blob = np.ascontiguousarray(blob)
-
-        outputs = self._run_model(blob)
-        return self._postprocess(
-            outputs=outputs,
+        raw_result = self._run_model(
+            image=img,
+            target_size=target_size,
             conf_thres=conf_thres,
             iou_thres=iou_thres,
-            gain=gain,
-            pad=pad,
-            input_shape=(input_h, input_w),
-            unpad_shape=unpad_shape,
-            orig_shape=(h, w),
         )
+        return self._extract_prediction_arrays(raw_result, orig_shape=(h, w))
 
     def _infer_long_image(
         self,
-        session: Any,
         img: np.ndarray,
         target_size: int,
         conf_thres: float,
@@ -586,7 +511,6 @@ class MangaLensBubbleDetector(ModelWrapper):
                 continue
 
             boxes, scores, cls_ids, mask_data = self._infer_single(
-                session=session,
                 img=patch,
                 target_size=target_size,
                 conf_thres=conf_thres,
@@ -675,80 +599,6 @@ class MangaLensBubbleDetector(ModelWrapper):
             mask_data.astype(np.uint8) if mask_data is not None else None,
         )
 
-    def _postprocess(
-        self,
-        outputs: list[np.ndarray],
-        conf_thres: float,
-        iou_thres: float,
-        gain: float,
-        pad: tuple[float, float],
-        input_shape: tuple[int, int],
-        unpad_shape: tuple[int, int],
-        orig_shape: tuple[int, int],
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
-        if not outputs:
-            return np.empty((0, 4), dtype=np.float32), np.empty((0,), dtype=np.float32), np.empty((0,), dtype=np.int32), None
-
-        pred_out = outputs[0]
-        proto_out = outputs[1] if len(outputs) > 1 else None
-        pred = pred_out[0]
-        if pred.ndim != 2:
-            pred = np.squeeze(pred)
-        if pred.shape[0] < pred.shape[1]:
-            pred = pred.T
-
-        if pred.size == 0:
-            return np.empty((0, 4), dtype=np.float32), np.empty((0,), dtype=np.float32), np.empty((0,), dtype=np.int32), None
-
-        protos = None
-        nm = 0
-        if proto_out is not None:
-            protos = proto_out[0] if proto_out.ndim == 4 else proto_out
-            nm = int(protos.shape[0]) if protos is not None and protos.ndim == 3 else 0
-
-        no = int(pred.shape[1])
-        nc = max(no - 4 - nm, 1)
-
-        boxes_xywh = pred[:, :4]
-        cls_scores = pred[:, 4 : 4 + nc]
-        mask_coeff = pred[:, 4 + nc : 4 + nc + nm] if nm > 0 else np.empty((pred.shape[0], 0), dtype=np.float32)
-
-        conf = cls_scores.max(axis=1)
-        cls = cls_scores.argmax(axis=1).astype(np.int32)
-        keep = conf >= conf_thres
-        if not np.any(keep):
-            return np.empty((0, 4), dtype=np.float32), np.empty((0,), dtype=np.float32), np.empty((0,), dtype=np.int32), None
-
-        boxes_xywh = boxes_xywh[keep]
-        conf = conf[keep]
-        cls = cls[keep]
-        mask_coeff = mask_coeff[keep] if mask_coeff.size else mask_coeff
-
-        input_boxes = self._xywh_to_xyxy(boxes_xywh)
-        keep_idx = self._nms_xyxy(input_boxes, conf, iou_thres)
-        if keep_idx.size == 0:
-            return np.empty((0, 4), dtype=np.float32), np.empty((0,), dtype=np.float32), np.empty((0,), dtype=np.int32), None
-
-        input_boxes = input_boxes[keep_idx]
-        conf = conf[keep_idx]
-        cls = cls[keep_idx]
-        mask_coeff = mask_coeff[keep_idx] if mask_coeff.size else mask_coeff
-
-        orig_boxes = self._scale_boxes_to_original(input_boxes, gain=gain, pad=pad, orig_shape=orig_shape)
-        mask_data = None
-        if protos is not None and mask_coeff.size:
-            mask_data = self._decode_masks(
-                mask_coeff=mask_coeff,
-                protos=protos,
-                input_boxes_xyxy=input_boxes,
-                orig_boxes_xyxy=orig_boxes,
-                input_shape=input_shape,
-                unpad_shape=unpad_shape,
-                pad=pad,
-                orig_shape=orig_shape,
-            )
-        return orig_boxes, conf, cls, mask_data
-
     def detect(
         self,
         image: ImageInput,
@@ -761,7 +611,7 @@ class MangaLensBubbleDetector(ModelWrapper):
         verbose: bool = False,
     ) -> BubbleDetectionResult:
         active_device = self._resolve_runtime_device(device)
-        session = self.load_model(device=active_device)
+        self.load_model(device=active_device)
 
         if not self._device_logged:
             self.logger.debug(f"MangaLens detect device request: {active_device}, active_session={self._session_device}")
@@ -776,7 +626,6 @@ class MangaLensBubbleDetector(ModelWrapper):
         use_long_rearrange = self._requires_long_rearrange((orig_h, orig_w), target_size)
         if use_long_rearrange:
             boxes_xyxy, scores, cls_ids, mask_data = self._infer_long_image(
-                session=session,
                 img=img,
                 target_size=target_size,
                 conf_thres=conf_thres,
@@ -785,7 +634,6 @@ class MangaLensBubbleDetector(ModelWrapper):
             )
         else:
             boxes_xyxy, scores, cls_ids, mask_data = self._infer_single(
-                session=session,
                 img=img,
                 target_size=target_size,
                 conf_thres=conf_thres,

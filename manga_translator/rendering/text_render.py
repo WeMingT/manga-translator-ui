@@ -518,6 +518,26 @@ def _scale_advance(advance: int, letter_spacing: float) -> int:
     return max(1, int(round(advance * multiplier)))
 
 
+def _normalize_line_spacing(line_spacing: float) -> float:
+    try:
+        value = float(line_spacing)
+    except (TypeError, ValueError):
+        return 1.0
+    return value if value > 0 else 1.0
+
+
+def resolve_horizontal_line_spacing_multiplier(line_spacing: float) -> float:
+    value = _normalize_line_spacing(line_spacing)
+    if value > 1.0:
+        # Keep 1.0 as the legacy baseline, but ramp extra spacing faster once the user raises it.
+        return 1.0 + (value - 1.0) * 10.0
+    return value
+
+
+def calc_horizontal_line_spacing_px(font_size: int, line_spacing: float) -> int:
+    return int(font_size * 0.01 * resolve_horizontal_line_spacing_multiplier(line_spacing))
+
+
 class namespace:
     pass
 
@@ -1967,8 +1987,8 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
 
     bg_size = int(max(font_size * stroke_ratio, 1)) if bg is not None else 0
     # line_spacing 是基本间距的倍率
-    # 横排基本间距: 0.01
-    spacing_y = int(font_size * 0.01 * (line_spacing or 1.0))
+    # 横排基准间距仍是 0.01，但大于 1 时按线性规则放大
+    spacing_y = calc_horizontal_line_spacing_px(font_size, line_spacing)
     if layout_mode != 'default' and is_cjk_lang(lang):
         line_text_list, line_width_list = calc_horizontal_cjk(font_size, text, width, letter_spacing=letter_spacing)
     else:

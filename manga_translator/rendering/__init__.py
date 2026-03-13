@@ -579,6 +579,7 @@ def optimize_line_breaks_for_region(region: TextBlock, config: Config, target_fo
     
     layout_mode = config.render.layout_mode if config and hasattr(config.render, 'layout_mode') else 'default'
     logger.debug(f"[OPTIMIZE_LINE_BREAKS] Testing {len(combinations)} combinations, layout_mode={layout_mode}")
+    render_horizontally = _resolve_region_render_horizontal(region)
     
     for text_variant, combo_desc, skip_reason in combinations:
         if skip_reason:
@@ -599,7 +600,7 @@ def optimize_line_breaks_for_region(region: TextBlock, config: Config, target_fo
             line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
             letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
             # Calculate required dimensions
-            if region.horizontal:
+            if render_horizontally:
                 lines, widths = text_render.calc_horizontal(
                     target_font_size, text_for_calc, 
                     max_width=99999, max_height=99999, 
@@ -806,6 +807,38 @@ def _resolve_letter_spacing_multiplier(region: TextBlock, config: Config) -> flo
     return 1.0
 
 
+def _resolve_configured_min_font_size(config: Config) -> int:
+    render_cfg = getattr(config, 'render', None) if config is not None else None
+    raw_min_font_size = getattr(render_cfg, 'font_size_minimum', 0) if render_cfg is not None else 0
+    if isinstance(raw_min_font_size, (int, float)) and raw_min_font_size > 0:
+        return max(int(raw_min_font_size), 1)
+    return 0
+
+
+def _apply_final_font_constraints(layout_font_size: int, config: Config) -> int:
+    final_font_size = max(int(layout_font_size), 1)
+    render_cfg = getattr(config, 'render', None) if config is not None else None
+
+    font_size_offset = getattr(render_cfg, 'font_size_offset', 0) if render_cfg is not None else 0
+    if isinstance(font_size_offset, (int, float)) and font_size_offset != 0:
+        final_font_size = max(int(final_font_size + float(font_size_offset)), 1)
+
+    font_scale_ratio = getattr(render_cfg, 'font_scale_ratio', 1.0) if render_cfg is not None else 1.0
+    if not isinstance(font_scale_ratio, (int, float)) or font_scale_ratio <= 0:
+        font_scale_ratio = 1.0
+    final_font_size = max(int(final_font_size * float(font_scale_ratio)), 1)
+
+    configured_min_font_size = _resolve_configured_min_font_size(config)
+    if configured_min_font_size > 0:
+        final_font_size = max(final_font_size, configured_min_font_size)
+
+    max_font_size = getattr(render_cfg, 'max_font_size', 0) if render_cfg is not None else 0
+    if isinstance(max_font_size, (int, float)) and max_font_size > 0:
+        final_font_size = min(final_font_size, int(max_font_size))
+
+    return max(final_font_size, 1)
+
+
 def _calc_region_dst_points_for_font(
     region: TextBlock,
     font_size: int,
@@ -886,13 +919,12 @@ def _binary_search_font_for_bubble_mask(
     return best_font, best_dst_points
 
 
-def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], config: Config, original_img: np.ndarray = None, return_debug_img: bool = False, editor_mode: bool = False, skip_font_scaling: bool = False):
+def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], config: Config, original_img: np.ndarray = None, return_debug_img: bool = False, skip_font_scaling: bool = False):
     """
     Resize text regions based on layout mode.
 
     Args:
         return_debug_img: If True, returns (dst_points_list, debug_img) for balloon_fill mode
-        editor_mode: If True, use simplified calculation (keep font unchanged, only scale box)
         skip_font_scaling: If True, skip font scaling algorithm and use font_size from region directly (for load_text mode)
     """
     mode = config.render.layout_mode
@@ -968,16 +1000,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 
             # 直接用固定字体大小计算文本框
             # 需要考虑 direction 强制覆盖（和 render() 中的判断逻辑一致）
-            forced_direction = region._direction if hasattr(region, '_direction') else region.direction
-            if forced_direction != 'auto':
-                if forced_direction in ['horizontal', 'h']:
-                    actual_horizontal = True
-                elif forced_direction in ['vertical', 'v']:
-                    actual_horizontal = False
-                else:
-                    actual_horizontal = region.horizontal
-            else:
-                actual_horizontal = region.horizontal
+            actual_horizontal = _resolve_region_render_horizontal(region)
 
             line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
             letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
@@ -1009,23 +1032,22 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             if not hasattr(region, 'original_font_size'):
                 region.original_font_size = original_region_font_size
 
-            font_size_offset = config.render.font_size_offset
-            min_font_size = max(config.render.font_size_minimum if config.render.font_size_minimum > 0 else 1, 1)
-            target_font_size = max(original_region_font_size + font_size_offset, min_font_size)
+            layout_min_font_size = 1
+            target_font_size = max(original_region_font_size, layout_min_font_size)
 
-            # 保存应用偏移量后的字体大小，用于JSON导出
-            region.offset_applied_font_size = int(target_font_size)
+            # 保存布局算法的基础字号；最终字号会在后置约束中统一应用 offset/scale/min/max
+            region.layout_base_font_size = int(target_font_size)
 
         # --- Mode 5: balloon_fill (MUST BE FIRST to override other modes) ---
         if mode == 'balloon_fill':
             logger.debug(f"=== balloon_fill mode activated for region {region_idx} ===")
             logger.debug(f"OCR box (xywh): {region.xywh}")
+            configured_min_font_size = _resolve_configured_min_font_size(config)
+            min_font_size = max(configured_min_font_size if configured_min_font_size > 0 else 1, 1)
 
             if original_img is None:
                 logger.warning("balloon_fill mode requires original_img, fallback to geometry-based dst_points")
-                fallback_font_size = int(max(target_font_size, min_font_size) * config.render.font_scale_ratio)
-                if config.render.max_font_size > 0:
-                    fallback_font_size = min(fallback_font_size, config.render.max_font_size)
+                fallback_font_size = _apply_final_font_constraints(target_font_size, config)
                 fallback_dst_points = _calc_region_dst_points_for_font(
                     region=region,
                     font_size=fallback_font_size,
@@ -1036,7 +1058,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 )
                 if fallback_dst_points is None:
                     fallback_dst_points = region.min_rect
-                region.font_size = int(max(fallback_font_size, 1))
+                region.font_size = fallback_font_size
                 dst_points_list.append(fallback_dst_points)
                 continue
 
@@ -1056,7 +1078,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 )
                 used_smart_scaling_fallback = False
                 chosen_dst_points = None
-                chosen_font_size = int(max(target_font_size, min_font_size))
+                chosen_font_size = int(max(target_font_size, layout_min_font_size))
                 overflow_candidate_dst_points = None
                 preferred_font_size_for_debug = None
 
@@ -1070,7 +1092,6 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         config=smart_scaling_config,
                         original_img=None,
                         return_debug_img=False,
-                        editor_mode=editor_mode,
                         skip_font_scaling=skip_font_scaling,
                     )
                     if isinstance(smart_result, list) and len(smart_result) > 0:
@@ -1192,7 +1213,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                                 seed_segments = n_ceil
                                 seed_font_size = font_ceil
 
-                        seed_font_size = int(max(min(seed_font_size, layout_target_font_size), min_font_size))
+                        seed_font_size = int(max(min(seed_font_size, layout_target_font_size), layout_min_font_size))
                         no_br_result = solve_no_br_layout(
                             text=region.translation,
                             horizontal=render_horizontally,
@@ -1200,7 +1221,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             seed_font_size=seed_font_size,
                             bubble_width=bubble_width,
                             bubble_height=bubble_height,
-                            min_font_size=min_font_size,
+                            min_font_size=layout_min_font_size,
                             max_font_size=no_br_max_font_size,
                             line_spacing_multiplier=line_spacing_multiplier,
                             letter_spacing_multiplier=letter_spacing_multiplier,
@@ -1214,10 +1235,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             f"font={layout_target_font_size}, required={no_br_result.required_width:.1f}x{no_br_result.required_height:.1f}"
                         )
 
-                    preferred_font_size = int(max(layout_target_font_size, min_font_size) * config.render.font_scale_ratio)
-                    preferred_font_size = max(preferred_font_size, 1)
-                    if config.render.max_font_size > 0:
-                        preferred_font_size = min(preferred_font_size, config.render.max_font_size)
+                    preferred_font_size = _apply_final_font_constraints(layout_target_font_size, config)
                     preferred_font_size_for_debug = preferred_font_size
 
                     # 调试用途：记录“超出范围候选框”（较大字号候选但不满足蒙版约束）
@@ -1244,17 +1262,6 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         config=config,
                         bubble_mask=region_bubble_mask,
                     )
-                    if best_font_size is None and min_font_size > 1:
-                        best_font_size, best_dst_points = _binary_search_font_for_bubble_mask(
-                            region=region,
-                            start_font_size=preferred_font_size,
-                            min_font_size=1,
-                            render_horizontally=render_horizontally,
-                            line_spacing_multiplier=line_spacing_multiplier,
-                            letter_spacing_multiplier=letter_spacing_multiplier,
-                            config=config,
-                            bubble_mask=region_bubble_mask,
-                        )
                     if best_font_size is not None and best_dst_points is not None:
                         chosen_font_size = int(best_font_size)
                         chosen_dst_points = best_dst_points
@@ -1263,14 +1270,25 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         )
                     else:
                         chosen_font_size = preferred_font_size
-                        chosen_dst_points = _calc_region_dst_points_for_font(
-                            region=region,
-                            font_size=chosen_font_size,
-                            render_horizontally=render_horizontally,
-                            line_spacing_multiplier=line_spacing_multiplier,
-                            letter_spacing_multiplier=letter_spacing_multiplier,
-                            config=config,
-                        )
+                        chosen_dst_points = preferred_dst_points
+                        if chosen_dst_points is None:
+                            chosen_dst_points = _calc_region_dst_points_for_font(
+                                region=region,
+                                font_size=chosen_font_size,
+                                render_horizontally=render_horizontally,
+                                line_spacing_multiplier=line_spacing_multiplier,
+                                letter_spacing_multiplier=letter_spacing_multiplier,
+                                config=config,
+                            )
+                        if min_font_size > 1:
+                            logger.debug(
+                                f"balloon_fill region {region_idx}: no mask-safe layout at configured min font "
+                                f"{min_font_size}, keeping preferred_font_size={chosen_font_size}"
+                            )
+                        else:
+                            logger.debug(
+                                f"balloon_fill region {region_idx}: no mask-safe layout found, keeping preferred_font_size={chosen_font_size}"
+                            )
 
                 if chosen_dst_points is None:
                     chosen_dst_points = region.min_rect
@@ -1345,8 +1363,9 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 logger.debug(f"[OPTIMIZE] Optimized text: {region.translation}")
             
             font_size = target_font_size
-            min_shrink_font_size = max(min_font_size, 8)
+            min_shrink_font_size = 8
             letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
+            render_horizontally = _resolve_region_render_horizontal(region)
 
             # AI 断句适配：如果开启了 AI 断句且有 BR 标记，使用无限宽度/高度
             
@@ -1374,10 +1393,8 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 calc_max_height = region.unrotated_size[1]
 
             # Step 1: 先缩小字体直到文本能放进文本框
-            iteration_count = 0
             while font_size >= min_shrink_font_size:
-                iteration_count += 1
-                if region.horizontal:
+                if render_horizontally:
                     lines, _ = text_render.calc_horizontal(
                         font_size,
                         region.translation,
@@ -1405,7 +1422,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             test_font_size = font_size + 1
 
             while test_font_size <= target_font_size:
-                if region.horizontal:
+                if render_horizontally:
                     test_lines, _ = text_render.calc_horizontal(
                         test_font_size,
                         region.translation,
@@ -1432,13 +1449,10 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     else:
                         break
 
-            # Calculate total font scale (font_scale_ratio + max_font_size limit)
-            final_font_size = int(max(max_fitting_font_size, min_shrink_font_size) * config.render.font_scale_ratio)
-            total_font_scale = config.render.font_scale_ratio
-
-            if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
-                total_font_scale *= config.render.max_font_size / final_font_size
-                final_font_size = config.render.max_font_size
+            # Apply final post-layout constraints: offset, scale ratio, and min/max clamps.
+            layout_font_size = max(max_fitting_font_size, min_shrink_font_size)
+            final_font_size = _apply_final_font_constraints(layout_font_size, config)
+            total_font_scale = final_font_size / max(layout_font_size, 1)
 
             # Scale region to match final font size
             dst_points = region.min_rect
@@ -1473,9 +1487,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         isinstance(bubble_height, (int, float)) and np.isfinite(bubble_height) and bubble_height > 0):
                     logger.warning(f"Invalid bubble size for region: w={bubble_width}, h={bubble_height}. Skipping smart scaling for this region.")
                     dst_points_list.append(region.min_rect)
-                    final_font_size = int(max(target_font_size, min_font_size) * config.render.font_scale_ratio)
-                    if config.render.max_font_size > 0:
-                        final_font_size = min(final_font_size, config.render.max_font_size)
+                    final_font_size = _apply_final_font_constraints(target_font_size, config)
                     region.font_size = final_font_size
                     continue
 
@@ -1498,6 +1510,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 n = 1
                 line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
                 letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
+                render_horizontally = _resolve_region_render_horizontal(region)
 
                 # 根据有没有BR选择不同的计算方式
                 if has_br:
@@ -1506,7 +1519,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     required_width = 0
                     required_height = 0
 
-                    if region.horizontal:
+                    if render_horizontally:
                         lines, widths = text_render.calc_horizontal(
                             target_font_size,
                             region.translation,
@@ -1544,7 +1557,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     # 无BR：用精确像素反推最优行数/列数
                     no_br_max_font_size = target_font_size
 
-                    if region.horizontal:
+                    if render_horizontally:
                         # 横排：计算单行总宽度
                         total_width = text_render.get_string_width(
                             target_font_size,
@@ -1586,7 +1599,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             final_font_size = font_ceil
 
                         final_font_size = min(final_font_size, target_font_size)
-                        final_font_size = max(final_font_size, min_font_size)
+                        final_font_size = max(final_font_size, layout_min_font_size)
 
                         # 用最终字体重新计算精确的required尺寸
                         final_total_width = text_render.get_string_width(
@@ -1608,7 +1621,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             seed_font_size=final_font_size,
                             bubble_width=bubble_width,
                             bubble_height=bubble_height,
-                            min_font_size=min_font_size,
+                            min_font_size=layout_min_font_size,
                             max_font_size=no_br_max_font_size,
                             line_spacing_multiplier=line_spacing_multiplier,
                             letter_spacing_multiplier=letter_spacing_multiplier,
@@ -1666,7 +1679,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             final_font_size = font_ceil
 
                         final_font_size = min(final_font_size, target_font_size)
-                        final_font_size = max(final_font_size, min_font_size)
+                        final_font_size = max(final_font_size, layout_min_font_size)
 
                         # 用最终字体重新计算精确的required尺寸
                         final_total_height = text_render.get_string_height(
@@ -1688,7 +1701,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             seed_font_size=final_font_size,
                             bubble_width=bubble_width,
                             bubble_height=bubble_height,
-                            min_font_size=min_font_size,
+                            min_font_size=layout_min_font_size,
                             max_font_size=no_br_max_font_size,
                             line_spacing_multiplier=line_spacing_multiplier,
                             letter_spacing_multiplier=letter_spacing_multiplier,
@@ -1744,7 +1757,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     target_font_size = int(target_font_size * font_scale_factor)
 
                     # 用取整后的字体重新算required
-                    if region.horizontal:
+                    if render_horizontally:
                         final_total_width = text_render.get_string_width(
                             target_font_size,
                             region.translation,
@@ -1790,20 +1803,17 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             except Exception as e:
                 logger.error(f"Error in new smart_scaling algorithm: {e}")
                 # Fallback to a safe state
-                target_font_size = region.offset_applied_font_size
+                target_font_size = getattr(region, 'layout_base_font_size', target_font_size)
                 dst_points = region.min_rect
 
-            # Calculate total font scale (font_scale_ratio + max_font_size limit)
-            final_font_size = int(max(target_font_size, min_font_size) * config.render.font_scale_ratio)
-
-            if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
-                final_font_size = config.render.max_font_size
+            # Apply final post-layout constraints: offset, scale ratio, and min/max clamps.
+            final_font_size = _apply_final_font_constraints(target_font_size, config)
 
             # 用辅助函数直接计算 dst_points（包含矩形构建和旋转）
             line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
             letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
             dst_points = calc_box_from_font(
-                final_font_size, region.translation, region.horizontal,
+                final_font_size, region.translation, render_horizontally,
                 line_spacing_multiplier, config, region.target_lang,
                 center=tuple(region.center), angle=region.angle,
                 letter_spacing=letter_spacing_multiplier,
@@ -1819,13 +1829,10 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 
         # --- Fallback for any other modes (e.g., 'fixed_font') ---
         else:
-            # Calculate total font scale (font_scale_ratio + max_font_size limit)
-            final_font_size = int(min(target_font_size, 512) * config.render.font_scale_ratio)
-            total_font_scale = config.render.font_scale_ratio
-
-            if config.render.max_font_size > 0 and final_font_size > config.render.max_font_size:
-                total_font_scale *= config.render.max_font_size / final_font_size
-                final_font_size = config.render.max_font_size
+            # Apply final post-layout constraints: offset, scale ratio, and min/max clamps.
+            layout_font_size = max(int(min(target_font_size, 512)), 1)
+            final_font_size = _apply_final_font_constraints(layout_font_size, config)
+            total_font_scale = final_font_size / layout_font_size
 
             # Scale region to match final font size
             dst_points = region.min_rect
@@ -1860,7 +1867,6 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 async def dispatch(
     img: np.ndarray,
     text_regions: List[TextBlock],
-    font_path: str = '',
     config: Config = None,
     original_img: np.ndarray = None,
     return_debug_img: bool = False,
@@ -2016,7 +2022,8 @@ def render(
             text_to_render = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text_to_render, flags=re.IGNORECASE)
 
         # Automatically add horizontal tags for vertical text
-        if region.vertical and config.render.auto_rotate_symbols:
+        render_horizontally = _resolve_region_render_horizontal(region)
+        if not render_horizontally and config.render.auto_rotate_symbols:
             text_to_render = text_render.auto_add_horizontal_tags(text_to_render)
 
     if disable_font_border :
@@ -2027,16 +2034,7 @@ def render(
     norm_v = np.linalg.norm(middle_pts[:, 2] - middle_pts[:, 0], axis=1)
     r_orig = np.mean(norm_h / norm_v)
 
-    forced_direction = region._direction if hasattr(region, "_direction") else region.direction
-    if forced_direction != "auto":
-        if forced_direction in ["horizontal", "h"]:
-            render_horizontally = True
-        elif forced_direction in ["vertical", "v"]:
-            render_horizontally = False
-        else:
-            render_horizontally = region.horizontal
-    else:
-        render_horizontally = region.horizontal
+    render_horizontally = _resolve_region_render_horizontal(region)
 
     # 如果最终判断为横排,删除所有 <H> 标签,防止打印出来
     if render_horizontally:
@@ -2121,7 +2119,7 @@ def render(
     r_temp = w / h
 
     box = None
-    if region.horizontal:
+    if render_horizontally:
         if r_temp > r_orig:
             h_ext = int((w / r_orig - h) // 2) if r_orig > 0 else 0
             if h_ext >= 0:
@@ -2216,8 +2214,6 @@ def render(
         new_x, new_y, new_w, new_h = cv2.boundingRect(np.round(pts).astype(np.int32))
         logger.info(f"Text box adjusted to fit image: ({x}, {y}, {w}, {h}) -> ({new_x}, {new_y}, {new_w}, {new_h})")
 
-    M, _ = cv2.findHomography(src_points, adjusted_dst_points[0], cv2.RANSAC, 5.0)
-    
     # 统一使用局部区域渲染，避免 OpenCV warpPerspective 的 32767 像素限制
     SHRT_MAX = 32767
     if box.shape[0] > SHRT_MAX or box.shape[1] > SHRT_MAX:
@@ -2301,12 +2297,11 @@ async def dispatch_eng_render(img_canvas: np.ndarray, original_img: np.ndarray, 
 
     return render_textblock_list_eng(img_canvas, text_regions, line_spacing=line_spacing, size_tol=1.2, original_img=original_img, downscale_constraint=0.8,disable_font_border=disable_font_border)
 
-async def dispatch_eng_render_pillow(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '', line_spacing: int = 0, disable_font_border: bool = False) -> np.ndarray:
+async def dispatch_eng_render_pillow(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '') -> np.ndarray:
     if len(text_regions) == 0:
         return img_canvas
 
     if not font_path:
         font_path = os.path.join(BASE_PATH, 'fonts/NotoSansMonoCJK-VF.ttf.ttc')
-    text_render.set_font(font_path)
 
     return render_textblock_list_eng_pillow(font_path, img_canvas, text_regions, original_img=original_img, downscale_constraint=0.95)
