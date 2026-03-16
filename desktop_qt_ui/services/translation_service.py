@@ -40,7 +40,10 @@ class TranslationResult:
 class TranslationService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        from . import get_config_service, get_i18n_manager  # Lazy import to avoid circular dependency
+        from . import (  # Lazy import to avoid circular dependency
+            get_config_service,
+            get_i18n_manager,
+        )
         self.config_service = get_config_service()
         self.i18n = get_i18n_manager()
         

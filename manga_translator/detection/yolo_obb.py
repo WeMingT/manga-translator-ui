@@ -4,14 +4,14 @@ YOLO 辅助检测器
 """
 
 import os
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import torch
 from ultralytics import YOLO
 
-from .common import OfflineDetector
 from ..utils import Quadrilateral, build_det_rearrange_plan, det_rearrange_patch_array
+from .common import OfflineDetector
 
 
 class YOLOOBBDetector(OfflineDetector):
@@ -317,8 +317,9 @@ class YOLOOBBDetector(OfflineDetector):
             if verbose:
                 self.logger.debug(f"YOLO OBB patch {ii}: 检测到 {len(boxes)} 个框")
                 try:
-                    from ..utils import imwrite_unicode
                     import logging
+
+                    from ..utils import imwrite_unicode
 
                     logger = logging.getLogger("manga_translator")
                     debug_path = (

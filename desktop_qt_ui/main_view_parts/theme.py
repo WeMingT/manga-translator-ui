@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QApplication, QWidget
-
 from theme_registry import AVAILABLE_THEMES, DEFAULT_THEME, THEME_OPTIONS
 
 _ACCENT_BASES = {
@@ -910,10 +909,6 @@ def is_dark_theme(theme: str | None = None) -> bool:
     return active_theme in DARK_THEMES
 
 
-def is_light_theme(theme: str | None = None) -> bool:
-    return not is_dark_theme(theme)
-
-
 def build_theme_palette(theme: str) -> QPalette:
     c = get_theme_colors(theme)
     palette = QPalette()
@@ -1516,17 +1511,6 @@ def repolish_widget(widget: QWidget) -> None:
         widget.update()
     except RuntimeError:
         return
-
-
-def refresh_widget_tree(widget: QWidget) -> None:
-    """Lightweight compatibility helper for widgets with direct local QSS."""
-    repolish_widget(widget)
-    for child in widget.findChildren(QWidget):
-        try:
-            if child.styleSheet():
-                repolish_widget(child)
-        except RuntimeError:
-            continue
 
 
 def apply_widget_stylesheet(widget: QWidget, stylesheet: str) -> None:

@@ -8,7 +8,6 @@
 import os
 from typing import Optional, Tuple
 
-
 # 工作目录名称常量
 WORK_DIR_NAME = "manga_translator_work"
 JSON_SUBDIR = "json"

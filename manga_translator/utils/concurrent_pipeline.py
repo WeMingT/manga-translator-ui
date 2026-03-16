@@ -6,13 +6,13 @@
 import asyncio
 import contextlib
 import logging
-import traceback
 import os
 import queue
 import threading
-from typing import List
-from datetime import datetime, timezone
+import traceback
 from concurrent.futures import ThreadPoolExecutor, wait
+from datetime import datetime, timezone
+from typing import List
 
 from . import Context, load_image, open_pil_image
 
@@ -684,9 +684,10 @@ class ConcurrentPipeline:
                                 # ✅ 先保存修复图（在PSD导出之前），这样PSD导出时可以找到修复图文件
                                 if img_inpainted_copy is not None:
                                     try:
-                                        from .path_manager import get_inpainted_path
-                                        from .generic import imwrite_unicode
                                         import cv2
+
+                                        from .generic import imwrite_unicode
+                                        from .path_manager import get_inpainted_path
                                         
                                         inpainted_path = get_inpainted_path(ctx.image_name, create_dir=True)
                                         imwrite_unicode(inpainted_path, cv2.cvtColor(img_inpainted_copy, cv2.COLOR_RGB2BGR), logger)
@@ -762,7 +763,7 @@ class ConcurrentPipeline:
         self.start_time = datetime.now(timezone.utc)
         
         logger.info(f"[并发流水线] 开始处理 {self.total_images} 张图片")
-        logger.info(f"[并发流水线] 真正并行模式: 4个独立线程（检测+OCR / 翻译 / 修复 / 渲染）")
+        logger.info("[并发流水线] 真正并行模式: 4个独立线程（检测+OCR / 翻译 / 修复 / 渲染）")
         
         # 重置统计
         for key in self.stats:

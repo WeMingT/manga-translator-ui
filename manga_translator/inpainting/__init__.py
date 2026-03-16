@@ -3,12 +3,12 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from ..config import Inpainter, InpainterConfig
 from .common import CommonInpainter, OfflineInpainter
 from .inpainting_aot import AotInpainter
-from .inpainting_lama_mpe import LamaMPEInpainter, LamaLargeInpainter
+from .inpainting_lama_mpe import LamaLargeInpainter, LamaMPEInpainter
 from .none import NoneInpainter
 from .original import OriginalInpainter
-from ..config import Inpainter, InpainterConfig
 
 _SD_IMPORT_ERROR = None
 try:
@@ -20,13 +20,13 @@ except Exception as e:
         async def _load(self, device: str):
             raise RuntimeError(
                 "Stable Diffusion inpainter is unavailable because optional dependencies are missing. "
-                f"Original import error: {e!r}"
+                f"Original import error: {_SD_IMPORT_ERROR!r}"
             )
 
         async def _infer(self, image: np.ndarray, mask: np.ndarray, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
             raise RuntimeError(
                 "Stable Diffusion inpainter is unavailable because optional dependencies are missing. "
-                f"Original import error: {e!r}"
+                f"Original import error: {_SD_IMPORT_ERROR!r}"
             )
 
 INPAINTERS = {

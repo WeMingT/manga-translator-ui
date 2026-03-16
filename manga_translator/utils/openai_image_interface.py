@@ -9,7 +9,6 @@ from PIL import Image
 
 from .retry import summarize_exception_message, summarize_response_text
 
-
 _OPENAI_IMAGE_INTERFACE_CACHE: dict[tuple[str, str], str] = {}
 _OPENAI_IMAGE_INTERFACES = ("images/edits", "images/generations", "chat/completions")
 _ENDPOINT_FALLBACK_STATUS_CODES = {404, 405, 501}

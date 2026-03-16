@@ -17,22 +17,10 @@
 
 import copy
 import logging
-import math
 import traceback
 from typing import List
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QCursor, QPainter, QPainterPath, QPen, QPolygonF
-from PyQt6.QtWidgets import (
-    QGraphicsItem,
-    QGraphicsItemGroup,
-    QGraphicsPixmapItem,
-    QGraphicsScene,
-    QGraphicsSceneMouseEvent,
-    QStyle,
-)
-
 from editor.desktop_ui_geometry import (
     calculate_new_edge_on_drag,
     calculate_new_vertices_on_drag,
@@ -43,6 +31,16 @@ from editor.geometry_commit_pipeline import (
     build_white_frame_region_data,
 )
 from editor.region_geometry_state import RegionGeometryState
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import QBrush, QColor, QCursor, QPainter, QPainterPath, QPen, QPolygonF
+from PyQt6.QtWidgets import (
+    QGraphicsItem,
+    QGraphicsItemGroup,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsSceneMouseEvent,
+    QStyle,
+)
 
 logger = logging.getLogger("manga_translator")
 
@@ -154,23 +152,6 @@ class RegionTextItem(QGraphicsItemGroup):
     def set_image_item(self, item):
         self._image_item = item
 
-    def _get_image_item(self):
-        if self._image_item:
-            return self._image_item
-        if self.scene():
-            for it in self.scene().items():
-                if isinstance(it, QGraphicsPixmapItem) and hasattr(it, "pixmap"):
-                    self._image_item = it
-                    break
-        return self._image_item
-
-    def _scene_to_image_coords(self, scene_pos):
-        img = self._get_image_item()
-        if img:
-            p = img.mapFromScene(scene_pos)
-            return p.x(), p.y()
-        return scene_pos.x(), scene_pos.y()
-
     # ------------------------------------------------------------------
     # 数据更新
     # ------------------------------------------------------------------
@@ -259,12 +240,6 @@ class RegionTextItem(QGraphicsItemGroup):
     # ID / 序列化
     # ------------------------------------------------------------------
 
-    def get_id(self):
-        return self.region_data.get("id")
-
-    def get_polygon_for_save(self):
-        return self.polygon
-
     # ------------------------------------------------------------------
     # 可见性
     # ------------------------------------------------------------------
@@ -279,19 +254,6 @@ class RegionTextItem(QGraphicsItemGroup):
 
     def set_white_box_visible(self, visible: bool):
         self._show_white_box = visible
-        self.update()
-
-    def get_white_frame_rect(self):
-        return self.geo.white_frame_local
-
-    def set_white_frame_rect(self, rect):
-        if rect is not None:
-            self.geo.set_custom_white_frame_local(rect)
-        else:
-            self.geo._white_frame_local = None
-            self.geo.has_custom_white_frame = False
-        self.prepareGeometryChange()
-        self._shape_path = None
         self.update()
 
     # ------------------------------------------------------------------
@@ -487,25 +449,6 @@ class RegionTextItem(QGraphicsItemGroup):
                     path.closeSubpath()
                     seen.add(key)
         return path
-
-    def _get_stable_center(self) -> QPointF:
-        return self.visual_center
-
-    def _calculate_raw_center(self) -> QPointF:
-        all_pts = [p for poly in self.polygons for p in poly]
-        if not all_pts:
-            return QPointF(0, 0)
-        xs = [p.x() for p in all_pts]
-        ys = [p.y() for p in all_pts]
-        return QPointF((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
-
-    def _calculate_center_from_polygons(self, polygons: List[QPolygonF]) -> QPointF:
-        all_pts = [p for poly in polygons for p in poly]
-        if not all_pts:
-            return QPointF(0, 0)
-        xs = [p.x() for p in all_pts]
-        ys = [p.y() for p in all_pts]
-        return QPointF((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
 
     # ------------------------------------------------------------------
     # 手柄命中检测
@@ -851,10 +794,12 @@ class RegionTextItem(QGraphicsItemGroup):
             min_s = 8.0
             if nr - nl < min_s:
                 e = (min_s - (nr - nl)) / 2.0
-                nl -= e; nr += e
+                nl -= e
+                nr += e
             if nb - nt < min_s:
                 e = (min_s - (nb - nt)) / 2.0
-                nt -= e; nb += e
+                nt -= e
+                nb += e
 
             old_rect = self.sceneBoundingRect() if self.scene() else None
             self.prepareGeometryChange()
@@ -946,6 +891,3 @@ class RegionTextItem(QGraphicsItemGroup):
     # ------------------------------------------------------------------
     # WYSIWYG 占位（实际渲染由 GraphicsView 驱动）
     # ------------------------------------------------------------------
-
-    def _render_wysiwyg_text(self, painter):
-        pass

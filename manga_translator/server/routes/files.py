@@ -5,9 +5,10 @@ This module contains file management endpoints for the manga translator server.
 """
 
 import os
-from fastapi import APIRouter, Header, UploadFile, File, HTTPException, Depends
 
-from manga_translator.server.core.config_manager import admin_settings, FONTS_DIR
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+
+from manga_translator.server.core.config_manager import FONTS_DIR, admin_settings
 from manga_translator.server.core.middleware import require_admin
 from manga_translator.server.core.models import Session
 from manga_translator.utils import BASE_PATH

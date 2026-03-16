@@ -1,19 +1,19 @@
 
-from PyQt6.QtCore import pyqtSignal, QTimer, Qt, QRect, QEvent
-from PyQt6.QtGui import QColor, QPixmap, QPainter, QIcon, QAction, QPen, QFont, QCursor
+import logging
+
+from main_view_parts.theme import _to_qcolor, get_current_theme_colors
+from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QCursor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QColorDialog,
     QFrame,
     QHBoxLayout,
+    QMenu,
     QPushButton,
     QToolButton,
-    QMenu,
     QWidget,
 )
-
-import logging
-from main_view_parts.theme import _to_qcolor, get_current_theme_colors
 
 logger = logging.getLogger('manga_translator')
 

@@ -7,18 +7,18 @@ PaddleOCR-VL for Manga OCR Model
 
 import os
 import sys
-import numpy as np
 from typing import List
-from PIL import Image
 
 import cv2
 import einops
+import numpy as np
 import torch
+from PIL import Image
 
-from .common import OfflineOCR
 from ..config import OcrConfig
 from ..utils import Quadrilateral
 from ..utils.generic import AvgMeter
+from .common import OfflineOCR
 
 
 class ModelPaddleOCRVL(OfflineOCR):
@@ -121,10 +121,7 @@ class ModelPaddleOCRVL(OfflineOCR):
 
     async def _load(self, device: str):
         """加载模型"""
-        # 动态导入，避免未使用时加载
-        from transformers import AutoProcessor
-        
-        # 在导入后立即过滤警告
+        # 在加载前过滤相关警告
         import warnings
         warnings.filterwarnings('ignore', message='.*slow image processor.*')
 
@@ -132,7 +129,10 @@ class ModelPaddleOCRVL(OfflineOCR):
         model_path = os.path.join(self.model_dir, self.MODEL_DIR_NAME)
         
         # 自动修补模型文件
-        from .paddleocr_vl_patcher import patch_paddleocr_vl_files, register_ernie_modules
+        from .paddleocr_vl_patcher import (
+            patch_paddleocr_vl_files,
+            register_ernie_modules,
+        )
         if os.path.exists(model_path):
             patch_paddleocr_vl_files(model_path)
             register_ernie_modules(model_path)
@@ -178,8 +178,9 @@ class ModelPaddleOCRVL(OfflineOCR):
                 load_path = model_path
 
             # 直接从 tokenizer.json 加载纯快速 tokenizer，完全避免 sentencepiece
-            from transformers import PreTrainedTokenizerFast
             import json
+
+            from transformers import PreTrainedTokenizerFast
             
             tokenizer_json_path = os.path.join(load_path if not use_relative_path else ".", "tokenizer.json")
             tokenizer_config_path = os.path.join(load_path if not use_relative_path else ".", "tokenizer_config.json")
@@ -211,10 +212,10 @@ class ModelPaddleOCRVL(OfflineOCR):
                 tokenizer.chat_template = chat_template
             
             # 加载 image processor（使用慢速模式）
-            from transformers import AutoImageProcessor
-            
             # 过滤 slow image processor 警告
             import warnings
+
+            from transformers import AutoImageProcessor
             with warnings.catch_warnings():
                 warnings.filterwarnings('ignore', message='.*slow image processor.*')
                 image_processor = AutoImageProcessor.from_pretrained(

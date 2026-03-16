@@ -1,11 +1,12 @@
 from typing import Any, Dict, List, Optional, Union
-import os
 
 from pydantic import BaseModel, Field, model_validator
-
-from manga_translator.custom_api_params import migrate_legacy_custom_api_params_config
 from theme_registry import VALID_THEME_PREFERENCES as REGISTERED_THEME_PREFERENCES
 from theme_registry import VALID_THEMES as REGISTERED_THEMES
+
+from manga_translator.custom_api_params import migrate_legacy_custom_api_params_config
+
+VALID_LAYOUT_MODES = {"smart_scaling", "strict", "balloon_fill"}
 
 
 class TranslatorSettings(BaseModel):
@@ -85,6 +86,15 @@ class RenderSettings(BaseModel):
     enable_template_alignment: bool = False  # 启用模板匹配对齐（替换翻译模式）- 直接提取翻译图文字
     paste_mask_dilation_pixels: int = 10  # 粘贴模式蒙版膨胀大小（像素），设为0禁用膨胀
     ai_renderer_concurrency: int = 1
+
+    @model_validator(mode="after")
+    def _validate_layout_mode(self):
+        if self.layout_mode not in VALID_LAYOUT_MODES:
+            raise ValueError(
+                f"Invalid render.layout_mode: {self.layout_mode!r}. "
+                f"Supported values: {', '.join(sorted(VALID_LAYOUT_MODES))}"
+            )
+        return self
 
 class UpscaleSettings(BaseModel):
     upscaler: str = "esrgan"

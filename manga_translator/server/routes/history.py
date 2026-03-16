@@ -7,15 +7,18 @@
 import logging
 import os
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from manga_translator.server.core.middleware import require_auth, require_admin
-from manga_translator.server.core.models import Session
 from manga_translator.server.core.history_service import HistoryManagementService
+from manga_translator.server.core.middleware import require_admin, require_auth
+from manga_translator.server.core.models import Session
+from manga_translator.server.core.permission_integration import (
+    IntegratedPermissionService,
+)
 from manga_translator.server.core.search_service import SearchService
-from manga_translator.server.core.permission_integration import IntegratedPermissionService
 
 logger = logging.getLogger(__name__)
 

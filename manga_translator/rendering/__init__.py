@@ -1,33 +1,35 @@
+import copy
 import math
 import os
 import re
-import copy
+from typing import List, Optional, Tuple
+
 import cv2
+
 # import logging
 import numpy as np
-from typing import List, Optional, Tuple
 from shapely import affinity
 from shapely.geometry import Polygon
 from tqdm import tqdm
 
-from . import text_render
-from . import text_render_hq
-from .auto_linebreak import solve_no_br_layout
-from .text_render_eng import render_textblock_list_eng
-from .text_render_pillow_eng import render_textblock_list_eng as render_textblock_list_eng_pillow
+from ..config import Config, Renderer
 
 # 只使用 freetype 渲染器（稳定可靠）
 from ..utils import (
     BASE_PATH,
     TextBlock,
     build_bubble_mask_from_mangalens_result,
-    color_difference,
     fg_bg_compare,
     get_cached_bubbles_with_mangalens,
     get_logger,
     rotate_polygons,
 )
-from ..config import Config, Renderer
+from . import text_render, text_render_hq
+from .auto_linebreak import solve_no_br_layout
+from .text_render_eng import render_textblock_list_eng
+from .text_render_pillow_eng import (
+    render_textblock_list_eng as render_textblock_list_eng_pillow,
+)
 
 logger = get_logger('render')
 
@@ -666,9 +668,6 @@ def optimize_line_breaks_for_region(region: TextBlock, config: Config, target_fo
     br_pattern = r'(\[BR\]|【BR】|<br>)'
     original_br_count = len(re.findall(br_pattern, original_translation, flags=re.IGNORECASE))
     optimized_br_count = len(re.findall(br_pattern, best_text, flags=re.IGNORECASE))
-    
-    # 标准化原文以便比较（只用于判断是否真的有改变）
-    _original_normalized = re.sub(r'\s*(<br>|【BR】)\s*', '[BR]', original_translation, flags=re.IGNORECASE)
     
     # 只有当BR数量真的改变时才应用优化
     if optimized_br_count != original_br_count:
@@ -1365,14 +1364,15 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 )
                 region.translation = optimized_text
                 logger.debug(f"[OPTIMIZE] Optimized text: {region.translation}")
-            
+
             font_size = target_font_size
             min_shrink_font_size = 8
+            line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
             letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
             render_horizontally = _resolve_region_render_horizontal(region)
 
             # AI 断句适配：如果开启了 AI 断句且有 BR 标记，使用无限宽度/高度
-            
+
             # 检测是否为替换翻译模式
             is_replace_mode = config.cli.replace_translation if (config and hasattr(config, 'cli')) else False
             
@@ -1380,9 +1380,46 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             # 强制使用无限宽度（不换行），以复刻原图的单行结构
             is_single_line = len(region.lines) == 1
             force_single_line_no_wrap = is_replace_mode and is_single_line
-            
+
             use_ai_break = (config.render.disable_auto_wrap and has_br) or force_single_line_no_wrap
-            
+
+            if not has_br:
+                bubble_width, bubble_height = region.unrotated_size
+                seed_segments = max(1, len(region.texts))
+                no_br_result = solve_no_br_layout(
+                    text=region.translation,
+                    horizontal=render_horizontally,
+                    seed_segments=seed_segments,
+                    seed_font_size=target_font_size,
+                    bubble_width=bubble_width,
+                    bubble_height=bubble_height,
+                    min_font_size=layout_min_font_size,
+                    max_font_size=target_font_size,
+                    line_spacing_multiplier=line_spacing_multiplier,
+                    target_lang=region.target_lang,
+                    config=config,
+                    letter_spacing_multiplier=letter_spacing_multiplier,
+                )
+                region.translation = no_br_result.text_with_br
+
+                layout_font_size = max(no_br_result.font_size, min_shrink_font_size)
+                final_font_size = _apply_final_font_constraints(layout_font_size, config)
+                total_font_scale = final_font_size / max(layout_font_size, 1)
+
+                dst_points = region.min_rect
+                if total_font_scale != 1.0:
+                    try:
+                        poly = Polygon(region.unrotated_min_rect[0])
+                        scaled_poly = affinity.scale(poly, xfact=total_font_scale, yfact=total_font_scale, origin='center')
+                        scaled_points = np.array(scaled_poly.exterior.coords[:4])
+                        dst_points = rotate_polygons(region.center, scaled_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
+                    except Exception as e:
+                        logger.warning(f"Failed to scale strict no-br region for font_scale_ratio: {e}")
+
+                region.font_size = final_font_size
+                dst_points_list.append(dst_points)
+                continue
+
             if use_ai_break:
                 calc_max_width = 99999
                 calc_max_height = 99999
@@ -1831,27 +1868,12 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             dst_points_list.append(dst_points)
             continue
 
-        # --- Fallback for any other modes (e.g., 'fixed_font') ---
+        # --- Unsupported layout modes ---
         else:
-            # Apply final post-layout constraints: offset, scale ratio, and min/max clamps.
-            layout_font_size = max(int(min(target_font_size, 512)), 1)
-            final_font_size = _apply_final_font_constraints(layout_font_size, config)
-            total_font_scale = final_font_size / layout_font_size
-
-            # Scale region to match final font size
-            dst_points = region.min_rect
-            if total_font_scale != 1.0:
-                try:
-                    poly = Polygon(region.unrotated_min_rect[0])
-                    scaled_poly = affinity.scale(poly, xfact=total_font_scale, yfact=total_font_scale, origin='center')
-                    scaled_points = np.array(scaled_poly.exterior.coords[:4])
-                    dst_points = rotate_polygons(region.center, scaled_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)
-                except Exception as e:
-                    logger.warning(f"Failed to scale region for font_scale_ratio: {e}")
-
-            region.font_size = final_font_size
-            dst_points_list.append(dst_points)
-            continue
+            raise ValueError(
+                f"Unsupported render.layout_mode: {mode!r}. "
+                "Supported values: balloon_fill, smart_scaling, strict"
+            )
         
     # Add legend to debug image
     if return_debug_img and debug_img is not None:
@@ -1962,7 +1984,7 @@ def render(
         # Last resort: Use the method2
         else:
             fg, _ = region.get_font_colors()
-    except Exception as _e:
+    except Exception:
         # If anything fails, fg remains black
         pass
 
@@ -1988,8 +2010,7 @@ def render(
     # Centralized text preprocessing
     # 检查是否有富文本，并标记给渲染器
     has_rich_text = hasattr(region, 'rich_text') and region.rich_text
-    _rich_text_html = region.rich_text if has_rich_text else None
-    
+
     if has_rich_text:
         # 有富文本，从 HTML 中提取纯文本（用于非 Qt 渲染器）
         from html import unescape

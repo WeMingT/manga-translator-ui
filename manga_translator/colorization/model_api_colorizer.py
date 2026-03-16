@@ -7,21 +7,24 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
+from ..custom_api_params import (
+    load_enabled_custom_api_params,
+    split_gemini_request_params,
+)
+from ..utils import get_logger
+from ..utils.ai_image_preprocess import (
+    normalize_ai_image,
+    prepare_square_ai_image,
+    restore_square_ai_image,
+)
+from ..utils.openai_image_interface import request_openai_image_with_fallback
+from ..utils.retry import run_with_retry
 from .common import CommonColorizer
 from .prompt_loader import (
     DEFAULT_AI_COLORIZER_PROMPT,
     build_ai_colorizer_prompt_payload,
     ensure_ai_colorizer_prompt_file,
 )
-from ..utils.ai_image_preprocess import normalize_ai_image, prepare_square_ai_image, restore_square_ai_image
-from ..custom_api_params import (
-    load_enabled_custom_api_params,
-    split_gemini_request_params,
-)
-from ..utils.openai_image_interface import request_openai_image_with_fallback
-from ..utils import get_logger
-from ..utils.retry import run_with_retry
-
 
 OPENAI_BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
