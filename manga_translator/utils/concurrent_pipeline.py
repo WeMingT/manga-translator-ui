@@ -20,6 +20,10 @@ from . import Context, load_image, open_pil_image
 logger = logging.getLogger('manga_translator')
 
 
+class PipelineAbortError(asyncio.CancelledError):
+    """内部停止信号：用于中止其他工作线程，但不应被当作用户取消。"""
+
+
 class ConcurrentPipeline:
     """
     流水线并发处理器 - 真正的并行架构
@@ -156,9 +160,15 @@ class ConcurrentPipeline:
         raise RuntimeError("并发流水线已停止，无法继续提交翻译任务")
 
     def _check_cancelled_or_raise(self, stage: str, detail: str = ""):
-        """统一取消检查：收到取消后设置停止标记并抛出 CancelledError。"""
+        """统一取消检查：区分用户取消与内部停机。"""
+        if self.has_critical_error:
+            raise PipelineAbortError(self.critical_error_msg or "并发流水线发生严重错误")
+
         try:
             self.translator._check_cancelled()
+        except PipelineAbortError:
+            self.stop_workers = True
+            raise
         except asyncio.CancelledError:
             self.stop_workers = True
             message = f"[{stage}] 用户取消"
@@ -333,6 +343,11 @@ class ConcurrentPipeline:
                     self.critical_error_exception = e
                     self.stop_workers = True
                     break
+                except PipelineAbortError:
+                    logger.info(f"[检测+OCR] 因内部停止信号结束: {os.path.basename(file_path)}")
+                    break
+        except PipelineAbortError:
+            self.stop_workers = True
         except asyncio.CancelledError:
             self.stop_workers = True
             raise
@@ -398,6 +413,9 @@ class ConcurrentPipeline:
                         await self._process_translation_batch(batch)
                         batch = []
                     
+                except PipelineAbortError:
+                    logger.info("[翻译] 因内部停止信号结束")
+                    break
                 except asyncio.CancelledError:
                     self.stop_workers = True
                     raise
@@ -422,6 +440,8 @@ class ConcurrentPipeline:
             
             if self.stats['translation'] >= self.total_images:
                 logger.info(f"[翻译线程] 所有图片已翻译 ({self.stats['translation']}/{self.total_images})")
+        except PipelineAbortError:
+            self.stop_workers = True
         finally:
             logger.info("[翻译线程] 停止")
     
@@ -460,6 +480,9 @@ class ConcurrentPipeline:
             else:
                 logger.debug(f"[翻译] 批次中 0/{len(batch)} 张图片完成修复，等待修复完成后加入渲染队列")
             
+        except PipelineAbortError:
+            self.stop_workers = True
+            raise
         except asyncio.CancelledError:
             self.stop_workers = True
             raise
@@ -586,6 +609,11 @@ class ConcurrentPipeline:
                     self.critical_error_exception = e
                     self.stop_workers = True
                     break
+                except PipelineAbortError:
+                    logger.info("[修复] 因内部停止信号结束")
+                    break
+        except PipelineAbortError:
+            self.stop_workers = True
         except asyncio.CancelledError:
             self.stop_workers = True
             raise
@@ -742,6 +770,11 @@ class ConcurrentPipeline:
                     self.critical_error_exception = e
                     self.stop_workers = True
                     break
+                except PipelineAbortError:
+                    logger.info("[渲染] 因内部停止信号结束")
+                    break
+        except PipelineAbortError:
+            self.stop_workers = True
         except asyncio.CancelledError:
             self.stop_workers = True
             raise
@@ -782,13 +815,16 @@ class ConcurrentPipeline:
         original_cancel_callback = getattr(self.translator, "_cancel_check_callback", None)
         if hasattr(self.translator, "set_cancel_check_callback"):
             def _pipeline_cancel_check():
-                if self.stop_workers:
-                    return True
+                if self.has_critical_error:
+                    raise PipelineAbortError(self.critical_error_msg or "并发流水线发生严重错误")
                 if original_cancel_callback:
                     try:
-                        return bool(original_cancel_callback())
+                        if bool(original_cancel_callback()):
+                            return True
                     except Exception as e:
                         logger.debug(f"[并发流水线] 外部取消回调异常（可忽略）: {e}")
+                if self.stop_workers:
+                    raise PipelineAbortError("并发流水线已停止")
                 return False
             self.translator.set_cancel_check_callback(_pipeline_cancel_check)
         
@@ -828,6 +864,20 @@ class ConcurrentPipeline:
                 # 让出控制权，检查取消
                 await asyncio.sleep(0)
                 
+        except PipelineAbortError as e:
+            logger.info(f"[并发流水线] 因内部停止信号结束等待: {e}")
+            self.stop_workers = True
+            done, not_done = wait(futures, timeout=10.0)
+            self._flush_status_to_logger()
+            if not_done:
+                thread_names = []
+                for i, future in enumerate(futures):
+                    if future in not_done:
+                        names = ["检测+OCR", "翻译", "修复", "渲染"]
+                        thread_names.append(names[i])
+                logger.warning(f"[并发流水线] {len(not_done)} 个线程未能在10秒内停止: {', '.join(thread_names)}")
+            else:
+                logger.info("[并发流水线] 所有线程已停止")
         except asyncio.CancelledError:
             # 用户取消了任务
             logger.info("[并发流水线] 收到取消信号")
