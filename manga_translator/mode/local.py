@@ -4,11 +4,11 @@
 命令行翻译工具 - 直接使用 UI 层的翻译逻辑
 支持子进程模式进行内存管理和断点续传
 """
-import os
-import sys
 import argparse
 import asyncio
 import multiprocessing
+import os
+import sys
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
@@ -85,11 +85,17 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     """翻译文件（使用 UI 层的逻辑）"""
     
     # 延迟导入，避免 --help 时加载所有模块
-    from desktop_qt_ui.services.file_service import FileService
-    from manga_translator import MangaTranslator, Config
-    from manga_translator.utils import init_logging, set_log_level, get_logger, open_pil_image
     import logging
     import logging.handlers
+
+    from desktop_qt_ui.services.file_service import FileService
+    from manga_translator import Config, MangaTranslator
+    from manga_translator.utils import (
+        get_logger,
+        init_logging,
+        open_pil_image,
+        set_log_level,
+    )
     
     init_logging()
     if verbose:
@@ -381,14 +387,18 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                 # 检查导出原文/翻译的TXT文件（如果启用）
                 if cli_config.get('template', False) and cli_config.get('save_text', False):
                     # 导出原文模式 - 检查TXT文件
-                    from manga_translator.utils.path_manager import get_original_txt_path
+                    from manga_translator.utils.path_manager import (
+                        get_original_txt_path,
+                    )
                     txt_path = get_original_txt_path(file_path, create_dir=False)
                     if os.path.exists(txt_path):
                         should_skip = True
                         skip_reason = f"原文文件已存在: {os.path.basename(txt_path)}"
                 elif cli_config.get('generate_and_export', False):
                     # 导出翻译模式 - 检查TXT文件
-                    from manga_translator.utils.path_manager import get_translated_txt_path
+                    from manga_translator.utils.path_manager import (
+                        get_translated_txt_path,
+                    )
                     txt_path = get_translated_txt_path(file_path, create_dir=False)
                     if os.path.exists(txt_path):
                         should_skip = True
@@ -500,11 +510,10 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
                     if hasattr(image, 'close'):
                         try:
                             image.close()
-                        except:
+                        except Exception:
                             pass
                 images_with_configs.clear()
                 
-                import gc
                 pass
         else:
             # ✅ 非并发模式：直接把路径交给后端，由后端按 batch_size 控制加载
@@ -698,7 +707,7 @@ async def run_local_mode(args):
                                 print(f"⏭️  跳过已存在: {os.path.basename(file_path)}")
                         else:
                             filtered_files.append(file_path)
-                    except:
+                    except Exception:
                         filtered_files.append(file_path)
                 
                 if skipped_count > 0:

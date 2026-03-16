@@ -1,6 +1,7 @@
 import json
 from typing import Any, Callable
 
+from main_view_parts.theme import get_current_theme, get_current_theme_colors
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -17,14 +18,13 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
 from utils.wheel_filter import NoWheelComboBox as QComboBox
+
 from manga_translator.custom_api_params import (
     CUSTOM_API_PARAM_SECTIONS,
     build_custom_api_params_payload,
     normalize_custom_api_params_payload,
 )
-from main_view_parts.theme import get_current_theme, get_current_theme_colors
 
 
 def _identity_translate(text: str, **kwargs) -> str:

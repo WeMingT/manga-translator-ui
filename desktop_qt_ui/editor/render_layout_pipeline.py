@@ -6,6 +6,7 @@ logger = logging.getLogger('manga_translator')
 
 import numpy as np
 from editor import text_renderer_backend
+
 from manga_translator.config import Config, RenderConfig
 from manga_translator.rendering import calc_box_from_font
 from manga_translator.utils import TextBlock

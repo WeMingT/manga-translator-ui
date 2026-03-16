@@ -1,10 +1,8 @@
+from main_view_parts.theme import get_current_theme, get_theme_colors
 from PIL.ImageQt import ImageQt
 from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPixmap, QTransform
 from PyQt6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
-
-from main_view_parts.theme import get_current_theme
-from main_view_parts.theme import get_theme_colors
 
 
 class OriginalCompareView(QGraphicsView):

@@ -1,10 +1,15 @@
-from PyQt6.QtCore import QLibraryInfo, QLocale, QTimer, Qt, QTranslator, pyqtSlot
-from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import QApplication, QMainWindow, QStackedWidget
-
 from app_logic import MainAppLogic
 from main_view import MainView
-from services import ServiceManager, get_config_service, get_logger, get_state_manager, get_i18n_manager
+from PyQt6.QtCore import QLibraryInfo, QLocale, Qt, QTimer, QTranslator, pyqtSlot
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QApplication, QMainWindow, QStackedWidget
+from services import (
+    ServiceManager,
+    get_config_service,
+    get_i18n_manager,
+    get_logger,
+    get_state_manager,
+)
 from theme_registry import THEME_OPTIONS
 from widgets.themed_message_box import show_error_dialog
 
@@ -127,7 +132,6 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.editor_view)
 
         self.app_logic.config_loaded.connect(self.editor_view.property_panel.repopulate_options)
-        self.app_logic.render_setting_changed.connect(self.editor_logic.on_global_render_setting_changed)
         self.editor_view.back_to_main_requested.connect(lambda: self.stacked_widget.setCurrentWidget(self.main_view))
 
         self.editor_view._apply_editor_style(self.current_applied_theme)
@@ -212,7 +216,7 @@ class MainWindow(QMainWindow):
             value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
             winreg.CloseKey(key)
             return "light" if value == 1 else "dark"
-        except Exception as e:
+        except Exception:
             # 默认返回浅色（或记录日志）
             # self.logger.warning(f"无法检测系统主题: {e}")
             return "light"
@@ -505,10 +509,8 @@ class MainWindow(QMainWindow):
         """
         Switches to the editor view and loads the necessary files.
         file_to_load: 单个文件路径（双击文件时使用）
-        files_to_load: 翻译后的文件列表（从翻译完成进入时使用）
+        files_to_load: 保存结果列表（从翻译完成进入时使用，用于定位要打开的原图）
         """
-        import os
-
         try:
             self._ensure_editor_initialized()
 
@@ -517,45 +519,17 @@ class MainWindow(QMainWindow):
             expanded_files = tree_structure['files']
             folder_tree = tree_structure['tree']
 
-            # 传递翻译后的图片列表给编辑器
-            # 从file_to_folder_map获取翻译后的图片路径
-            translated_files = []
-            translated_folder_map = {}  # 翻译后文件的文件夹映射
-            config = self.app_logic.config_service.get_config()
-            output_folder = config.app.last_output_path
-            output_format = config.cli.format
-            if not output_format or output_format == "不指定":
-                output_format = None
-            save_info = {
-                'output_folder': output_folder,
-                'format': output_format,
-                'save_to_source_dir': config.cli.save_to_source_dir,
-            }
-            
-            for source_file in expanded_files:
-                # 根据源文件路径构造翻译后的图片路径
-                translated_file = self.app_logic._calculate_output_path(source_file, save_info)
-                if os.path.exists(translated_file):
-                    translated_files.append(translated_file)
-                    translated_folder_map[translated_file] = os.path.dirname(translated_file)
-
             # 判断是否从翻译完成进入（有 files_to_load 参数）
             if files_to_load and len(files_to_load) > 0:
-                # 从翻译完成进入：仍然显示源文件列表，具体加载时再解析到可编辑底图
                 self.editor_logic.load_file_lists(
                     source_files=expanded_files,
-                    translated_files=translated_files,
                     folder_tree=folder_tree,
-                    show_translated=False
                 )
-                
-                # 传入翻译结果路径，编辑器会自动解析到可编辑底图
                 self.editor_logic.load_image_into_editor(files_to_load[0])
             else:
                 # 手动打开编辑器：显示源文件列表
                 self.editor_logic.load_file_lists(
-                    source_files=expanded_files, 
-                    translated_files=translated_files,
+                    source_files=expanded_files,
                     folder_tree=folder_tree
                 )
                 # 如果指定了要加载的文件
@@ -563,8 +537,6 @@ class MainWindow(QMainWindow):
                     self.editor_logic.load_image_into_editor(file_to_load)
                 elif expanded_files:
                     self.editor_logic.load_image_into_editor(expanded_files[0])
-                elif translated_files:
-                    self.editor_logic.load_image_into_editor(translated_files[0])
 
             self.stacked_widget.setCurrentWidget(self.editor_view)
         except Exception as e:

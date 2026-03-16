@@ -5,10 +5,11 @@ Provides user authentication functionality including login, logout, password cha
 session checking, initial setup, and user registration.
 """
 
+import logging
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from typing import Optional
-import logging
 
 from manga_translator.server.core.config_manager import admin_settings
 

@@ -1,11 +1,12 @@
 import itertools
-import numpy as np
-from typing import List, Set, Optional, Tuple
 from collections import Counter
+from typing import List, Optional, Set, Tuple
+
 import networkx as nx
+import numpy as np
 from shapely.geometry import Polygon
 
-from ..utils import TextBlock, Quadrilateral, quadrilateral_can_merge_region
+from ..utils import Quadrilateral, TextBlock, quadrilateral_can_merge_region
 
 GROUP_BUBBLE_LABELS = {'balloon', 'qipao', 'other'}
 GROUP_STRIP_LABELS = {'changfangtiao'}

@@ -5,14 +5,15 @@
 """
 
 import logging
-from typing import Optional, Dict, Any
-from fastapi import Header, HTTPException, Depends, Query
+from typing import Any, Dict, Optional
+
+from fastapi import Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from manga_translator.server.core.models import Session
-from manga_translator.server.core.session_service import SessionService
-from manga_translator.server.core.permission_service import PermissionService
 from manga_translator.server.core.account_service import AccountService
+from manga_translator.server.core.models import Session
+from manga_translator.server.core.permission_service import PermissionService
+from manga_translator.server.core.session_service import SessionService
 
 logger = logging.getLogger(__name__)
 

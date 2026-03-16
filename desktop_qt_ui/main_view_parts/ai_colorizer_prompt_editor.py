@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
-    QHeaderView,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMenu,
     QPlainTextEdit,
@@ -20,6 +20,9 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from widgets.filter_list_editor import _dialog_stylesheet as _base_dialog_stylesheet
+from widgets.filter_list_editor import _monospace_font
+from widgets.themed_text_input_dialog import themed_get_text
 
 from main_view_parts.theme import (
     apply_widget_stylesheet,
@@ -27,9 +30,9 @@ from main_view_parts.theme import (
     get_current_theme_colors,
     repolish_widget,
 )
-from manga_translator.colorization.prompt_loader import load_ai_colorizer_prompt_template
-from widgets.filter_list_editor import _dialog_stylesheet as _base_dialog_stylesheet, _monospace_font
-from widgets.themed_text_input_dialog import themed_get_text
+from manga_translator.colorization.prompt_loader import (
+    load_ai_colorizer_prompt_template,
+)
 
 
 def is_ai_colorizer_prompt_data(data) -> bool:

@@ -6,27 +6,35 @@ Updated to use the new session-based authentication system.
 """
 
 import io
+import logging
+import os
 import secrets
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Header, Form, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, Form, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
-from manga_translator.server.core.config_manager import (
-    admin_settings, save_admin_settings, ADMIN_CONFIG_PATH
-)
-from manga_translator.server.core.task_manager import server_config, init_semaphore
 from manga_translator.server.core.auth import valid_admin_tokens
-from manga_translator.server.core.logging_manager import (
-    global_log_queue, task_logs, task_logs_lock, add_log
+from manga_translator.server.core.config_manager import (
+    ADMIN_CONFIG_PATH,
+    admin_settings,
+    save_admin_settings,
 )
-from manga_translator.server.core.task_manager import (
-    active_tasks, active_tasks_lock
+from manga_translator.server.core.logging_manager import (
+    add_log,
+    global_log_queue,
+    task_logs,
+    task_logs_lock,
 )
 from manga_translator.server.core.middleware import require_admin
 from manga_translator.server.core.models import Session
-import os
-import logging
+from manga_translator.server.core.task_manager import (
+    active_tasks,
+    active_tasks_lock,
+    init_semaphore,
+    server_config,
+)
 
 logger = logging.getLogger('manga_translator.server')
 
@@ -570,6 +578,7 @@ async def save_env_vars(
         logger.debug("Using legacy admin token authentication")
     
     from dotenv import load_dotenv
+
     from manga_translator.server.core.env_service import EnvService
     env_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env')
     

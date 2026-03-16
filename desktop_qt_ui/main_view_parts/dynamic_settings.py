@@ -3,18 +3,17 @@ import os
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QFrame,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QVBoxLayout,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
-
 from utils.resource_helper import resource_path
 from utils.wheel_filter import NoWheelComboBox as QComboBox
 from widgets.toggle_switch import ToggleSwitch
@@ -126,7 +125,9 @@ def _open_fixed_prompt_editor(self, full_key: str):
 
     abs_path = spec["ensure_func"](spec["hint"])
     if full_key == "colorizer.ai_colorizer_prompt_path":
-        from main_view_parts.ai_colorizer_prompt_editor import AIColorizerPromptEditorDialog
+        from main_view_parts.ai_colorizer_prompt_editor import (
+            AIColorizerPromptEditorDialog,
+        )
 
         dialog = AIColorizerPromptEditorDialog(abs_path, t_func=self._t, parent=self)
         dialog.exec()
@@ -1082,8 +1083,8 @@ class _ClickableRow(QWidget):
 
     def paintEvent(self, event):
         if self._selected:
-            from PyQt6.QtGui import QPainter, QPainterPath
             from PyQt6.QtCore import QRectF
+            from PyQt6.QtGui import QPainter, QPainterPath
             p = QPainter(self)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             path = QPainterPath()

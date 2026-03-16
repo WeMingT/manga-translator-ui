@@ -1,4 +1,6 @@
 
+import logging
+
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIntValidator, QWheelEvent
 from PyQt6.QtWidgets import (
@@ -12,21 +14,19 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSlider,
     QSizePolicy,
+    QSlider,
     QStyle,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
-
 from services import get_config_service, get_i18n_manager
 
 from .color_picker import ColorPickerWidget
-from .themed_text_input_dialog import themed_get_text
+
 # from .collapsible_frame import CollapsibleFrame  # 不再使用折叠框
-from .syntax_highlighter import HorizontalTagHighlighter
-import logging
+from .themed_text_input_dialog import themed_get_text
 
 logger = logging.getLogger('manga_translator')
 
@@ -537,6 +537,7 @@ class PropertyPanel(QWidget):
     def _populate_font_list(self):
         """Populate font combo box with available fonts from fonts folder"""
         import os
+
         from manga_translator.utils import BASE_PATH
         
         # 清空现有列表
@@ -626,17 +627,10 @@ class PropertyPanel(QWidget):
         self.copy_button.clicked.connect(self.copy_region_requested.emit)
         self.paste_button.clicked.connect(self.paste_region_requested.emit)
         self.delete_button.clicked.connect(self.delete_region_requested.emit)
-
-
-    def reload_config_settings(self):
-        """公共方法：重新加载主页配置设置"""
-        self.repopulate_options()  # 重新加载选项
-
     def _connect_model_signals(self):
         self.model.display_mask_type_changed.connect(self._on_display_mask_type_changed)
         self.model.refined_mask_changed.connect(self._on_refined_mask_changed)
         self.model.regions_changed.connect(self.on_regions_updated)
-        self.model.region_text_updated.connect(self.on_single_region_updated)
         self.model.region_style_updated.connect(self.on_single_region_updated)
 
     def _on_display_mask_type_changed(self, mask_type: str):
@@ -1144,6 +1138,7 @@ class PropertyPanel(QWidget):
 
     def _on_save_style_preset_clicked(self):
         import copy
+
         from PyQt6.QtWidgets import QMessageBox
 
         default_name = self.style_preset_combo.currentData() or ""
@@ -1189,6 +1184,7 @@ class PropertyPanel(QWidget):
 
     def _on_delete_style_preset_clicked(self):
         import copy
+
         from PyQt6.QtWidgets import QMessageBox
 
         preset_name = self.style_preset_combo.currentData()

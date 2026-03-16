@@ -1187,11 +1187,8 @@ function generateConfigUI(config) {
                 
                 // 排版模式的翻译映射
                 const layoutModeMap = {
-                    'default': t('layout_mode_default'),
                     'smart_scaling': t('layout_mode_smart_scaling'),
                     'strict': t('layout_mode_strict'),
-                    'fixed_font': t('layout_mode_fixed_font'),
-                    'disable_all': t('layout_mode_disable_all'),
                     'balloon_fill': t('layout_mode_balloon_fill')
                 };
                 

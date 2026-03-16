@@ -9,7 +9,6 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QWidget,
 )
-
 from services import get_i18n_manager
 
 

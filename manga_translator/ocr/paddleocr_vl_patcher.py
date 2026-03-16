@@ -70,8 +70,8 @@ def register_ernie_modules(model_path: str):
     if os.path.exists(model_path):
         sys.path.insert(0, model_path)
         try:
-            import __init__ as paddleocr_vl_init
-        except:
+            __import__('__init__')
+        except Exception:
             pass
         finally:
             if model_path in sys.path:

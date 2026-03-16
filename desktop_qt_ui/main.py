@@ -1,6 +1,6 @@
-import sys
-import os
 import logging
+import os
+import sys
 import warnings
 
 # 抑制第三方库的警告（必须在导入其他库之前设置）
@@ -20,6 +20,7 @@ os.environ['HF_HUB_ENDPOINT'] = 'https://hf-mirror.com'
 
 # 禁用 SSL 验证（解决 hf-mirror.com 证书问题）
 import ssl
+
 ssl._create_default_https_context = ssl._create_unverified_context
 os.environ['CURL_CA_BUNDLE'] = ''
 os.environ['REQUESTS_CA_BUNDLE'] = ''
@@ -43,11 +44,12 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         if os.path.exists(onnx_capi_dir):
             os.add_dll_directory(onnx_capi_dir)
 
-from PyQt6.QtWidgets import QApplication
 from main_window import MainWindow
+from PyQt6.QtWidgets import QApplication
 from services import init_services
 from utils.resource_helper import load_icon_from_resources
 from widgets.themed_message_box import install_themed_message_boxes
+
 
 # 全局异常处理器，捕获未处理的异常并记录到日志
 def global_exception_handler(exc_type, exc_value, exc_traceback):
@@ -80,9 +82,9 @@ def main():
     应用主入口
     """
     # --- 日志配置（异步优化）---
+    import atexit
     import queue
     import threading
-    import atexit
     
     # 创建异步日志处理器
     class AsyncStreamHandler(logging.Handler):
@@ -111,7 +113,7 @@ def main():
                     # ✅ 即使队列为空也刷新一次，确保之前的输出显示
                     try:
                         self.stream.flush()
-                    except:
+                    except Exception:
                         pass
                     continue
                 except Exception:

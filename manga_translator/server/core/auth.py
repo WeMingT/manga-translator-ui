@@ -6,8 +6,8 @@
 
 import secrets
 from typing import Optional
-from fastapi import Header, HTTPException
 
+from fastapi import Header, HTTPException
 
 # 有效的管理员 tokens（登录后生成）
 valid_admin_tokens = set()

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from main_view_parts.theme import (
+    apply_native_title_bar_theme,
+    apply_widget_stylesheet,
+    generate_application_stylesheet,
+    get_current_theme,
+)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -13,13 +19,6 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QVBoxLayout,
-)
-
-from main_view_parts.theme import (
-    apply_native_title_bar_theme,
-    apply_widget_stylesheet,
-    generate_application_stylesheet,
-    get_current_theme,
 )
 
 

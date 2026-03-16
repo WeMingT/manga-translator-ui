@@ -11,7 +11,6 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -19,7 +18,6 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -29,9 +27,9 @@ from PyQt6.QtWidgets import (
 
 from main_view_parts.theme import get_current_theme, get_current_theme_colors
 
-
 # 模块级翻译函数（由 Panel / Dialog 初始化时设置）
-_current_t = lambda x: x
+def _current_t(text):
+    return text
 
 
 def _theme_tokens() -> Dict[str, str]:
@@ -1390,8 +1388,8 @@ class PromptEditorDialog(QDialog):
         return {k for k, _ in self._section_containers}
 
     def _show_add_section_menu(self):
-        from PyQt6.QtWidgets import QMenu
         from PyQt6.QtGui import QAction
+        from PyQt6.QtWidgets import QMenu
         menu = QMenu(self)
         menu.setStyleSheet(_menu_style())
         existing = self._get_existing_sections()

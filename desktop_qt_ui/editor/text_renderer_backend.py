@@ -3,14 +3,15 @@ import os
 
 import cv2
 import numpy as np
+from PyQt6.QtCore import QPointF
+from PyQt6.QtGui import QImage, QPixmap, QPolygonF
+
 from manga_translator.config import Config, RenderConfig
 from manga_translator.rendering import text_render
 from manga_translator.rendering.text_render import (
     set_font,
 )
 from manga_translator.utils import TextBlock
-from PyQt6.QtCore import QPointF
-from PyQt6.QtGui import QImage, QPixmap, QPolygonF
 
 logger = logging.getLogger('manga_translator')
 
@@ -66,10 +67,6 @@ def apply_font_for_render(font_path: str) -> str:
         set_font(text_render.DEFAULT_FONT)
         return ''
     return resolved_font_path
-
-def update_font_config(font_filename: str):
-    """兼容旧调用：更新字体配置（现转为按路径解析设置）。"""
-    apply_font_for_render(font_filename)
 
 def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transform, render_params: dict, pure_zoom: float = 1.0, total_regions: int = 1):
     """
@@ -148,7 +145,7 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
         if hasattr(text_block, 'lines') and text_block.lines is not None:
             try:
                 region_count = len(text_block.lines)
-            except:
+            except Exception:
                 region_count = 1
 
         # 将当前text_block传递给config，用于方向不匹配检测

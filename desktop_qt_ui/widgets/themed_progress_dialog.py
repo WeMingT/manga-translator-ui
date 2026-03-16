@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtWidgets import QApplication, QProgressBar, QProgressDialog
-
 from main_view_parts.theme import (
     apply_native_title_bar_theme,
     apply_widget_stylesheet,
     generate_application_stylesheet,
     get_current_theme,
 )
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QApplication, QProgressBar, QProgressDialog
 
 
 def _global_progress_stylesheet() -> str:

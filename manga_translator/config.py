@@ -1,12 +1,12 @@
 import argparse
 from enum import Enum
+from typing import Any, Optional, Union
 
-from typing import Optional, Any, Union
-
-from omegaconf import OmegaConf
 from pydantic import BaseModel, PrivateAttr, model_validator
 
 from manga_translator.custom_api_params import migrate_legacy_custom_api_params_config
+
+VALID_LAYOUT_MODES = {"smart_scaling", "strict", "balloon_fill"}
 
 
 # TODO: Refactor
@@ -194,7 +194,7 @@ class RenderConfig(BaseModel):
     auto_rotate_symbols: bool = False
     """Automatically rotate symbols like '!!' or '??' in vertical text"""
     layout_mode: str = 'smart_scaling'
-    """The layout mode to use for rendering. Options: 'default', 'smart_scaling', 'strict', 'disable_all', 'balloon_fill'"""
+    """The layout mode to use for rendering. Options: 'smart_scaling', 'strict', 'balloon_fill'"""
     stroke_width: float = 0.07
     """Stroke/border width ratio relative to font size. Default is 0.07 (7%). Set to 0 to disable stroke."""
     enable_template_alignment: bool = False
@@ -205,6 +205,16 @@ class RenderConfig(BaseModel):
     """Maximum concurrent API requests for OpenAI Renderer and Gemini Renderer."""
     _font_color_fg = None
     _font_color_bg = None
+
+    @model_validator(mode="after")
+    def _validate_layout_mode(self):
+        if self.layout_mode not in VALID_LAYOUT_MODES:
+            raise ValueError(
+                f"Invalid render.layout_mode: {self.layout_mode!r}. "
+                f"Supported values: {', '.join(sorted(VALID_LAYOUT_MODES))}"
+            )
+        return self
+
     @property
     def font_color_fg(self):
         if self.font_color and not self._font_color_fg:
@@ -212,7 +222,7 @@ class RenderConfig(BaseModel):
             try:
                 self._font_color_fg = hex2rgb(colors[0]) if colors[0] else None
                 self._font_color_bg = hex2rgb(colors[1]) if len(colors) > 1 and colors[1] else None
-            except:
+            except Exception:
                 raise Exception(
                     f'Invalid --font-color value: {self.font_color}. Use a hex value such as FF0000')
         return self._font_color_fg
@@ -224,7 +234,7 @@ class RenderConfig(BaseModel):
             try:              
                 self._font_color_fg = hex2rgb(colors[0]) if colors[0] else None
                 self._font_color_bg = hex2rgb(colors[1]) if len(colors) > 1 and colors[1] else None
-            except:
+            except Exception:
                 raise Exception(
                     f'Invalid --font-color value: {self.font_color}. Use a hex value such as FF0000')
         return self._font_color_bg

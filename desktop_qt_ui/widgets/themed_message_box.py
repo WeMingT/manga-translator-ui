@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import textwrap
 
+from main_view_parts.theme import apply_widget_stylesheet, get_current_theme_colors
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import (
     QApplication,
@@ -19,8 +20,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-from main_view_parts.theme import apply_widget_stylesheet, get_current_theme_colors
 
 _INSTALLED = False
 

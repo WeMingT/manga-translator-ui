@@ -16,10 +16,10 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from PIL import Image
+from utils.json_encoder import CustomJSONEncoder
 
 from manga_translator.utils import open_pil_image
 from manga_translator.utils.path_manager import get_inpainted_path
-from utils.json_encoder import CustomJSONEncoder
 
 # 全局输出目录存储
 _global_output_directory = None
@@ -64,6 +64,57 @@ class ExportService:
         save_image.save(temp_inpainted_path)
         self.logger.info(f"已写入临时修复图供导出复用: {temp_inpainted_path}")
         return temp_inpainted_path
+
+    def _persist_backend_inpainted_image(
+        self,
+        source_image_path: Optional[str],
+        inpainted_image: Any,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """将后端实际生成的修复图回写到工作目录，避免下次编辑回退到原图底图。"""
+        if not source_image_path or inpainted_image is None:
+            return None
+
+        save_image = None
+        try:
+            if isinstance(inpainted_image, Image.Image):
+                save_image = inpainted_image.copy()
+            else:
+                inpainted_array = np.asarray(inpainted_image)
+                if inpainted_array.size == 0:
+                    return None
+                save_image = Image.fromarray(inpainted_array.astype(np.uint8, copy=False))
+
+            inpainted_path = get_inpainted_path(source_image_path, create_dir=True)
+            save_quality = (config or {}).get('cli', {}).get('save_quality', 95)
+            save_kwargs = {}
+            lower_path = inpainted_path.lower()
+
+            if lower_path.endswith(('.jpg', '.jpeg')):
+                if save_image.mode in ('RGBA', 'LA', 'P'):
+                    save_image = save_image.convert('RGB')
+                elif save_image.mode == 'CMYK':
+                    save_image = save_image.convert('RGB')
+                save_kwargs['quality'] = save_quality
+            elif lower_path.endswith('.webp'):
+                if save_image.mode == 'CMYK':
+                    save_image = save_image.convert('RGB')
+                save_kwargs['quality'] = save_quality
+            elif save_image.mode == 'CMYK':
+                save_image = save_image.convert('RGB')
+
+            save_image.save(inpainted_path, **save_kwargs)
+            self.logger.info(f"已回写导出后的修复图: {inpainted_path}")
+            return inpainted_path
+        except Exception as e:
+            self.logger.warning(f"回写导出后的修复图失败: {e}")
+            return None
+        finally:
+            if save_image is not None:
+                try:
+                    save_image.close()
+                except Exception:
+                    pass
     
     def get_output_directory(self) -> Optional[str]:
         """获取设置的输出目录"""
@@ -210,7 +261,6 @@ class ExportService:
                                      save_inpainted_only: bool = False,
                                      editor_inpainted_image: Optional[Image.Image] = None):
         """在后台线程中执行后端渲染导出"""
-        import gc
         import os
         
         temp_dir = None
@@ -280,26 +330,26 @@ class ExportService:
             try:
                 if rendered_image:
                     rendered_image.close()
-            except:
+            except Exception:
                 pass
             
             try:
                 if image:
                     image.close()
-            except:
+            except Exception:
                 pass
 
             try:
                 if editor_inpainted_image is not None:
                     editor_inpainted_image.close()
-            except:
+            except Exception:
                 pass
             
             try:
                 if temp_dir and os.path.exists(temp_dir):
                     import shutil
                     shutil.rmtree(temp_dir, ignore_errors=True)
-            except:
+            except Exception:
                 pass
             
             # 强制垃圾回收
@@ -309,7 +359,7 @@ class ExportService:
                 import torch
                 if torch.cuda.is_available():
                     pass
-            except:
+            except Exception:
                 pass
     
     def _save_regions_data_with_path(self, regions_data: List[Dict[str, Any]], json_path: str, image_path: str, mask: Optional[np.ndarray] = None, config: Optional[Dict[str, Any]] = None):
@@ -517,6 +567,7 @@ class ExportService:
             self.logger.info("在导出JSON中加入预计算的蒙版（已编辑的refined mask）。")
             # 使用base64编码保存蒙版，避免JSON文件过大
             import base64
+
             import cv2
             _, encoded_mask = cv2.imencode('.png', mask)
             mask_base64 = base64.b64encode(encoded_mask).decode('utf-8')
@@ -618,7 +669,7 @@ class ExportService:
             if os.path.exists(temp_output_path):
                 try:
                     os.remove(temp_output_path)
-                except:
+                except Exception:
                     pass
             raise
             raise
@@ -710,7 +761,12 @@ class ExportService:
             render_cfg = RenderConfig(**render_config)
 
             # 创建翻译器配置，设置为none以跳过翻译
-            from manga_translator.config import TranslatorConfig, UpscaleConfig, ColorizerConfig, InpainterConfig
+            from manga_translator.config import (
+                ColorizerConfig,
+                InpainterConfig,
+                TranslatorConfig,
+                UpscaleConfig,
+            )
             translator_cfg = TranslatorConfig(translator='none')
             
             # 从config中提取upscale、colorizer、inpainter和cli配置
@@ -745,7 +801,7 @@ class ExportService:
                     wsa_data = ctypes.create_string_buffer(WSADATA_SIZE)
                     ws2_32 = ctypes.WinDLL('ws2_32')
                     ws2_32.WSAStartup(0x0202, wsa_data)
-                except:
+                except Exception:
                     pass
                 
                 asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -755,6 +811,11 @@ class ExportService:
 
             try:
                 ctx = loop.run_until_complete(translator.translate(image, cfg, image_name=image.name))
+                self._persist_backend_inpainted_image(
+                    source_image_path=source_image_path,
+                    inpainted_image=getattr(ctx, 'img_inpainted', None),
+                    config=config,
+                )
 
                 # 根据参数决定返回inpainted还是result
                 if save_inpainted_only:
@@ -786,7 +847,10 @@ class ExportService:
                 # 导出可编辑PSD（如果启用）
                 if cfg.cli.export_editable_psd and not save_inpainted_only:
                         try:
-                            from manga_translator.utils.photoshop_export import photoshop_export, get_psd_output_path
+                            from manga_translator.utils.photoshop_export import (
+                                get_psd_output_path,
+                                photoshop_export,
+                            )
                             
                             # 优先使用原图路径生成PSD路径，其次使用输出路径，最后使用临时路径
                             if source_image_path:

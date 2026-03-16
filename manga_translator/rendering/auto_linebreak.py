@@ -9,15 +9,14 @@ from typing import Any, List, Tuple
 from . import text_render
 from .text_render import (
     CJK_Compatibility_Forms_translate,
-    get_char_glyph,
     auto_add_horizontal_tags,
-    should_rotate_horizontal_block_90,
-    get_string_width,
-    get_char_offset_x,
-    get_char_offset_y,
-    select_hyphenator,
     calc_horizontal_block_height,
     compact_special_symbols,
+    get_char_glyph,
+    get_char_offset_x,
+    get_char_offset_y,
+    get_string_width,
+    select_hyphenator,
 )
 
 
