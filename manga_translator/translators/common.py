@@ -55,6 +55,16 @@ VALID_LANGUAGES = {
     'FIL': 'Filipino (Tagalog)'
 }
 
+KEEP_LANGUAGES = {
+    **VALID_LANGUAGES,
+    'SWE': 'Swedish',
+    'DAN': 'Danish',
+    'NOR': 'Norwegian',
+    'FIN': 'Finnish',
+    'MSA': 'Malay',
+    'CAT': 'Catalan',
+}
+
 ISO_639_1_TO_VALID_LANGUAGES = {
     'zh': 'CHS',
     'ja': 'JPN',
@@ -81,6 +91,18 @@ ISO_639_1_TO_VALID_LANGUAGES = {
     'th': 'THA',
     'id': 'IND',
     'tl': 'FIL'
+}
+
+ISO_639_1_TO_KEEP_LANGUAGES = {
+    **ISO_639_1_TO_VALID_LANGUAGES,
+    'sv': 'SWE',
+    'da': 'DAN',
+    'no': 'NOR',
+    'nb': 'NOR',
+    'nn': 'NOR',
+    'fi': 'FIN',
+    'ms': 'MSA',
+    'ca': 'CAT',
 }
 
 class InvalidServerResponse(Exception):

@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import traceback
+import unicodedata
 from typing import Any, List, Optional
 
 import cv2
@@ -30,6 +31,7 @@ from .utils import (
     is_valuable_text,
     load_image,
     open_pil_image,
+    save_pil_image,
     sort_regions,
     visualize_textblocks,
 )
@@ -64,7 +66,7 @@ from .translators import (
 from .translators import (
     unload as unload_translation,
 )
-from .translators.common import ISO_639_1_TO_VALID_LANGUAGES
+from .translators.common import ISO_639_1_TO_KEEP_LANGUAGES, ISO_639_1_TO_VALID_LANGUAGES, KEEP_LANGUAGES
 from .upscaling import dispatch as dispatch_upscaling
 from .upscaling import prepare as prepare_upscaling
 from .upscaling import unload as unload_upscaling
@@ -82,6 +84,14 @@ logger = logging.getLogger('manga_translator')
 
 ARCHIVE_EXTRACT_IMAGE_DIRNAME = 'original_images'
 ARCHIVE_EXTRACT_META_FILENAME = '.extract_meta.json'
+_KEEP_LANG_NONE_VALUES = {'', 'NONE', 'OFF', 'DISABLED'}
+_DETECTED_KEEP_LANG_CODES = set(KEEP_LANGUAGES.keys())
+_KEEP_LANG_CJK_SHARED = 'CJK_SHARED'
+_KEEP_LANG_SHARED_CJK_TARGETS = frozenset({'CHS', 'CHT', 'JPN'})
+_ENGLISH_KEEP_FILTER_PUNCTUATION = frozenset(
+    ".,!?;:'\"-()[]{}<>/&@#%+*=~_|`$^\\"
+    "…“”‘’–—"
+)
 
 
 class FileTranslationFailure(Exception):
@@ -123,6 +133,109 @@ def _resolve_archive_output_dir_from_extracted_image(image_path: str, output_fol
         return None
 
     return archive_output_dir
+
+
+def _is_likely_english_text_for_keep_filter(text: str) -> bool:
+    normalized = unicodedata.normalize('NFKC', str(text or '').strip())
+    if not normalized:
+        return False
+
+    has_latin_letter = False
+    for char in normalized:
+        if char.isspace() or char.isdigit():
+            continue
+        if char in _ENGLISH_KEEP_FILTER_PUNCTUATION:
+            continue
+
+        category = unicodedata.category(char)
+        if category.startswith('L') and 'LATIN' in unicodedata.name(char, ''):
+            has_latin_letter = True
+            continue
+
+        return False
+
+    return has_latin_letter
+
+
+def _normalize_detected_keep_language(lang_code: Optional[str]) -> str:
+    value = str(lang_code or '').strip()
+    if not value:
+        return 'UNKNOWN'
+
+    upper_value = value.upper()
+    if upper_value in _DETECTED_KEEP_LANG_CODES:
+        return upper_value
+
+    mapped = ISO_639_1_TO_KEEP_LANGUAGES.get(value.lower())
+    if mapped:
+        return mapped.upper()
+
+    return 'UNKNOWN'
+
+
+def _normalize_keep_filter_script_candidate(text: str) -> str:
+    normalized = unicodedata.normalize('NFKC', str(text or '').strip())
+    if not normalized:
+        return ''
+
+    normalized = re.sub(r'^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$', '', normalized)
+    return normalized
+
+
+def _detect_script_based_keep_language(text: str) -> Optional[str]:
+    candidate = _normalize_keep_filter_script_candidate(text)
+    if not candidate:
+        return None
+
+    meaningful_chars = []
+    for char in candidate:
+        category = unicodedata.category(char)
+        if char.isspace() or char.isdigit() or category.startswith(('P', 'S')):
+            continue
+        meaningful_chars.append(char)
+
+    if not meaningful_chars:
+        return None
+
+    meaningful_text = ''.join(meaningful_chars)
+    if re.search(r'[\p{Hiragana}\p{Katakana}]', meaningful_text):
+        return 'JPN'
+    if re.search(r'\p{Hangul}', meaningful_text):
+        return 'KOR'
+    if re.fullmatch(r'\p{Han}+', meaningful_text):
+        return _KEEP_LANG_CJK_SHARED
+
+    return None
+
+
+def _detect_region_keep_language(text: str) -> str:
+    text = str(text or '').strip()
+    if not text:
+        return 'UNKNOWN'
+
+    if _is_likely_english_text_for_keep_filter(text):
+        return 'ENG'
+
+    detected_by_script = _detect_script_based_keep_language(text)
+    if detected_by_script:
+        return detected_by_script
+
+    try:
+        detected_lang, _ = langid.classify(text)
+    except Exception:
+        return 'UNKNOWN'
+
+    return _normalize_detected_keep_language(detected_lang)
+
+
+def _keep_language_matches(detected_lang: str, keep_lang: str) -> bool:
+    if detected_lang == keep_lang:
+        return True
+    if keep_lang in {'CHS', 'CHT'} and detected_lang in {'CHS', 'CHT'}:
+        return True
+    if detected_lang == _KEEP_LANG_CJK_SHARED and keep_lang in _KEEP_LANG_SHARED_CJK_TARGETS:
+        return True
+    return False
 
 
 def set_main_logger(l):
@@ -476,7 +589,15 @@ class MangaTranslator:
         final_output_path = os.path.join(final_output_dir, output_filename)
         return final_output_path
 
-    def _save_translated_image(self, image: Image.Image, output_path: str, image_path: str, overwrite: bool = True, mode_label: str = "BATCH") -> bool:
+    def _save_translated_image(
+        self,
+        image: Image.Image,
+        output_path: str,
+        image_path: str,
+        overwrite: bool = True,
+        mode_label: str = "BATCH",
+        source_image: Optional[Image.Image] = None,
+    ) -> bool:
         """
         保存翻译后的图片到指定路径
         
@@ -495,13 +616,12 @@ class MangaTranslator:
             return False
         
         try:
-            image_to_save = image
-            # 处理RGBA到RGB转换（JPEG格式）
-            if output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                image_to_save = image_to_save.convert('RGB')
-            
-            # 保存图片并应用save_quality设置
-            image_to_save.save(output_path, quality=self.save_quality)
+            save_pil_image(
+                image,
+                output_path,
+                source_image=source_image,
+                quality=self.save_quality,
+            )
             logger.info(f"  -> ✅ [{mode_label}] Saved successfully: {os.path.basename(output_path)}")
             
             # 更新翻译映射表
@@ -530,7 +650,14 @@ class MangaTranslator:
         try:
             overwrite = save_info.get('overwrite', True)
             final_output_path = self._calculate_output_path(ctx.image_name, save_info)
-            success = self._save_translated_image(ctx.result, final_output_path, ctx.image_name, overwrite, mode_label)
+            success = self._save_translated_image(
+                ctx.result,
+                final_output_path,
+                ctx.image_name,
+                overwrite,
+                mode_label,
+                source_image=ctx.input,
+            )
             
             # 标记成功
             if success or not overwrite:  # 跳过已存在的文件也算成功
@@ -841,12 +968,12 @@ class MangaTranslator:
     def _save_inpainted_image(self, image_path: str, inpainted_img: np.ndarray):
         """保存修复后的图片到 inpainted 目录。"""
         inpainted_path = get_inpainted_path(image_path, create_dir=True)
-        self._save_image_to_path(inpainted_path, inpainted_img, "Inpainted image")
+        self._save_image_to_path(inpainted_path, inpainted_img, "Inpainted image", source_image_path=image_path)
 
     def _save_work_image(self, image_path: str, image_data, label: str = "Work image") -> Optional[str]:
         """保存编辑器专用的上色/超分底图到 editor_base 目录。"""
         work_image_path = get_work_image_path(image_path, create_dir=True)
-        return self._save_image_to_path(work_image_path, image_data, label)
+        return self._save_image_to_path(work_image_path, image_data, label, source_image_path=image_path)
 
     def _save_editor_base_if_needed(self, ctx, config, image_data=None) -> Optional[str]:
         """在执行了上色或超分时，保存编辑器使用的底图。"""
@@ -867,12 +994,19 @@ class MangaTranslator:
 
         return self._save_work_image(image_path, image_data, "Processed base image")
 
-    def _save_image_to_path(self, target_path: str, image_data, label: str) -> Optional[str]:
+    def _save_image_to_path(
+        self,
+        target_path: str,
+        image_data,
+        label: str,
+        source_image_path: Optional[str] = None,
+    ) -> Optional[str]:
         """将图像保存到指定路径。"""
         try:
             if image_data is None:
                 return None
 
+            source_image = None
             if isinstance(image_data, Image.Image):
                 image_to_save = image_data.copy()
             elif isinstance(image_data, np.ndarray):
@@ -880,18 +1014,29 @@ class MangaTranslator:
             else:
                 raise TypeError(f"Unsupported work image type: {type(image_data)}")
 
-            save_kwargs = {}
-            if target_path.lower().endswith(('.jpg', '.jpeg')):
-                if image_to_save.mode in ('RGBA', 'LA'):
-                    image_to_save = image_to_save.convert('RGB')
-                save_kwargs['quality'] = self.save_quality
-            elif target_path.lower().endswith('.webp'):
-                save_kwargs['quality'] = self.save_quality
+            try:
+                if source_image_path and os.path.exists(source_image_path):
+                    try:
+                        source_image = open_pil_image(source_image_path, eager=True)
+                    except Exception as exc:
+                        logger.warning(
+                            f"Failed to read source image metadata for {label.lower()}, saving without ICC: "
+                            f"{source_image_path}, error={exc}"
+                        )
 
-            image_to_save.save(target_path, **save_kwargs)
-            if self.verbose:
-                logger.debug(f"{label} saved to: {target_path}")
-            return target_path
+                save_pil_image(
+                    image_to_save,
+                    target_path,
+                    source_image=source_image,
+                    quality=self.save_quality,
+                )
+                if self.verbose:
+                    logger.debug(f"{label} saved to: {target_path}")
+                return target_path
+            finally:
+                if source_image is not None:
+                    source_image.close()
+                image_to_save.close()
         except Exception as e:
             logger.error(f"Failed to save {label.lower()}: {e}")
             return None
@@ -2185,6 +2330,10 @@ class MangaTranslator:
                         height = y2 - y1
                         logger.debug(f'  移除单框区域[{idx+1}]: 大小={width:.0f}x{height:.0f}, 面积={region.real_area:.1f}像素, 占比={ratio*100:.3f}%, 文本="{region.text[:20]}"')
 
+        keep_lang = str(getattr(config.translator, 'keep_lang', 'none') or 'none').strip().upper()
+        keep_lang_enabled = keep_lang not in _KEEP_LANG_NONE_VALUES
+        keep_lang_filtered_count = 0
+
         new_text_regions = []
         for region in text_regions:
             # 跳过text为None的区域
@@ -2276,8 +2425,19 @@ class MangaTranslator:
                 
                 stripped_text = new_stripped_text  
               
-            region.text = stripped_text.strip()     
-            
+            region.text = stripped_text.strip()
+
+            if keep_lang_enabled and region.text:
+                detected_keep_lang = _detect_region_keep_language(region.text)
+                if not _keep_language_matches(detected_keep_lang, keep_lang):
+                    keep_lang_filtered_count += 1
+                    logger.info(f'Filtered out: {region.text}')
+                    logger.info(
+                        f'Reason: Detected source language {detected_keep_lang} '
+                        f'does not match keep_lang={keep_lang}.'
+                    )
+                    continue
+
             # 过滤空文本、过短文本、无价值文本
             if not region.text \
                     or len(region.text) < config.ocr.min_text_length \
@@ -2298,6 +2458,11 @@ class MangaTranslator:
                     if config.render.font_color_bg:
                         region.adjust_bg_color = False
                 new_text_regions.append(region)
+        if keep_lang_enabled and keep_lang_filtered_count > 0:
+            logger.info(
+                f'合并后保留语言过滤: keep_lang={keep_lang}, '
+                f'移除了 {keep_lang_filtered_count} 个文本区域'
+            )
         text_regions = new_text_regions
         text_regions = sort_regions(
             text_regions,

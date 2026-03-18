@@ -457,6 +457,84 @@ def dump_image(img_pil: Image.Image, img: np.ndarray, alpha_ch: Image.Image = No
     result.paste(Image.fromarray(img), mask = mask_for_paste)
     return result
 
+
+def _infer_pil_save_format(output_path: str, format: Optional[str] = None) -> str:
+    if format:
+        return format.upper()
+
+    ext = os.path.splitext(output_path)[1].lower()
+    format_map = {
+        '.jpg': 'JPEG',
+        '.jpeg': 'JPEG',
+        '.png': 'PNG',
+        '.webp': 'WEBP',
+        '.bmp': 'BMP',
+        '.tif': 'TIFF',
+        '.tiff': 'TIFF',
+        '.avif': 'AVIF',
+        '.heic': 'HEIF',
+        '.heif': 'HEIF',
+    }
+    return format_map.get(ext, 'PNG')
+
+
+def build_preserved_pil_save_kwargs(source_image: Optional[Image.Image] = None) -> dict:
+    if source_image is None:
+        return {}
+
+    info = getattr(source_image, 'info', None) or {}
+    save_kwargs = {}
+
+    icc_profile = info.get('icc_profile')
+    if icc_profile:
+        save_kwargs['icc_profile'] = icc_profile
+
+    dpi = info.get('dpi')
+    if isinstance(dpi, tuple) and len(dpi) >= 2 and dpi[0] is not None and dpi[1] is not None:
+        save_kwargs['dpi'] = dpi[:2]
+
+    return save_kwargs
+
+
+def save_pil_image(
+    image: Image.Image,
+    output_path: str,
+    source_image: Optional[Image.Image] = None,
+    *,
+    quality: Optional[int] = None,
+    format: Optional[str] = None,
+    **save_kwargs,
+):
+    """
+    Save a PIL image while preserving source color metadata when possible.
+    """
+    target_format = _infer_pil_save_format(output_path, format)
+    image_to_save = image
+    converted_image = None
+
+    try:
+        if target_format in {'JPEG', 'BMP'}:
+            if image_to_save.mode != 'RGB':
+                converted_image = image_to_save.convert('RGB')
+                image_to_save = converted_image
+        elif image_to_save.mode == 'CMYK':
+            converted_image = image_to_save.convert('RGB')
+            image_to_save = converted_image
+
+        for key, value in build_preserved_pil_save_kwargs(source_image).items():
+            save_kwargs.setdefault(key, value)
+
+        if quality is not None and target_format in {'JPEG', 'WEBP', 'AVIF', 'HEIF'}:
+            save_kwargs.setdefault('quality', quality)
+
+        if format is not None:
+            image_to_save.save(output_path, format=target_format, **save_kwargs)
+        else:
+            image_to_save.save(output_path, **save_kwargs)
+    finally:
+        if converted_image is not None:
+            converted_image.close()
+
 def resize_keep_aspect(img, size):
     ratio = (float(size)/max(img.shape[0], img.shape[1]))
     new_width = round(img.shape[1] * ratio)

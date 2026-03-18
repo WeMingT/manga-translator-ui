@@ -12,6 +12,7 @@ VALID_LAYOUT_MODES = {"smart_scaling", "strict", "balloon_fill"}
 class TranslatorSettings(BaseModel):
     translator: str = "openai_hq"
     target_lang: str = "CHS"
+    keep_lang: str = "none"
     enable_streaming: bool = True
     no_text_lang_skip: bool = False
     # 相对路径，后端会用BASE_PATH拼接（打包后=_internal，开发时=项目根目录）

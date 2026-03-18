@@ -12,6 +12,7 @@
   "translator": {
     "translator": "openai_hq",
     "target_lang": "CHS",
+    "keep_lang": "none",
     "no_text_lang_skip": false,
     "gpt_config": "examples/gpt_config-example.yaml",
     "high_quality_prompt_path": "dict/prompt_example.yaml",

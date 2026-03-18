@@ -1202,9 +1202,13 @@ function generateConfigUI(config) {
                     } else if (key === 'translator') {
                         // 如果是翻译器，使用翻译
                         option.textContent = t(`translator_${opt}`, opt);
-                    } else if (key === 'target_lang') {
+                    } else if (key === 'target_lang' || key === 'keep_lang') {
                         // 如果是目标语言，使用翻译
-                        option.textContent = t(`lang_${opt}`, opt);
+                        if (key === 'keep_lang' && opt === 'none') {
+                            option.textContent = t('lang_filter_disabled', 'No Filter');
+                        } else {
+                            option.textContent = t(`lang_${opt}`, opt);
+                        }
                     } else if (key === 'ocr_vl_language_hint') {
                         // OCR 语言提示显示翻译后的全称
                         const langKey = `ocr_lang_${String(opt).toLowerCase().replace(/\s+/g, '_')}`;
@@ -1317,6 +1321,24 @@ function populateDropdowns() {
     
     if (langs.length > 0) {
         replaceWithSelectTranslated('translator.target_lang', langs);
+    }
+
+    const keepLangOptions = (configOptions['keep_lang'] || []).map(lang => {
+        if (lang === 'none') {
+            return {
+                value: lang,
+                label: t('lang_filter_disabled', 'No Filter')
+            };
+        }
+        const langKey = `lang_${lang}`;
+        return {
+            value: lang,
+            label: t(langKey, lang)
+        };
+    });
+
+    if (keepLangOptions.length > 0) {
+        replaceWithSelectTranslated('translator.keep_lang', keepLangOptions);
     }
     
     // 设置超分模型联动

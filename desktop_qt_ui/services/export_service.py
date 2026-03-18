@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image
 from utils.json_encoder import CustomJSONEncoder
 
-from manga_translator.utils import open_pil_image
+from manga_translator.utils import open_pil_image, save_pil_image
 from manga_translator.utils.path_manager import get_inpainted_path
 
 # 全局输出目录存储
@@ -49,21 +49,34 @@ class ExportService:
         colorizer_config['colorizer'] = 'none'
         return export_config
 
-    def _save_temp_inpainted_image(self, temp_image_path: str, editor_inpainted_image: Optional[Image.Image], base_size=None) -> Optional[str]:
+    def _save_temp_inpainted_image(
+        self,
+        temp_image_path: str,
+        editor_inpainted_image: Optional[Image.Image],
+        base_size=None,
+        source_image: Optional[Image.Image] = None,
+    ) -> Optional[str]:
         """将编辑器当前修复图临时落盘，供 load_text 导出流程直接复用。"""
         if editor_inpainted_image is None:
             return None
 
         temp_inpainted_path = get_inpainted_path(temp_image_path, create_dir=True)
         save_image = editor_inpainted_image.copy()
-        if base_size and save_image.size != base_size:
-            save_image = save_image.resize(base_size, Image.Resampling.LANCZOS)
-        if save_image.mode == 'CMYK':
-            save_image = save_image.convert('RGB')
+        try:
+            if base_size and save_image.size != base_size:
+                resized_image = save_image.resize(base_size, Image.Resampling.LANCZOS)
+                save_image.close()
+                save_image = resized_image
+            if save_image.mode == 'CMYK':
+                rgb_image = save_image.convert('RGB')
+                save_image.close()
+                save_image = rgb_image
 
-        save_image.save(temp_inpainted_path)
-        self.logger.info(f"已写入临时修复图供导出复用: {temp_inpainted_path}")
-        return temp_inpainted_path
+            save_pil_image(save_image, temp_inpainted_path, source_image=source_image)
+            self.logger.info(f"已写入临时修复图供导出复用: {temp_inpainted_path}")
+            return temp_inpainted_path
+        finally:
+            save_image.close()
 
     def _persist_backend_inpainted_image(
         self,
@@ -76,6 +89,7 @@ class ExportService:
             return None
 
         save_image = None
+        source_image = None
         try:
             if isinstance(inpainted_image, Image.Image):
                 save_image = inpainted_image.copy()
@@ -87,29 +101,28 @@ class ExportService:
 
             inpainted_path = get_inpainted_path(source_image_path, create_dir=True)
             save_quality = (config or {}).get('cli', {}).get('save_quality', 95)
-            save_kwargs = {}
-            lower_path = inpainted_path.lower()
-
-            if lower_path.endswith(('.jpg', '.jpeg')):
-                if save_image.mode in ('RGBA', 'LA', 'P'):
-                    save_image = save_image.convert('RGB')
-                elif save_image.mode == 'CMYK':
-                    save_image = save_image.convert('RGB')
-                save_kwargs['quality'] = save_quality
-            elif lower_path.endswith('.webp'):
-                if save_image.mode == 'CMYK':
-                    save_image = save_image.convert('RGB')
-                save_kwargs['quality'] = save_quality
-            elif save_image.mode == 'CMYK':
-                save_image = save_image.convert('RGB')
-
-            save_image.save(inpainted_path, **save_kwargs)
+            try:
+                source_image = open_pil_image(source_image_path, eager=True)
+            except Exception as metadata_error:
+                self.logger.warning(f"读取原图元数据失败，将继续保存但不继承ICC: {source_image_path}, error={metadata_error}")
+                source_image = None
+            save_pil_image(
+                save_image,
+                inpainted_path,
+                source_image=source_image,
+                quality=save_quality,
+            )
             self.logger.info(f"已回写导出后的修复图: {inpainted_path}")
             return inpainted_path
         except Exception as e:
             self.logger.warning(f"回写导出后的修复图失败: {e}")
             return None
         finally:
+            if source_image is not None:
+                try:
+                    source_image.close()
+                except Exception:
+                    pass
             if save_image is not None:
                 try:
                     save_image.close()
@@ -283,12 +296,9 @@ class ExportService:
             
             # 保存当前图片到临时文件
             temp_image_path = os.path.join(temp_dir, "temp_image.png")
-            # 如果是CMYK模式，转换为RGB（PNG不支持CMYK）
-            if image.mode == 'CMYK':
-                image = image.convert('RGB')
-            image.save(temp_image_path)
+            save_pil_image(image, temp_image_path, source_image=image)
 
-            self._save_temp_inpainted_image(temp_image_path, editor_inpainted_image, image.size)
+            self._save_temp_inpainted_image(temp_image_path, editor_inpainted_image, image.size, source_image=image)
             
             # 保存区域数据到JSON文件
             base_name = os.path.splitext(os.path.basename(temp_image_path))[0]
@@ -310,7 +320,7 @@ class ExportService:
                 raise Exception("后端渲染没有生成结果")
             
             # 保存渲染结果
-            self._save_rendered_image(rendered_image, output_path, config)
+            self._save_rendered_image(rendered_image, output_path, config, source_image=image)
             
             self.logger.info(f"图片已成功导出到: {output_path}")
             
@@ -582,7 +592,13 @@ class ExportService:
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(formatted_data, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
     
-    def _save_rendered_image(self, image: Image.Image, output_path: str, config: Dict[str, Any]):
+    def _save_rendered_image(
+        self,
+        image: Image.Image,
+        output_path: str,
+        config: Dict[str, Any],
+        source_image: Optional[Image.Image] = None,
+    ):
         """
         保存渲染后的图像到文件
         
@@ -599,22 +615,31 @@ class ExportService:
             
             # 需要转换为RGB的格式（不支持透明度或CMYK）
             if output_lower.endswith(('.jpg', '.jpeg')):
-                # JPEG格式：转换为RGB
-                rgb_image = image.convert('RGB')
-                rgb_image.save(temp_output_path, format='JPEG', quality=save_quality)
-                rgb_image.close()
+                save_pil_image(
+                    image,
+                    temp_output_path,
+                    source_image=source_image,
+                    quality=save_quality,
+                    format='JPEG',
+                )
                 
             elif output_lower.endswith('.webp'):
-                # WEBP格式：支持透明度，但不支持CMYK
-                if image.mode == 'CMYK':
-                    image = image.convert('RGB')
-                image.save(temp_output_path, format='WEBP', quality=save_quality)
+                save_pil_image(
+                    image,
+                    temp_output_path,
+                    source_image=source_image,
+                    quality=save_quality,
+                    format='WEBP',
+                )
                 
             elif output_lower.endswith('.avif'):
-                # AVIF格式：支持透明度，但不支持CMYK
-                if image.mode == 'CMYK':
-                    image = image.convert('RGB')
-                image.save(temp_output_path, format='AVIF', quality=save_quality)
+                save_pil_image(
+                    image,
+                    temp_output_path,
+                    source_image=source_image,
+                    quality=save_quality,
+                    format='AVIF',
+                )
                 
             elif output_lower.endswith(('.heic', '.heif')):
                 # HEIC/HEIF格式：需要 pillow-heif 库支持
@@ -622,38 +647,48 @@ class ExportService:
                     import pillow_heif
                     # 注册 HEIF 插件
                     pillow_heif.register_heif_opener()
-                    
-                    if image.mode == 'CMYK':
-                        image = image.convert('RGB')
-                    image.save(temp_output_path, format='HEIF', quality=save_quality)
+                    save_pil_image(
+                        image,
+                        temp_output_path,
+                        source_image=source_image,
+                        quality=save_quality,
+                        format='HEIF',
+                    )
                 except ImportError:
                     self.logger.warning("HEIC/HEIF 格式需要安装 pillow-heif 库，降级为 PNG 格式")
-                    if image.mode == 'CMYK':
-                        image = image.convert('RGB')
                     # 修改输出路径为 PNG
                     temp_output_path = output_path.rsplit('.', 1)[0] + '.png.tmp'
                     output_path = output_path.rsplit('.', 1)[0] + '.png'
-                    image.save(temp_output_path, format='PNG')
+                    save_pil_image(
+                        image,
+                        temp_output_path,
+                        source_image=source_image,
+                        format='PNG',
+                    )
                 
             elif output_lower.endswith('.bmp'):
-                # BMP格式：转换为RGB（不支持透明度）
-                if image.mode in ('RGBA', 'LA', 'P'):
-                    image = image.convert('RGB')
-                elif image.mode == 'CMYK':
-                    image = image.convert('RGB')
-                image.save(temp_output_path, format='BMP')
+                save_pil_image(
+                    image,
+                    temp_output_path,
+                    source_image=source_image,
+                    format='BMP',
+                )
                 
             elif output_lower.endswith(('.tiff', '.tif')):
-                # TIFF格式：支持多种模式
-                if image.mode == 'CMYK':
-                    image = image.convert('RGB')
-                image.save(temp_output_path, format='TIFF')
+                save_pil_image(
+                    image,
+                    temp_output_path,
+                    source_image=source_image,
+                    format='TIFF',
+                )
                 
             else:
-                # PNG或其他格式：支持透明度，但不支持CMYK
-                if image.mode == 'CMYK':
-                    image = image.convert('RGB')
-                image.save(temp_output_path, format='PNG')
+                save_pil_image(
+                    image,
+                    temp_output_path,
+                    source_image=source_image,
+                    format='PNG',
+                )
             
             # 确保文件已写入
             if not os.path.exists(temp_output_path):
