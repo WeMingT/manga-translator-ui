@@ -41,6 +41,7 @@ LANGUAGE_ORIENTATION_PRESETS = {
     'ROM': 'h',
     'RUS': 'h',
     'ESP': 'h',
+    'THA': 'h',
     'TRK': 'h',
     'UKR': 'h',
     'VIN': 'h',

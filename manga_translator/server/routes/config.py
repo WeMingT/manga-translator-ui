@@ -51,6 +51,12 @@ def _get_server_colorizer_options():
     return [member.value for member in Colorizer if member.value not in SERVER_HIDDEN_COLORIZER_OPTIONS]
 
 
+def _get_server_keep_lang_options():
+    from manga_translator.translators.common import KEEP_LANGUAGES
+
+    return ['none'] + list(KEEP_LANGUAGES.keys())
+
+
 def _filter_server_hidden_config(config_dict: dict) -> dict:
     filtered = {}
     for section, content in config_dict.items():
@@ -384,6 +390,7 @@ async def get_config_options(
         'secondary_ocr': _get_server_ocr_options(),
         'translator': [member.value for member in Translator],
         'target_lang': list(VALID_LANGUAGES),
+        'keep_lang': _get_server_keep_lang_options(),
         'upscale_ratio': ['不使用', '2', '3', '4'],
         'realcugan_model': [
             '2x-conservative', '2x-conservative-pro', '2x-no-denoise',

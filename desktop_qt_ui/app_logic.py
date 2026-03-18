@@ -48,6 +48,7 @@ from manga_translator.config import (
     Upscaler,
 )
 from manga_translator.save import OUTPUT_FORMATS
+from manga_translator.utils import open_pil_image, save_pil_image
 
 
 @dataclass
@@ -365,18 +366,13 @@ class MainAppLogic(QObject):
 
             os.makedirs(final_output_folder, exist_ok=True)
 
-            save_kwargs = {}
             image_to_save = result['image_data']
-
-            # Convert RGBA to RGB for JPEG format
-            if final_output_path.lower().endswith(('.jpg', '.jpeg')):
-                if image_to_save.mode == 'RGBA':
-                    image_to_save = image_to_save.convert('RGB')
-                save_kwargs['quality'] = save_quality
-            elif final_output_path.lower().endswith('.webp'):
-                save_kwargs['quality'] = save_quality
-
-            image_to_save.save(final_output_path, **save_kwargs)
+            self._save_image_with_source_metadata(
+                image_to_save,
+                final_output_path,
+                original_path,
+                save_quality,
+            )
 
             # 更新translation_map.json
             self._update_translation_map(original_path, final_output_path)
@@ -388,6 +384,33 @@ class MainAppLogic(QObject):
 
         except Exception as e:
             self.logger.error(self._t("log_file_save_error", path=result['original_path'], error=e))
+
+    def _save_image_with_source_metadata(
+        self,
+        image: Image.Image,
+        output_path: str,
+        source_path: Optional[str],
+        save_quality: int,
+    ):
+        source_image = None
+        try:
+            if source_path and os.path.exists(source_path):
+                try:
+                    source_image = open_pil_image(source_path, eager=True)
+                except Exception as exc:
+                    self.logger.warning(f"读取原图元数据失败，将继续保存但不继承ICC: {source_path}, error={exc}")
+            save_pil_image(
+                image,
+                output_path,
+                source_image=source_image,
+                quality=save_quality,
+            )
+        finally:
+            if source_image is not None:
+                try:
+                    source_image.close()
+                except Exception:
+                    pass
 
     def _update_translation_map(self, source_path: str, translated_path: str):
         """在输出目录创建或更新 translation_map.json"""
@@ -1312,6 +1335,10 @@ class MainAppLogic(QObject):
                     "original": self._t("translator_original"),
                 },
                 "target_lang": self.translation_service.get_target_languages(),
+                "keep_lang": {
+                    "none": self._t("lang_filter_disabled"),
+                    **self.translation_service.get_keep_languages(),
+                },
                 "ocr_vl_language_hint": {
                     "auto": self._t("ocr_lang_auto"),
                     "multilingual": self._t("ocr_lang_multilingual"),
@@ -1340,6 +1367,7 @@ class MainAppLogic(QObject):
                     "mask_dilation_offset": self._t("label_mask_dilation_offset"),
                     "translator": self._t("label_translator"),
                     "target_lang": self._t("label_target_lang"),
+                    "keep_lang": self._t("label_keep_lang"),
                     "enable_streaming": self._t("label_enable_streaming"),
                     "no_text_lang_skip": self._t("label_no_text_lang_skip"),
                     "high_quality_prompt_path": self._t("label_high_quality_prompt_path"),
@@ -1480,6 +1508,7 @@ class MainAppLogic(QObject):
                 "4x-denoise3x",
             ],
             "translator": [member.value for member in Translator],
+            "keep_lang": ["none"] + list(self.translation_service.get_keep_languages().keys()),
             "detector": [member.value for member in Detector],
             "colorizer": [member.value for member in Colorizer],
             "inpainter": [member.value for member in Inpainter],
@@ -2144,18 +2173,13 @@ class MainAppLogic(QObject):
                                     final_output_path = os.path.join(output_folder, output_filename)
                                     os.makedirs(output_folder, exist_ok=True)
                                     
-                                    save_kwargs = {}
                                     image_to_save = result['image_data']
-
-                                    # Convert RGBA to RGB for JPEG format
-                                    if file_extension in ['.jpg', '.jpeg']:
-                                        if image_to_save.mode == 'RGBA':
-                                            image_to_save = image_to_save.convert('RGB')
-                                        save_kwargs['quality'] = save_quality
-                                    elif file_extension == '.webp':
-                                        save_kwargs['quality'] = save_quality
-
-                                    image_to_save.save(final_output_path, **save_kwargs)
+                                    self._save_image_with_source_metadata(
+                                        image_to_save,
+                                        final_output_path,
+                                        result.get('original_path'),
+                                        save_quality,
+                                    )
                                     saved_files.append(final_output_path)
                                     self._ui_log(f"成功保存文件: {final_output_path}")
                                 except Exception as e:
@@ -3272,7 +3296,6 @@ class TranslationWorker(QObject):
                 UpscaleConfig,
             )
             from manga_translator.manga_translator import MangaTranslator
-            from manga_translator.utils import open_pil_image
 
             self._log_info("--- 正在初始化翻译器...")
             translator_params = self.config_dict.get('cli', {})
