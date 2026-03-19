@@ -19,10 +19,16 @@ set "DEFAULT_MINICONDA_ROOT=%SCRIPT_DIR%\Miniconda3"
 set "ALT_MINICONDA_ROOT=%~d0\Miniconda3"
 set "CONDA_REGISTRY_FOUND=0"
 set "CONDA_VALID=0"
+set "ENV_PATH="
+set "ENV_PYTHON="
+set "USE_DIRECT_ENV_PYTHON=0"
+set "CONDA_ENV_MODE="
 set "CONDA_REGISTRY_FOUND=0"
 set "CONDA_VALID=0"
-set "CONDA_REGISTRY_FOUND=0"
-set "CONDA_VALID=0"
+set "ENV_PATH="
+set "ENV_PYTHON="
+set "USE_DIRECT_ENV_PYTHON=0"
+set "CONDA_ENV_MODE="
 
 REM 检测路径是否包含非ASCII字符（中文等）
 REM 使用PowerShell进行更可靠的检测
@@ -32,10 +38,6 @@ if %ERRORLEVEL% neq 0 (
     REM 路径包含中文，使用磁盘根目录的Miniconda
     set "DEFAULT_MINICONDA_ROOT=%ALT_MINICONDA_ROOT%"
 )
-
-call :detect_conda_registry_s4
-
-call :detect_conda_registry_s3
 
 call :detect_conda_registry_s2
 
@@ -108,12 +110,14 @@ REM 使用 /B 选项进行精确匹配行首，避免误匹配路径中的文本
 call conda info --envs 2>nul | findstr /B /C:"%CONDA_ENV_NAME%" >nul 2>&1
 if %ERRORLEVEL% == 0 (
     echo [INFO] 检测到命名环境: %CONDA_ENV_NAME%
+    set "CONDA_ENV_MODE=named"
     goto :env_check_ok
 )
 
 REM 检查旧版本路径环境
 if exist "%CONDA_ENV_PATH%\python.exe" (
     echo [INFO] 检测到路径环境（旧版本）
+    set "CONDA_ENV_MODE=legacy"
     goto :env_check_ok
 )
 
@@ -125,46 +129,42 @@ exit /b 1
 
 :env_check_ok
 
-REM 先确保 conda 已初始化
-if not exist "%MINICONDA_ROOT%\Scripts\activate.bat" goto :try_activate_s2
-call "%MINICONDA_ROOT%\Scripts\activate.bat"
+call :resolve_env_path_s2
+if not defined ENV_PATH goto :activate_failed_s2
+if not exist "!ENV_PATH!\python.exe" goto :activate_failed_s2
+set "ENV_PYTHON=!ENV_PATH!\python.exe"
+set "USE_DIRECT_ENV_PYTHON=0"
 
-:try_activate_s2
-REM 方法1: conda activate 命名环境
-call conda activate "%CONDA_ENV_NAME%" 2>nul && goto :activated_ok_s2
+if /I "!CONDA_ENV_MODE!"=="named" (
+    REM 方法1: 优先激活命名环境
+    call conda activate "%CONDA_ENV_NAME%" 2>nul && goto :activated_ok_s2
 
-REM 方法2: activate.bat 激活命名环境
-echo [INFO] 尝试备用激活方式...
-if not exist "%MINICONDA_ROOT%\Scripts\activate.bat" goto :try_manual_path_s2
-call "%MINICONDA_ROOT%\Scripts\activate.bat" "%CONDA_ENV_NAME%" 2>nul && goto :activated_ok_s2
+    REM 方法2: activate.bat 激活命名环境
+    echo [INFO] 尝试备用激活方式...
+    if exist "%MINICONDA_ROOT%\Scripts\activate.bat" (
+        call "%MINICONDA_ROOT%\Scripts\activate.bat" "%CONDA_ENV_NAME%" 2>nul && goto :activated_ok_s2
+    )
+) else (
+    REM 方法1: 优先按路径激活旧版本环境
+    call conda activate "!ENV_PATH!" 2>nul && goto :activated_ok_s2
 
-:try_manual_path_s2
-REM 方法3: 获取环境路径并手动设置PATH
-set "ENV_PATH="
-for /f "tokens=1,2,3" %%a in ('conda info --envs 2^>nul ^| findstr /B /C:"%CONDA_ENV_NAME%"') do (
-    if "%%b"=="*" (
-        set "ENV_PATH=%%c"
-    ) else (
-        set "ENV_PATH=%%b"
+    REM 方法2: activate.bat 按路径激活旧版本环境
+    echo [INFO] 尝试备用激活方式...
+    if exist "%MINICONDA_ROOT%\Scripts\activate.bat" (
+        call "%MINICONDA_ROOT%\Scripts\activate.bat" "!ENV_PATH!" 2>nul && goto :activated_ok_s2
     )
 )
-if not defined ENV_PATH goto :try_legacy_env_s2
-if not exist "!ENV_PATH!\python.exe" goto :try_legacy_env_s2
-echo [INFO] 使用手动PATH激活方式...
-set "PATH=!ENV_PATH!;!ENV_PATH!\Library\mingw-w64\bin;!ENV_PATH!\Library\usr\bin;!ENV_PATH!\Library\bin;!ENV_PATH!\Scripts;!ENV_PATH!\bin;%PATH%"
-set "CONDA_PREFIX=!ENV_PATH!"
-set "CONDA_DEFAULT_ENV=%CONDA_ENV_NAME%"
-echo [INFO] 已激活环境: %CONDA_ENV_NAME%
-goto :activated_ok_s2
 
-:try_legacy_env_s2
-REM 方法4: 旧版本路径环境
-if not exist "%CONDA_ENV_PATH%\python.exe" goto :activate_failed_s2
-echo [INFO] 激活路径环境（旧版本）...
-echo [INFO] 使用手动PATH激活方式...
-set "PATH=%CONDA_ENV_PATH%;%CONDA_ENV_PATH%\Library\mingw-w64\bin;%CONDA_ENV_PATH%\Library\usr\bin;%CONDA_ENV_PATH%\Library\bin;%CONDA_ENV_PATH%\Scripts;%CONDA_ENV_PATH%\bin;%PATH%"
-set "CONDA_PREFIX=%CONDA_ENV_PATH%"
-set "CONDA_DEFAULT_ENV=%CONDA_ENV_PATH%"
+echo [WARNING] 环境激活失败，回退到直接调用环境 Python
+echo [INFO] 环境路径: !ENV_PATH!
+call :apply_env_runtime_path_s2
+set "USE_DIRECT_ENV_PYTHON=1"
+set "CONDA_PREFIX=!ENV_PATH!"
+if /I "!CONDA_ENV_MODE!"=="named" (
+    set "CONDA_DEFAULT_ENV=%CONDA_ENV_NAME%"
+) else (
+    set "CONDA_DEFAULT_ENV=!ENV_PATH!"
+)
 goto :activated_ok_s2
 
 :activate_failed_s2
@@ -172,6 +172,33 @@ echo [ERROR] 无法激活环境
 echo 请尝试: 打开新命令提示符，运行 conda init cmd.exe，然后重试
 pause
 exit /b 1
+
+:resolve_env_path_s2
+set "ENV_PATH="
+if exist "%MINICONDA_ROOT%\envs\%CONDA_ENV_NAME%\python.exe" set "ENV_PATH=%MINICONDA_ROOT%\envs\%CONDA_ENV_NAME%"
+if not defined ENV_PATH (
+    for /f "tokens=1,2,3" %%a in ('conda info --envs 2^>nul ^| findstr /B /C:"%CONDA_ENV_NAME%"') do (
+        if "%%b"=="*" (
+            set "ENV_PATH=%%c"
+        ) else (
+            set "ENV_PATH=%%b"
+        )
+    )
+)
+if not defined ENV_PATH if exist "%CONDA_ENV_PATH%\python.exe" set "ENV_PATH=%CONDA_ENV_PATH%"
+exit /b 0
+
+:apply_env_runtime_path_s2
+set "PATH=!ENV_PATH!;!ENV_PATH!\Library\mingw-w64\bin;!ENV_PATH!\Library\usr\bin;!ENV_PATH!\Library\bin;!ENV_PATH!\Scripts;!ENV_PATH!\bin;%PATH%"
+exit /b 0
+
+:run_env_python_s2
+if "%USE_DIRECT_ENV_PYTHON%"=="1" (
+    call "!ENV_PYTHON!" %*
+) else (
+    call python %*
+)
+exit /b %ERRORLEVEL%
 
 :activated_ok_s2
 
@@ -184,7 +211,7 @@ REM 切换到项目根目录(确保Python能正确找到模块)
 cd /d "%~dp0"
 
 REM 直接启动 Qt 界面
-python desktop_qt_ui\main.py
+call :run_env_python_s2 desktop_qt_ui\main.py
 pause
 goto :eof
 
