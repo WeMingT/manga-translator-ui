@@ -65,6 +65,7 @@
           "title": "Detection"
         },
         "detector.detector",
+        "detector.import_yolo_labels",
         "detector.use_yolo_obb",
         "detector.min_box_area_ratio",
         {

@@ -47,6 +47,7 @@ class DetectorSettings(BaseModel):
     text_threshold: float = 0.5
     box_threshold: float = 0.5
     unclip_ratio: float = 2.5
+    import_yolo_labels: bool = False
     use_yolo_obb: bool = False
     yolo_obb_conf: float = 0.4
     yolo_obb_overlap_threshold: float = 0.1
@@ -122,6 +123,7 @@ class CliSettings(BaseModel):
     skip_no_text: bool = False
     save_text: bool = True
     load_text: bool = False
+    translate_json_only: bool = False
     template: bool = False
     save_quality: int = 100
     batch_size: int = 1

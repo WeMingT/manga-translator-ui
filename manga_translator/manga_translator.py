@@ -45,6 +45,10 @@ from .colorization import dispatch as dispatch_colorization
 from .colorization import prepare as prepare_colorization
 from .colorization import unload as unload_colorization
 from .detection import dispatch as dispatch_detection
+from .detection.imported_yolo import (
+    build_mask_from_textlines,
+    load_imported_yolo_textlines,
+)
 from .detection import prepare as prepare_detection
 from .detection import unload as unload_detection
 from .inpainting import dispatch as dispatch_inpainting
@@ -75,6 +79,7 @@ from .utils.path_manager import (
     find_json_path,
     get_inpainted_path,
     get_json_path,
+    get_original_txt_path,
     get_work_image_path,
 )
 from .utils.translation_text import remove_trailing_period_if_needed
@@ -426,6 +431,7 @@ class MangaTranslator:
         self.save_text = params.get('save_text', False)
         # Set load_text
         self.load_text = params.get('load_text', False)
+        self.translate_json_only = params.get('translate_json_only', False)
         self.save_mask = not params.get('no_save_mask', False)
         self.template = params.get('template', False)
         self.attempts = params.get('attempts', -1)
@@ -695,7 +701,7 @@ class MangaTranslator:
             self._mark_context_failure(ctx, e, stage='saving')
             return False
 
-    def _save_text_to_file(self, image_path: str, ctx: Context, config: Config = None):
+    def _save_text_to_file(self, image_path: str, ctx: Context, config: Config = None) -> bool:
         """保存/回写文本区域到JSON（含translation、font_size等渲染后字段），使用新的目录结构"""
         text_output_file = self.text_output_file
         if not text_output_file:
@@ -828,18 +834,33 @@ class MangaTranslator:
                 data_to_save['colorizer'] = config.colorizer.colorizer
                 logger.info(f"在JSON中记录上色信息: colorizer={config.colorizer.colorizer}")
 
+        # 导入 YOLO 框的导出类模式不保存蒙版，后续由 load_text 缺失 mask 时再补生成
+        skip_mask_export = (
+            getattr(ctx, 'used_imported_yolo_labels', False) and
+            ((self.template and self.save_text) or self.generate_and_export)
+        )
+
         # 保存优化后的蒙版（ctx.mask），而不是原始蒙版（ctx.mask_raw）
         # 这样加载后可以直接使用，无需再次进行蒙版优化
-        if self.save_mask and ctx.mask is not None:
+        mask_to_save = None
+        mask_is_refined = False
+        if ctx.mask is not None:
+            mask_to_save = ctx.mask
+            mask_is_refined = True
+        elif ctx.mask_raw is not None:
+            mask_to_save = ctx.mask_raw
+
+        if skip_mask_export:
+            logger.info("Import YOLO labels enabled in export mode: skipping mask save in JSON")
+        elif self.save_mask and mask_to_save is not None:
             try:
                 import base64
 
                 import cv2
-                _, buffer = cv2.imencode('.png', ctx.mask)
+                _, buffer = cv2.imencode('.png', mask_to_save)
                 mask_base64 = base64.b64encode(buffer).decode('utf-8')
                 data_to_save['mask_raw'] = mask_base64
-                # 保存的是优化后的蒙版，标记为已优化
-                data_to_save['mask_is_refined'] = True
+                data_to_save['mask_is_refined'] = mask_is_refined
             except Exception as e:
                 logger.error(f"Failed to encode mask to base64: {e}")
 
@@ -862,8 +883,57 @@ class MangaTranslator:
             with open(text_output_file, 'wb') as f:
                 f.write(json_string.encode('utf-8'))
             logger.info(f"JSON saved to: {text_output_file}")
+            return True
         except Exception as e:
             logger.error(f"Failed to write translation file to {text_output_file}: {e}")
+            return False
+
+    def _prepare_loaded_regions(self, loaded_regions: List[TextBlock], use_text_as_translation: bool = False) -> None:
+        for region in loaded_regions:
+            if not hasattr(region, 'font_size') or not region.font_size:
+                try:
+                    if region.lines.ndim == 3 and region.lines.shape[1] >= 4 and region.lines.shape[2] >= 2:
+                        box_height = np.max(region.lines[:, :, 1]) - np.min(region.lines[:, :, 1])
+                        region.font_size = min(int(box_height * 0.8), 128)
+                    else:
+                        logger.warning(f"Invalid lines shape {region.lines.shape}, using default font_size=24")
+                        region.font_size = 24
+                except Exception as e:
+                    logger.warning(f"Error calculating font_size from lines: {e}, using default font_size=24")
+                    region.font_size = 24
+
+            if use_text_as_translation and not region.translation:
+                region.translation = region.text
+                logger.debug(f"Region translation is empty, using original text: {region.text[:50]}...")
+
+    def _apply_pre_dictionary_to_regions(self, ctx: Context) -> None:
+        pre_dict = load_dictionary(self.pre_dict)
+        pre_replacements = []
+        for region in ctx.text_regions:
+            if region.text is None:
+                continue
+            original = region.text
+            region.text = apply_dictionary(region.text, pre_dict)
+            if original != region.text:
+                pre_replacements.append(f"{original} => {region.text}")
+
+        if pre_replacements:
+            logger.info("Pre-translation replacements:")
+            for replacement in pre_replacements:
+                logger.info(replacement)
+        else:
+            logger.info("No pre-translation replacements made.")
+
+    def _delete_original_txt_after_json_translation(self, image_path: str) -> None:
+        original_txt_path = get_original_txt_path(image_path, create_dir=False)
+        if not os.path.exists(original_txt_path):
+            return
+
+        try:
+            os.remove(original_txt_path)
+            logger.info(f"Deleted original text file after JSON translation: {original_txt_path}")
+        except Exception as e:
+            logger.warning(f"Failed to delete original text file {original_txt_path}: {e}")
 
     async def _handle_generate_and_export(
         self,
@@ -881,8 +951,13 @@ class MangaTranslator:
         if not image_name:
             return
 
+        # 导入 YOLO 框的导出模式不保存蒙版
+        if getattr(ctx, 'used_imported_yolo_labels', False):
+            logger.info("Import YOLO labels enabled in generate_and_export mode: skipping mask refinement and mask save")
+            ctx.mask = None
+            ctx.mask_raw = None
         # 导出翻译模式：强制执行蒙版优化（跳过修复）
-        if ctx.mask is None and ctx.mask_raw is not None:
+        elif ctx.mask is None and ctx.mask_raw is not None:
             await self._report_progress('mask-generation')
             try:
                 ctx.mask = await self._run_mask_refinement(config, ctx)
@@ -931,8 +1006,13 @@ class MangaTranslator:
         if not image_name:
             return
 
+        # 导入 YOLO 框的导出模式不保存蒙版
+        if getattr(ctx, 'used_imported_yolo_labels', False):
+            logger.info("Import YOLO labels enabled in template mode: skipping mask refinement and mask save")
+            ctx.mask = None
+            ctx.mask_raw = None
         # 导出原文模式：强制执行蒙版优化（跳过修复）
-        if ctx.mask is None and ctx.mask_raw is not None:
+        elif ctx.mask is None and ctx.mask_raw is not None:
             await self._report_progress('mask-generation')
             try:
                 ctx.mask = await self._run_mask_refinement(config, ctx)
@@ -1497,74 +1577,124 @@ class MangaTranslator:
         
         current_time = time.time()
         self._model_usage_timestamps[("detection", config.detector.detector)] = current_time
-        result = await dispatch_detection(
-            config.detector.detector,
-            ctx.img_rgb,
-            config.detector.detection_size,
-            config.detector.text_threshold,
-            config.detector.box_threshold,
-            config.detector.unclip_ratio,
-            self.device,
-            self.verbose,
-            config.detector.use_yolo_obb,
-            config.detector.yolo_obb_conf,
-            config.detector.yolo_obb_overlap_threshold,
-            config.detector.min_box_area_ratio,
-            self._result_path,
+        import_yolo_labels = bool(getattr(config.detector, 'import_yolo_labels', False))
+        ctx.used_imported_yolo_labels = False
+        imported_textlines = []
+        imported_mask_raw = None
+        if import_yolo_labels:
+            image_name = getattr(ctx, 'image_name', None)
+            input_name = getattr(getattr(ctx, 'input', None), 'name', None)
+            image_name_has_dir = bool(image_name and (os.path.isabs(image_name) or os.path.dirname(image_name)))
+            input_name_has_dir = bool(input_name and (os.path.isabs(input_name) or os.path.dirname(input_name)))
+            if input_name_has_dir and not image_name_has_dir:
+                label_lookup_path = input_name
+            else:
+                label_lookup_path = image_name or input_name
+            imported_textlines = load_imported_yolo_textlines(
+                getattr(ctx, 'img_rgb', None),
+                label_lookup_path,
+                logger=logger,
+            )
+            if imported_textlines:
+                imported_mask_raw = build_mask_from_textlines(ctx.img_rgb.shape, imported_textlines)
+
+        should_use_imported_labels_only = (
+            import_yolo_labels and
+            bool(imported_textlines) and
+            self.template and
+            self.save_text
         )
+
+        if should_use_imported_labels_only:
+            logger.info(
+                "Import YOLO labels enabled in template mode: skip detector boxes and use imported labels directly"
+            )
+            ctx.used_imported_yolo_labels = True
+            result = (imported_textlines, imported_mask_raw, None)
+        else:
+            use_yolo_obb = config.detector.use_yolo_obb
+            if self.load_text:
+                use_yolo_obb = False
+            result = await dispatch_detection(
+                config.detector.detector,
+                ctx.img_rgb,
+                config.detector.detection_size,
+                config.detector.text_threshold,
+                config.detector.box_threshold,
+                config.detector.unclip_ratio,
+                self.device,
+                self.verbose,
+                use_yolo_obb,
+                config.detector.yolo_obb_conf,
+                config.detector.yolo_obb_overlap_threshold,
+                config.detector.min_box_area_ratio,
+                self._result_path,
+            )
         
-        # 处理bbox调试图（如果检测器返回了）
-        if self.verbose and result and len(result) == 3 and result[2] is not None:
-            third_elem = result[2]
-            # 检查是否是tuple（包含三张图）
-            if isinstance(third_elem, tuple) and len(third_elem) == 3:
-                try:
-                    logger.info(f'[DEBUG] Processing 3-element tuple: {[type(x) for x in third_elem]}')
-                    bbox_img, binary_mask_img, raw_mask_mask = third_elem
-                    # 保存边框调试图
-                    bbox_debug_path = self._result_path('bboxes_with_scores.png')
-                    imwrite_unicode(bbox_debug_path, bbox_img, logger)
-                    logger.info(f'Saved bbox debug image to {bbox_debug_path}')
-                    # 保存二值化mask
-                    binary_mask_path = self._result_path('mask_binary.png')
-                    imwrite_unicode(binary_mask_path, binary_mask_img, logger)
-                    logger.info(f'Saved binary mask to {binary_mask_path}')
-                    # 暂存raw_mask_mask到ctx以便后续生成对比图
-                    ctx.raw_mask_mask = raw_mask_mask
-                    logger.info(f'[DEBUG] Stored raw_mask_mask for later comparison (shape: {raw_mask_mask.shape})')
-                    result = (result[0], result[1], None)
-                except Exception as e:
-                    logger.error(f'Failed to save bbox debug images: {e}')
-            # 兼容2张图的情况
-            elif isinstance(third_elem, tuple) and len(third_elem) == 2:
-                try:
-                    bbox_img, binary_mask_img = third_elem
-                    bbox_debug_path = self._result_path('bboxes_with_scores.png')
-                    imwrite_unicode(bbox_debug_path, bbox_img, logger)
-                    logger.info(f'Saved bbox debug image to {bbox_debug_path}')
-                    binary_mask_path = self._result_path('mask_binary.png')
-                    imwrite_unicode(binary_mask_path, binary_mask_img, logger)
-                    logger.info(f'Saved binary mask to {binary_mask_path}')
-                    result = (result[0], result[1], None)
-                except Exception as e:
-                    logger.error(f'Failed to save bbox debug images: {e}')
-            # 兼容单张图的情况（包括混合检测调试图）
-            elif isinstance(third_elem, np.ndarray) and len(third_elem.shape) == 3:
-                try:
-                    # 如果启用了YOLO辅助检测，优先保存为混合检测调试图
-                    if config.detector.use_yolo_obb:
-                        # 保存混合检测调试图
-                        hybrid_debug_path = self._result_path('hybrid_detection_boxes.png')
-                        imwrite_unicode(hybrid_debug_path, cv2.cvtColor(third_elem, cv2.COLOR_RGB2BGR), logger)
-                        logger.info(f'✅ 已保存混合检测调试图: {hybrid_debug_path}')
-                    else:
-                        # 保存普通bbox调试图
+            # 处理bbox调试图（如果检测器返回了）
+            if self.verbose and result and len(result) == 3 and result[2] is not None:
+                third_elem = result[2]
+                # 检查是否是tuple（包含三张图）
+                if isinstance(third_elem, tuple) and len(third_elem) == 3:
+                    try:
+                        logger.info(f'[DEBUG] Processing 3-element tuple: {[type(x) for x in third_elem]}')
+                        bbox_img, binary_mask_img, raw_mask_mask = third_elem
+                        # 保存边框调试图
                         bbox_debug_path = self._result_path('bboxes_with_scores.png')
-                        imwrite_unicode(bbox_debug_path, third_elem, logger)
+                        imwrite_unicode(bbox_debug_path, bbox_img, logger)
                         logger.info(f'Saved bbox debug image to {bbox_debug_path}')
-                    result = (result[0], result[1], None)
-                except Exception as e:
-                    logger.error(f'Failed to save bbox debug image: {e}')
+                        # 保存二值化mask
+                        binary_mask_path = self._result_path('mask_binary.png')
+                        imwrite_unicode(binary_mask_path, binary_mask_img, logger)
+                        logger.info(f'Saved binary mask to {binary_mask_path}')
+                        # 暂存raw_mask_mask到ctx以便后续生成对比图
+                        ctx.raw_mask_mask = raw_mask_mask
+                        logger.info(f'[DEBUG] Stored raw_mask_mask for later comparison (shape: {raw_mask_mask.shape})')
+                        result = (result[0], result[1], None)
+                    except Exception as e:
+                        logger.error(f'Failed to save bbox debug images: {e}')
+                # 兼容2张图的情况
+                elif isinstance(third_elem, tuple) and len(third_elem) == 2:
+                    try:
+                        bbox_img, binary_mask_img = third_elem
+                        bbox_debug_path = self._result_path('bboxes_with_scores.png')
+                        imwrite_unicode(bbox_debug_path, bbox_img, logger)
+                        logger.info(f'Saved bbox debug image to {bbox_debug_path}')
+                        binary_mask_path = self._result_path('mask_binary.png')
+                        imwrite_unicode(binary_mask_path, binary_mask_img, logger)
+                        logger.info(f'Saved binary mask to {binary_mask_path}')
+                        result = (result[0], result[1], None)
+                    except Exception as e:
+                        logger.error(f'Failed to save bbox debug images: {e}')
+                # 兼容单张图的情况（包括混合检测调试图）
+                elif isinstance(third_elem, np.ndarray) and len(third_elem.shape) == 3:
+                    try:
+                        # 如果启用了YOLO辅助检测，优先保存为混合检测调试图
+                        if config.detector.use_yolo_obb:
+                            # 保存混合检测调试图
+                            hybrid_debug_path = self._result_path('hybrid_detection_boxes.png')
+                            imwrite_unicode(hybrid_debug_path, cv2.cvtColor(third_elem, cv2.COLOR_RGB2BGR), logger)
+                            logger.info(f'✅ 已保存混合检测调试图: {hybrid_debug_path}')
+                        else:
+                            # 保存普通bbox调试图
+                            bbox_debug_path = self._result_path('bboxes_with_scores.png')
+                            imwrite_unicode(bbox_debug_path, third_elem, logger)
+                            logger.info(f'Saved bbox debug image to {bbox_debug_path}')
+                        result = (result[0], result[1], None)
+                    except Exception as e:
+                        logger.error(f'Failed to save bbox debug image: {e}')
+
+            if import_yolo_labels and imported_textlines and not self.load_text:
+                detector_box_count = len(result[0]) if result and result[0] else 0
+                raw_mask = result[1] if result and len(result) > 1 else None
+                if raw_mask is None:
+                    raw_mask = imported_mask_raw
+                ctx.used_imported_yolo_labels = True
+                result = (imported_textlines, raw_mask, result[2] if result and len(result) > 2 else None)
+                logger.info(
+                    f"Import YOLO labels enabled: replace detector boxes with imported boxes "
+                    f"(detector_boxes={detector_box_count}, imported_boxes={len(imported_textlines)})"
+                )
         
         # --- BEGIN NON-MAXIMUM SUPPRESSION (NMS) FOR DE-DUPLICATION ---
         if result and result[0]:
@@ -2506,6 +2636,85 @@ class MangaTranslator:
                 for k in keys_to_remove:
                     del self._saved_image_contexts[k]
 
+    @staticmethod
+    def _get_context_region_count(region: Any) -> int:
+        lines = getattr(region, 'lines', None)
+        if lines is None:
+            return 1
+
+        try:
+            return max(int(len(lines)), 1)
+        except TypeError:
+            return 1
+
+    def _build_page_context_entries(self, ctx: Context) -> List[dict]:
+        entries = []
+        if not getattr(ctx, 'text_regions', None):
+            return entries
+
+        for region in ctx.text_regions:
+            original_text = getattr(region, 'text', None)
+            translated_text = getattr(region, 'translation', None)
+            if original_text is None or not translated_text:
+                continue
+
+            entries.append({
+                "text": original_text,
+                "translation": translated_text,
+                "original_region_count": self._get_context_region_count(region),
+            })
+
+        return entries
+
+    def _normalize_context_page_entries(self, page: Any) -> List[dict]:
+        """
+        历史上下文页兼容两种结构：
+        1. 旧结构：{original_text: translation}
+        2. 新结构：[{"text": ..., "translation": ..., "original_region_count": ...}, ...]
+        """
+        normalized_entries: List[dict] = []
+
+        if isinstance(page, dict):
+            for original_text, translated_text in page.items():
+                normalized_entries.append({
+                    "text": original_text,
+                    "translation": translated_text,
+                })
+            return normalized_entries
+
+        if not isinstance(page, list):
+            return normalized_entries
+
+        for entry in page:
+            if not isinstance(entry, dict):
+                continue
+
+            original_text = entry.get("text")
+            translated_text = entry.get("translation")
+            if original_text is None or translated_text is None:
+                continue
+
+            normalized_entry = {
+                "text": original_text,
+                "translation": translated_text,
+            }
+
+            region_count = entry.get("original_region_count")
+            if isinstance(region_count, (int, float)):
+                normalized_entry["original_region_count"] = max(int(region_count), 1)
+
+            normalized_entries.append(normalized_entry)
+
+        return normalized_entries
+
+    def _page_has_context_entries(self, page: Any) -> bool:
+        for entry in self._normalize_context_page_entries(page):
+            original_text = str(entry.get("text") or "").strip()
+            translated_text = str(entry.get("translation") or "").strip()
+            if original_text and translated_text:
+                return True
+        return False
+
     def _build_prev_context(self, use_original_text=False, current_page_index=None, batch_index=None, batch_original_texts=None):
         """
         跳过句子数为0的页面，取最近 context_size 个非空页面，构造成历史多轮对话：
@@ -2536,7 +2745,7 @@ class MangaTranslator:
         # 筛选出有句子的页面
         non_empty_pages = [
             page for page in available_pages
-            if any(sent.strip() for sent in page.values())
+            if self._page_has_context_entries(page)
         ]
         # 实际要用的页数
         pages_used = min(self.context_size, len(non_empty_pages))
@@ -2547,24 +2756,37 @@ class MangaTranslator:
         # 构造成历史 user / assistant 多轮消息
         history_turns = []
         for page in tail:
-            page_pairs = []
-            for original_text, translated_text in page.items():
+            page_entries = []
+            for entry in self._normalize_context_page_entries(page):
+                original_text = entry.get("text")
+                translated_text = entry.get("translation")
                 original_clean = (original_text or "").replace('\n', ' ').replace('\ufffd', '').strip()
                 translated_clean = (translated_text or "").strip()
                 if original_clean and translated_clean:
-                    page_pairs.append((original_clean, translated_clean))
+                    page_entry = {
+                        "text": original_clean,
+                        "translation": translated_clean,
+                    }
+                    region_count = entry.get("original_region_count")
+                    if isinstance(region_count, int) and region_count > 0:
+                        page_entry["original_region_count"] = region_count
+                    page_entries.append(page_entry)
 
-            if not page_pairs:
+            if not page_entries:
                 continue
 
             input_data = [
-                {"id": index + 1, "text": original_text}
-                for index, (original_text, _) in enumerate(page_pairs)
+                {
+                    "id": index + 1,
+                    "text": entry["text"],
+                    **({"original_region_count": entry["original_region_count"]} if "original_region_count" in entry else {}),
+                }
+                for index, entry in enumerate(page_entries)
             ]
             output_data = {
                 "translations": [
-                    {"id": index + 1, "translation": translated_text}
-                    for index, (_, translated_text) in enumerate(page_pairs)
+                    {"id": index + 1, "translation": entry["translation"]}
+                    for index, entry in enumerate(page_entries)
                 ]
             }
             user_prompt = (
@@ -2596,7 +2818,7 @@ class MangaTranslator:
             pages_expected = min(self.context_size, len(done_pages))
             non_empty_pages = [
                 page for page in done_pages
-                if any(sent.strip() for sent in page.values())
+                if self._page_has_context_entries(page)
             ]
             pages_used = min(self.context_size, len(non_empty_pages))
             skipped = pages_expected - pages_used
@@ -3368,7 +3590,7 @@ class MangaTranslator:
                 from manga_translator.config import Translator
                 translator_type = first_config.translator.translator
                 is_hq_translator = translator_type in [Translator.openai_hq, Translator.gemini_hq]
-                is_import_export_mode = self.load_text or self.template
+                is_import_export_mode = self.load_text or self.template or self.translate_json_only
 
                 # 如果是高质量翻译且未启用并发模式，使用专用的高质量翻译流程
                 if is_hq_translator and not is_import_export_mode and not self.batch_concurrent:
@@ -3402,6 +3624,7 @@ class MangaTranslator:
         # 检查是否有不兼容的特殊模式
         has_incompatible_mode = (
             self.load_text or 
+            self.translate_json_only or
             is_template_save_mode or 
             self.generate_and_export or 
             self.colorize_only or 
@@ -3415,6 +3638,8 @@ class MangaTranslator:
             incompatible_modes = []
             if self.load_text:
                 incompatible_modes.append("加载翻译")
+            if self.translate_json_only:
+                incompatible_modes.append("仅翻译(JSON)")
             if is_template_save_mode:
                 incompatible_modes.append("导出原文")
             if self.generate_and_export:
@@ -3551,54 +3776,15 @@ class MangaTranslator:
                             if not loaded_regions:
                                 logger.info(f"No text regions found in JSON for {os.path.basename(image_name)}, will render original image")
                             
-                            # 设置字体大小和默认translation
-                            for region in loaded_regions:
-                                if not hasattr(region, 'font_size') or not region.font_size:
-                                    try:
-                                        # 确保lines形状正确 (N, 4, 2)
-                                        if region.lines.ndim == 3 and region.lines.shape[1] >= 4 and region.lines.shape[2] >= 2:
-                                            box_height = np.max(region.lines[:,:,1]) - np.min(region.lines[:,:,1])
-                                            region.font_size = min(int(box_height * 0.8), 128)
-                                        else:
-                                            logger.warning(f"Invalid lines shape {region.lines.shape}, using default font_size=24")
-                                            region.font_size = 24
-                                    except Exception as e:
-                                        logger.warning(f"Error calculating font_size from lines: {e}, using default font_size=24")
-                                        region.font_size = 24
-                                
-                                # 如果translation为空或None，使用原文text作为默认值
-                                if not region.translation:
-                                    region.translation = region.text
-                                    logger.debug(f"Region translation is empty, using original text: {region.text[:50]}...")
+                            self._prepare_loaded_regions(loaded_regions, use_text_as_translation=True)
                             
                             ctx.text_regions = loaded_regions
                             
                             existing_inpainted_path = find_inpainted_path(image_name) if image_name else None
 
-                            # 导入翻译并渲染时，如果已有修复图，直接复用它作为渲染底图
-                            if existing_inpainted_path and os.path.exists(existing_inpainted_path):
-                                logger.info(f"Load text mode: Reusing inpainted image as render base: {existing_inpainted_path}")
-                                ctx.img_colorized = open_pil_image(existing_inpainted_path, eager=False)
-                            elif config.colorizer.colorizer != Colorizer.none:
-                                await self._report_progress('colorizing')
-                                ctx.img_colorized = await self._run_colorizer(config, ctx)
-                            else:
-                                ctx.img_colorized = ctx.input
-                            
-                            if existing_inpainted_path and os.path.exists(existing_inpainted_path):
-                                ctx.upscaled = ctx.img_colorized
-                            elif config.upscale.upscale_ratio:
-                                await self._report_progress('upscaling')
-                                ctx.upscaled = await self._run_upscaling(config, ctx)
-                            else:
-                                ctx.upscaled = ctx.img_colorized
-
-                            if (
-                                image_name and
-                                not existing_inpainted_path and
-                                (config.colorizer.colorizer != Colorizer.none or config.upscale.upscale_ratio)
-                            ):
-                                self._save_editor_base_if_needed(ctx, config)
+                            # load_text 始终基于原图处理，不走上色/超分，也不把已有修复图塞进 img_colorized/upscaled
+                            ctx.img_colorized = ctx.input
+                            ctx.upscaled = ctx.input
                             
                             ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
                             
@@ -3611,35 +3797,49 @@ class MangaTranslator:
                                 logger.error(f"[批量] 加载的图片尺寸无效: {ctx.img_rgb.shape}")
                                 continue
                             
+                            import_yolo_labels = bool(getattr(config.detector, 'import_yolo_labels', False))
+
                             # 处理 mask
                             if loaded_mask is not None:
                                 if mask_is_refined:
                                     ctx.mask = loaded_mask
                                 else:
                                     ctx.mask_raw = loaded_mask
+                                if import_yolo_labels:
+                                    self._prime_bubble_detection_cache(config, ctx.img_rgb)
                             else:
-                                if ctx.mask_raw is None:
+                                if import_yolo_labels:
+                                    try:
+                                        detection_img_rgb = None
+                                        input_image = getattr(ctx, 'input', None)
+                                        if input_image is not None:
+                                            try:
+                                                detection_img_rgb, _ = load_image(input_image)
+                                            except Exception as original_load_err:
+                                                logger.warning(
+                                                    f"Load text mode: failed to load original image for mask detection, "
+                                                    f"falling back to current image ({original_load_err})"
+                                                )
+
+                                        mask_ctx = Context()
+                                        mask_ctx.img_rgb = detection_img_rgb if detection_img_rgb is not None else ctx.img_rgb
+                                        mask_ctx.image_name = image_name
+                                        _, generated_mask_raw, generated_mask = await self._run_detection(config, mask_ctx)
+                                        if generated_mask_raw is not None:
+                                            ctx.mask_raw = generated_mask_raw
+                                        if generated_mask is not None:
+                                            ctx.mask = generated_mask
+                                        if ctx.mask_raw is not None or ctx.mask is not None:
+                                            logger.info("Load text mode: generated mask from detection because JSON has no mask")
+                                    except Exception as e:
+                                        logger.warning(f"Load text mode: detection-based mask generation failed, fallback to region mask ({e})")
+
+                                if ctx.mask_raw is None and ctx.mask is None:
                                     mask = np.zeros_like(ctx.img_rgb[:, :, 0])
                                     polygons = [p.reshape((-1, 1, 2)) for r in ctx.text_regions for p in r.lines]
                                     cv2.fillPoly(mask, polygons, 255)
                                     ctx.mask_raw = mask
                             
-                            # 如果执行了超分，需要将mask和坐标也超分
-                            if config.upscale.upscale_ratio:
-                                upscale_ratio = parse_upscale_ratio(config.upscale.upscale_ratio)
-                                if upscale_ratio > 0:
-                                    if ctx.mask_raw is not None:
-                                        ctx.mask_raw = cv2.resize(ctx.mask_raw, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
-                                    if ctx.mask is not None:
-                                        ctx.mask = cv2.resize(ctx.mask, (ctx.img_rgb.shape[1], ctx.img_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
-                                    
-                                    for region in ctx.text_regions:
-                                        region.lines = region.lines * upscale_ratio
-                                        if hasattr(region, '_center_override') and region._center_override is not None:
-                                            region._center_override = region._center_override * upscale_ratio
-                                        if hasattr(region, 'font_size') and region.font_size:
-                                            region.font_size = int(region.font_size * upscale_ratio)
-
                             # load_text 模式下：无论是否超分，都强制对齐 mask 到当前图像尺寸，
                             # 避免 ONNX inpainting 因 image/mask 维度不一致而报错。
                             target_h, target_w = ctx.img_rgb.shape[:2]
@@ -3685,15 +3885,35 @@ class MangaTranslator:
                                     ctx.mask = await self._run_mask_refinement(config, ctx)
                                 
                                 # Inpainting
+                                generated_inpainted_in_load_text = False
                                 if self._should_skip_inpainting_for_ai_renderer(config):
                                     logger.info("AI renderer selected: skipping inpainting and using original work image as render base.")
                                     ctx.img_inpainted = ctx.img_rgb
                                 elif existing_inpainted_path and loaded_mask is not None:
-                                    logger.info("Load text mode: Using existing inpainted image, skipping inpainting.")
-                                    ctx.img_inpainted = ctx.img_rgb
+                                    try:
+                                        existing_inpainted_image = open_pil_image(existing_inpainted_path, eager=False)
+                                        existing_inpainted_rgb, _ = load_image(existing_inpainted_image)
+                                        ctx.img_inpainted = existing_inpainted_rgb
+                                        logger.info("Load text mode: Using existing inpainted image, skipping inpainting.")
+                                    except Exception as existing_inpaint_err:
+                                        logger.warning(
+                                            f"Load text mode: failed to load existing inpainted image, rerunning inpainting ({existing_inpaint_err})"
+                                        )
+                                        await self._report_progress('inpainting')
+                                        ctx.img_inpainted = await self._run_inpainting(config, ctx)
+                                        generated_inpainted_in_load_text = True
                                 else:
                                     await self._report_progress('inpainting')
                                     ctx.img_inpainted = await self._run_inpainting(config, ctx)
+                                    generated_inpainted_in_load_text = True
+
+                                if (
+                                    generated_inpainted_in_load_text
+                                    and image_name
+                                    and ctx.img_inpainted is not None
+                                    and self.save_text
+                                ):
+                                    self._save_inpainted_image(image_name, ctx.img_inpainted)
                                 
                                 # Rendering - load_text按JSON中的skip_font_scaling控制：True=跳过字体缩放，False=执行字体缩放
                                 await self._report_progress('rendering')
@@ -3748,6 +3968,88 @@ class MangaTranslator:
                                     pass
                     
                     # load_text模式处理完成，继续下一批
+                    continue
+
+                if self.translate_json_only:
+                    logger.info("Translate JSON only mode: Loading original text from JSON and skipping detection/OCR/rendering")
+                    for i, (image, config) in enumerate(current_batch_images):
+                        await asyncio.sleep(0)
+                        self._check_cancelled()
+                        try:
+                            self._set_image_context(config, image)
+                            image_name = image.name if hasattr(image, 'name') else None
+
+                            ctx = Context()
+                            ctx.input = image
+                            ctx.image_name = image_name
+                            ctx.verbose = self.verbose
+                            ctx.save_quality = self.save_quality
+                            ctx.config = config
+                            ctx.from_lang = 'auto'
+
+                            loaded_regions, loaded_mask, mask_is_refined, _ = self._load_text_and_regions_from_file(image_name, config)
+                            if loaded_regions is None:
+                                json_path = find_json_path(image_name) if image_name else None
+                                if not json_path and image_name:
+                                    json_path = get_json_path(image_name, create_dir=False)
+                                raise FileNotFoundError(f"JSON translation data not found or invalid: {json_path}")
+
+                            self._prepare_loaded_regions(loaded_regions, use_text_as_translation=False)
+                            ctx.text_regions = loaded_regions
+
+                            if loaded_mask is not None:
+                                if mask_is_refined:
+                                    ctx.mask = loaded_mask
+                                else:
+                                    ctx.mask_raw = loaded_mask
+
+                            self._apply_pre_dictionary_to_regions(ctx)
+                            preprocessed_contexts.append((ctx, config))
+                        except Exception as e:
+                            logger.error(f"Error loading JSON translation data for image {i+1} in batch: {e}")
+                            ctx = Context()
+                            ctx.input = image
+                            ctx.text_regions = []
+                            if hasattr(image, 'name'):
+                                ctx.image_name = image.name
+                            ctx.translation_error = str(e)
+                            preprocessed_contexts.append((ctx, config))
+
+                    logger.info('[阶段] JSON 原文加载完成，开始翻译阶段')
+                    try:
+                        translated_contexts = await self._batch_translate_contexts(preprocessed_contexts, batch_size)
+                    except Exception as e:
+                        logger.error(f"Error during JSON-only batch translation stage: {e}")
+                        raise
+
+                    for ctx, config in translated_contexts:
+                        if getattr(ctx, 'translation_error', None):
+                            results.append(ctx)
+                            await report_completed_image_progress()
+                            continue
+
+                        try:
+                            save_success = self._save_text_to_file(ctx.image_name, ctx, config)
+                            if not save_success:
+                                raise IOError(f"Failed to save JSON for {os.path.basename(ctx.image_name)}")
+                            self._delete_original_txt_after_json_translation(ctx.image_name)
+                            ctx.success = True
+                        except Exception as save_err:
+                            logger.error(f"Error saving translated JSON for {os.path.basename(ctx.image_name)}: {save_err}")
+                            ctx = self._mark_context_failure(ctx, save_err, stage='saving')
+
+                        results.append(ctx)
+                        await report_completed_image_progress()
+                        self._cleanup_context_memory(ctx, keep_result=True)
+
+                    if current_batch_images:
+                        for image, _ in current_batch_images:
+                            if hasattr(image, 'close'):
+                                try:
+                                    image.close()
+                                except Exception:
+                                    pass
+
                     continue
 
                 # 标准模式：执行检测、OCR等预处理
@@ -4137,19 +4439,27 @@ class MangaTranslator:
                 return ctx
             
             # Step 4: Mask Refinement - 使用text_regions和mask_raw优化蒙版
-            await self._report_progress('mask-generation')
-            try:
-                ctx.mask = await self._run_mask_refinement(config, ctx)
-                mask_pixels = np.count_nonzero(ctx.mask) if ctx.mask is not None else 0
-                logger.info(f"✓ Step 4 - Mask Refinement: Generated mask with {mask_pixels} non-zero pixels")
-            except Exception:
-                logger.error(f"Error during mask refinement:\n{traceback.format_exc()}")
-                # 降级到简单膨胀
-                logger.warning("Falling back to simple mask dilation")
-                kernel = np.ones((config.kernel_size, config.kernel_size), np.uint8)
-                ctx.mask = cv2.dilate(ctx.mask_raw, kernel, iterations=config.mask_dilation_offset // config.kernel_size)
-                mask_pixels = np.count_nonzero(ctx.mask) if ctx.mask is not None else 0
-                logger.info(f"Simple dilated mask has {mask_pixels} non-zero pixels")
+            skip_mask_refinement_for_imported_export = (
+                getattr(ctx, 'used_imported_yolo_labels', False) and
+                ((self.template and self.save_text) or self.generate_and_export)
+            )
+            if skip_mask_refinement_for_imported_export:
+                logger.info("Import YOLO labels enabled in export mode: skipping mask refinement stage")
+                ctx.mask = None
+            else:
+                await self._report_progress('mask-generation')
+                try:
+                    ctx.mask = await self._run_mask_refinement(config, ctx)
+                    mask_pixels = np.count_nonzero(ctx.mask) if ctx.mask is not None else 0
+                    logger.info(f"✓ Step 4 - Mask Refinement: Generated mask with {mask_pixels} non-zero pixels")
+                except Exception:
+                    logger.error(f"Error during mask refinement:\n{traceback.format_exc()}")
+                    # 降级到简单膨胀
+                    logger.warning("Falling back to simple mask dilation")
+                    kernel = np.ones((config.kernel_size, config.kernel_size), np.uint8)
+                    ctx.mask = cv2.dilate(ctx.mask_raw, kernel, iterations=config.mask_dilation_offset // config.kernel_size)
+                    mask_pixels = np.count_nonzero(ctx.mask) if ctx.mask is not None else 0
+                    logger.info(f"Simple dilated mask has {mask_pixels} non-zero pixels")
             
             # Step 5: Inpainting - 使用优化后的mask进行修复
             if self._should_skip_inpainting_for_ai_renderer(config):
@@ -4275,20 +4585,7 @@ class MangaTranslator:
             imwrite_unicode(self._result_path('bboxes.png'), bboxes, logger)
 
         # Apply pre-dictionary after textline merge
-        pre_dict = load_dictionary(self.pre_dict)
-        pre_replacements = []
-        for region in ctx.text_regions:
-            original = region.text  
-            region.text = apply_dictionary(region.text, pre_dict)
-            if original != region.text:
-                pre_replacements.append(f"{original} => {region.text}")
-
-        if pre_replacements:
-            logger.info("Pre-translation replacements:")
-            for replacement in pre_replacements:
-                logger.info(replacement)
-        else:
-            logger.info("No pre-translation replacements made.")
+        self._apply_pre_dictionary_to_regions(ctx)
 
         # 保存当前图片上下文到ctx中，用于并发翻译时的路径管理
         if self._current_image_context:
@@ -4455,12 +4752,9 @@ class MangaTranslator:
                 # ✅ 立即保存当前批次的翻译结果到all_page_translations，供下一个批次使用上下文
                 for ctx, config in batch:
                     if ctx.text_regions:
-                        page_trans = {}
-                        for region in ctx.text_regions:
-                            if region.translation:
-                                page_trans[region.text] = region.translation
-                        self.all_page_translations.append(page_trans)
-                        logger.debug(f"[Batch Context] Saved {len(page_trans)} translations for next batch context")
+                        page_entries = self._build_page_context_entries(ctx)
+                        self.all_page_translations.append(page_entries)
+                        logger.debug(f"[Batch Context] Saved {len(page_entries)} translations for next batch context")
                         
                 # Prune history to prevent memory leak
                 self._prune_context_history()
@@ -4846,7 +5140,7 @@ class MangaTranslator:
                 pages_expected = min(self.context_size, len(done_pages))
                 non_empty_pages = [
                     page for page in done_pages
-                    if any(sent.strip() for sent in page.values())
+                    if self._page_has_context_entries(page)
                 ]
                 pages_used = min(self.context_size, len(non_empty_pages))
                 skipped = pages_expected - pages_used
@@ -5159,8 +5453,8 @@ class MangaTranslator:
                 logger.debug(f"Exception details: {traceback.format_exc()}")
 
         # 保存inpainted图片到新目录结构（用于可编辑图片功能）
-        # 与JSON保存逻辑保持一致：save_text或text_output_file任一满足即保存
-        if (self.save_text or self.text_output_file) and hasattr(ctx, 'image_name') and ctx.image_name and ctx.img_inpainted is not None:
+        # 仅在开启“图片可编辑”时保存
+        if self.save_text and hasattr(ctx, 'image_name') and ctx.image_name and ctx.img_inpainted is not None:
             self._save_inpainted_image(ctx.image_name, ctx.img_inpainted)
 
         # -- Rendering
@@ -5616,13 +5910,10 @@ class MangaTranslator:
                         # ✅ 立即保存当前批次的翻译结果到all_page_translations，供下一个批次使用上下文
                         for ctx, config in preprocessed_contexts:
                             if ctx.text_regions:
-                                # 保存译文
-                                page_trans = {}
-                                for region in ctx.text_regions:
-                                    if region.translation:
-                                        page_trans[region.text] = region.translation
-                                self.all_page_translations.append(page_trans)
-                                logger.debug(f"[HQ Batch Context] Saved {len(page_trans)} translations for next batch context")
+                                # 保存译文和原始区域数量，供历史上下文与 AI 断句复用
+                                page_entries = self._build_page_context_entries(ctx)
+                                self.all_page_translations.append(page_entries)
+                                logger.debug(f"[HQ Batch Context] Saved {len(page_entries)} translations for next batch context")
                                 
                                 # 保存原文（用于并发模式的上下文）
                                 page_original_texts = {i: (r.text_raw if hasattr(r, "text_raw") else r.text)

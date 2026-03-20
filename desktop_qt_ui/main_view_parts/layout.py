@@ -267,6 +267,7 @@ def create_translation_page(self) -> QWidget:
         self._t("Normal Translation"),
         self._t("Export Translation"),
         self._t("Export Original Text"),
+        self._t("Translate JSON Only"),
         self._t("Import Translation and Render"),
         self._t("Colorize Only"),
         self._t("Upscale Only"),

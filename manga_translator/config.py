@@ -326,6 +326,8 @@ class DetectorConfig(BaseModel):
     """Size of image used for detection"""
     text_threshold: float = 0.5
     """Threshold for text detection"""
+    import_yolo_labels: bool = False
+    """Import YOLO labels from manga_translator_work/yolo_labels and use them in detection workflows"""
     use_yolo_obb: bool = False
     """Enable YOLO OBB auxiliary detector for hybrid detection"""
     yolo_obb_conf: float = 0.4
@@ -395,6 +397,8 @@ class CliConfig(BaseModel):
     """Only generate JSX script without executing Photoshop"""
     replace_translation: bool = False
     """Replace translation mode: apply translation from one image to another raw image"""
+    translate_json_only: bool = False
+    """Translate existing JSON only: read original text from JSON, translate, and write back JSON"""
 
 class OcrConfig(BaseModel):
     ocr: Ocr = Ocr.ocr48px

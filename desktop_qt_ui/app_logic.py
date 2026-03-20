@@ -1395,6 +1395,7 @@ class MainAppLogic(QObject):
                     "detector": self._t("label_detector"),
                     "detection_size": self._t("label_detection_size"),
                     "text_threshold": self._t("label_text_threshold"),
+                    "import_yolo_labels": self._t("label_import_yolo_labels"),
                     "use_yolo_obb": self._t("label_use_yolo_obb"),
                     "yolo_obb_conf": self._t("label_yolo_obb_conf"),
                     "yolo_obb_overlap_threshold": self._t("label_yolo_obb_overlap_threshold"),
@@ -1451,6 +1452,7 @@ class MainAppLogic(QObject):
                     "skip_no_text": self._t("label_skip_no_text"),
                     "save_text": self._t("label_save_text"),
                     "load_text": self._t("label_load_text"),
+                    "translate_json_only": self._t("label_translate_json_only"),
                     "template": self._t("label_template"),
                     "save_quality": self._t("label_save_quality"),
                     "batch_size": self._t("label_batch_size"),
@@ -3468,7 +3470,9 @@ class TranslationWorker(QObject):
                         should_skip = False
                         
                         # 检查导出原文/翻译的TXT文件（如果启用）
-                        if cli_config.get('template', False) and cli_config.get('save_text', False):
+                        if cli_config.get('translate_json_only', False):
+                            should_skip = False
+                        elif cli_config.get('template', False) and cli_config.get('save_text', False):
                             # 导出原文模式 - 检查TXT文件
                             from manga_translator.utils.path_manager import (
                                 get_original_txt_path,
@@ -3534,7 +3538,10 @@ class TranslationWorker(QObject):
             elif cli_config.get('load_text', False):
                 workflow_mode = self._t("Import Translation and Render")
                 workflow_tip = self._t("Tip: Will read TXT files from manga_translator_work/originals/ or translations/ and render (prioritize _original.txt)")
-                
+            elif cli_config.get('translate_json_only', False):
+                workflow_mode = self._t("Translate JSON Only")
+                workflow_tip = self._t("Tip: Requires existing JSON data. The app reads original text from JSON, translates it, writes results back to JSON, and deletes imagename_original.txt after success")
+                 
                 # TXT导入JSON的预处理已经统一到翻译器入口（manga_translator.py），这里不再需要
 
             # 检查是否启用并发模式
@@ -3542,6 +3549,7 @@ class TranslationWorker(QObject):
             
             # 检查是否有不兼容并行的特殊模式
             load_text = self.config_dict.get('cli', {}).get('load_text', False)
+            translate_json_only = self.config_dict.get('cli', {}).get('translate_json_only', False)
             template = self.config_dict.get('cli', {}).get('template', False)
             save_text = self.config_dict.get('cli', {}).get('save_text', False)
             generate_and_export = self.config_dict.get('cli', {}).get('generate_and_export', False)
@@ -3553,6 +3561,7 @@ class TranslationWorker(QObject):
             is_template_save_mode = template and save_text
             has_incompatible_mode = (
                 load_text or 
+                translate_json_only or
                 is_template_save_mode or 
                 generate_and_export or 
                 colorize_only or 
@@ -3566,6 +3575,8 @@ class TranslationWorker(QObject):
                 incompatible_modes = []
                 if load_text:
                     incompatible_modes.append("导入翻译")
+                if translate_json_only:
+                    incompatible_modes.append("仅翻译(JSON)")
                 if is_template_save_mode:
                     incompatible_modes.append("导出原文")
                 if generate_and_export:

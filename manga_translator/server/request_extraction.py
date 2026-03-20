@@ -268,6 +268,8 @@ def prepare_translator_params(config: Config, workflow: str = "normal") -> dict:
     if hasattr(config, 'cli'):
         if hasattr(config.cli, 'load_text'):
             config.cli.load_text = False
+        if hasattr(config.cli, 'translate_json_only'):
+            config.cli.translate_json_only = False
         if hasattr(config.cli, 'template'):
             config.cli.template = False
         if hasattr(config.cli, 'generate_and_export'):

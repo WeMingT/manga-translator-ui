@@ -50,6 +50,7 @@ DEFAULT_ADMIN_SETTINGS = {
         'cli.skip_no_text',
         'cli.save_text',
         'cli.load_text',
+        'cli.translate_json_only',
         'cli.template',
         # 'cli.attempts',  # 不再隐藏，让用户可以设置重试次数
         'cli.ignore_errors',

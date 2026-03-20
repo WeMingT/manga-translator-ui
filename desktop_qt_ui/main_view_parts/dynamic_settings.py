@@ -717,7 +717,7 @@ def _create_param_widgets(self, data, parent_layout, prefix=""):
         # gimp_font 已废弃，使用 font_path 代替
         # replace_translation 和 replace_translation_mode 通过工作流模式下拉框控制
         # app 配置组的字段：last_open_dir, last_output_path, favorite_folders, current_preset 是内部状态，不显示在UI中
-        if full_key in ["cli.load_text", "cli.template", "cli.generate_and_export", "cli.colorize_only", "cli.upscale_only", "cli.inpaint_only", "cli.replace_translation", "cli.replace_translation_mode", "upscale.realcugan_model", "render.gimp_font", "render.font_path", "translator.high_quality_prompt_path", "app.last_open_dir", "app.last_output_path", "app.favorite_folders", "app.current_preset"]:
+        if full_key in ["cli.load_text", "cli.translate_json_only", "cli.template", "cli.generate_and_export", "cli.colorize_only", "cli.upscale_only", "cli.inpaint_only", "cli.replace_translation", "cli.replace_translation_mode", "upscale.realcugan_model", "render.gimp_font", "render.font_path", "translator.high_quality_prompt_path", "app.last_open_dir", "app.last_output_path", "app.favorite_folders", "app.current_preset"]:
             continue
 
         label_text = key

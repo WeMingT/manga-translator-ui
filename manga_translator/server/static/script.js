@@ -37,6 +37,7 @@ const hiddenKeys = [
     // 通过其他UI控制的参数
     'upscale.realcugan_model',  // 通过 upscale_ratio 动态控制
     'cli.load_text',  // 通过工作流模式下拉框控制
+    'cli.translate_json_only',  // 通过工作流模式下拉框控制
     'cli.template',  // 通过工作流模式下拉框控制
     'cli.generate_and_export',  // 通过工作流模式下拉框控制
     'cli.colorize_only',  // 通过工作流模式下拉框控制
