@@ -43,14 +43,8 @@ jobs:
           git remote remove gitee 2>/dev/null || true
           git remote add gitee "https://hgmzhn:${GITEE_TOKEN}@gitee.com/hgmzhn/manga-translator-ui.git"
 
-      - name: Fetch all GitHub branches and tags
-        run: |
-          git fetch --prune origin \
-            '+refs/heads/*:refs/heads/*' \
-            '+refs/tags/*:refs/tags/*'
-
       - name: Mirror to Gitee
         run: |
           git push --prune gitee \
-            '+refs/heads/*:refs/heads/*' \
+            '+refs/remotes/origin/*:refs/heads/*' \
             '+refs/tags/*:refs/tags/*'
