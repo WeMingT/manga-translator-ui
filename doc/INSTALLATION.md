@@ -231,14 +231,26 @@ D:\manga-translator-ui\          # 你选择的安装目录
 
 适合开发者或想自定义的用户。
 
-### 1. 克隆仓库
+> ℹ️ 说明：当前项目默认仍以 **Conda / Miniforge + `requirements_*.txt`** 路线为主。`uv` 目前只是一个**可选的测试方式**，用于验证新的依赖定义流程，现有安装脚本、CI 和 Docker 暂未切换到 uv。
+
+### 1. 安装 Python 3.12
+
+本仓库当前以 **Python 3.12** 为基线。
+
+- Windows：安装 Python 3.12，并勾选“Add Python to PATH”
+- Linux（Ubuntu / Debian）：确保系统中存在 `python3.12`
+- macOS：建议通过官方安装包或你已有的 Python 3.12 环境
+
+### 2. 克隆仓库
 
 ```bash
 git clone https://github.com/hgmzhn/manga-translator-ui.git
 cd manga-translator-ui
 ```
 
-### 2. 安装依赖
+### 3. 默认方式：安装 requirements 依赖
+
+按你的运行目标安装一套依赖即可：
 
 ```bash
 # CPU 版本
@@ -246,9 +258,90 @@ pip install -r requirements_cpu.txt
 
 # GPU 版本（需要 CUDA 12.x）
 pip install -r requirements_gpu.txt
+
+# AMD GPU（实验性）
+pip install -r requirements_amd.txt
+
+# Apple Silicon / Metal
+pip install -r requirements_metal.txt
 ```
 
-### 3. 运行程序
+如果你需要 PyInstaller 打包环境：
+
+```bash
+pip install pyinstaller
+```
+
+### 4. 可选方式：使用 uv（测试中）
+
+仓库根目录已经补充 `pyproject.toml` / `uv.lock`，供开发者测试 uv 依赖管理流程。
+
+#### 安装 uv
+
+**Windows PowerShell**：
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**Linux / macOS**：
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+安装完成后，重新打开终端，并确认：
+
+```bash
+uv --version
+```
+
+#### 创建虚拟环境
+
+```bash
+uv venv --python 3.12
+```
+
+激活环境：
+
+**Windows PowerShell**：
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+**Windows CMD**：
+```cmd
+.\.venv\Scripts\activate.bat
+```
+
+**Linux / macOS**：
+```bash
+source .venv/bin/activate
+```
+
+#### 同步依赖
+
+```bash
+# CPU 版本
+uv sync --extra cpu
+
+# NVIDIA GPU（CUDA 12.x）
+uv sync --extra gpu
+
+# AMD GPU（实验性，仅同步非 ROCm / 非 torch 依赖）
+uv sync --extra amd
+
+# Apple Silicon / Metal
+uv sync --extra metal
+```
+
+> ⚠️ **AMD 说明**：`uv sync --extra amd` 当前只覆盖非 ROCm / 非 torch 依赖。AMD ROCm PyTorch 仍沿用现有安装脚本 / `packaging/launch.py` 的特殊安装流程。
+
+如果你需要 PyInstaller 打包环境，还可以额外同步：
+
+```bash
+uv sync --extra build
+```
+
+### 5. 运行程序
 
 ```bash
 # 运行 PyQt6 界面
@@ -257,6 +350,7 @@ python -m desktop_qt_ui.main
 # 或运行旧版 CustomTkinter 界面
 python -m desktop-ui.main
 ```
+
 
 ---
 

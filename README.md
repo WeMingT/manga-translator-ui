@@ -178,13 +178,21 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
    ```bash
    # NVIDIA GPU
    pip install -r requirements_gpu.txt
-   
+
    # AMD GPU（仅 RX 7000/9000 系列）
    pip install -r requirements_amd.txt
-   
+
    # CPU 版本
    pip install -r requirements_cpu.txt
+
+   # Apple Silicon / Metal
+   pip install -r requirements_metal.txt
    ```
+
+   > ℹ️ 说明：当前默认安装路径仍然是 `requirements_*.txt`。仓库根目录已补充 `pyproject.toml` / `uv.lock`，供开发者**可选**测试 uv 依赖管理流程；现有安装脚本、CI 和 Docker 暂未切换到 uv。
+
+   如果你想测试 uv，可以参考开发文档中的可选步骤：`doc/DEVELOPMENT.md`。
+   
 4. **运行程序**：
    ```bash
    # 桌面 UI
