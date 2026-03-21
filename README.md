@@ -191,7 +191,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 
    > ℹ️ 说明：当前默认安装路径仍然是 `requirements_*.txt`。仓库根目录已补充 `pyproject.toml` / `uv.lock`，供开发者**可选**测试 uv 依赖管理流程；现有安装脚本、CI 和 Docker 暂未切换到 uv。
 
-   如果你想测试 uv，可以参考开发文档中的可选步骤：`doc/DEVELOPMENT.md`。
+   如果你想测试 uv，可以参考开发文档中的可选步骤：[安装指南](doc/INSTALLATION.md)。
    
 4. **运行程序**：
    ```bash
