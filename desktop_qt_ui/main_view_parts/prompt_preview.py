@@ -649,6 +649,17 @@ class PromptPreviewPanel(QWidget):
         if self._current_path:
             self.load_file(self._current_path)
 
+    def refresh_ui_texts(self):
+        """语言切换后刷新固定文案，并按当前文件重绘内容。"""
+        global _current_t
+        _current_t = self._t
+        self._title_label.setText(self._t("Prompt Preview"))
+        self._edit_btn.setText(self._t("Edit"))
+        if self._current_path:
+            self.load_file(self._current_path)
+        else:
+            self.clear()
+
     # ─── 清空 ──────────────────────────────────────────
     def _clear_content(self):
         while self._content_layout.count():
@@ -665,6 +676,7 @@ class PromptPreviewPanel(QWidget):
         self._edit_btn.setEnabled(bool(file_path))
 
         if not file_path or not os.path.isfile(file_path):
+            self._edit_btn.setEnabled(False)
             self._filename_label.setText(self._t("File not found"))
             return
 
@@ -815,7 +827,7 @@ class PromptPreviewPanel(QWidget):
             with open(file_path, "r", encoding="utf-8") as f:
                 raw = f.read()
         except Exception as e:
-            raw = f"Error reading file: {e}"
+            raw = self._t("Error reading file: {error}", error=e)
 
         text_edit = QPlainTextEdit(raw)
         text_edit.setReadOnly(True)
@@ -1113,7 +1125,7 @@ class PromptEditorDialog(QDialog):
                 self._original_content = f.read()
         except Exception as e:
             self._original_content = ""
-            self._status.setText(f"Error: {e}")
+            self._status.setText(self._t("Error: {error}", error=e))
             self._status.setStyleSheet(_status_style("error"))
 
         # 尝试解析

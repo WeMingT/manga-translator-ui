@@ -1,10 +1,12 @@
 import json
 import os
+import shutil
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import (
     QButtonGroup,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGroupBox,
@@ -13,6 +15,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -31,6 +34,9 @@ _SETTINGS_TAB_LAYOUT_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "locales", "settings_tab_layout.json"
 )
+
+_PROMPT_EXTENSIONS = (".yaml", ".yml", ".json")
+_FONT_EXTENSIONS = (".ttf", ".otf", ".ttc")
 
 
 def _load_reclassify_settings_layout():
@@ -56,6 +62,39 @@ def refresh_font_preview_styles(self):
     """主题变化后刷新字体预览区域颜色。"""
     current_item = self.font_list_widget.currentItem() if hasattr(self, "font_list_widget") else None
     _on_font_selection_changed(self, current_item, None)
+
+
+def _set_prompt_status(self, translation_key: str, **kwargs):
+    if hasattr(self, "prompt_status_label"):
+        self.prompt_status_label.setText(self._t(translation_key, **kwargs))
+
+
+def _set_font_status(self, translation_key: str, **kwargs):
+    if hasattr(self, "font_status_label"):
+        self.font_status_label.setText(self._t(translation_key, **kwargs))
+
+
+def _sanitize_file_stem(name: str) -> str:
+    return "".join(c for c in name if c.isalnum() or c in ("_", "-", ".", " ")).strip()
+
+
+def _normalize_prompt_filename(name: str, default_extension: str = ".yaml") -> str:
+    safe_name = _sanitize_file_stem(name)
+    if not safe_name:
+        return ""
+
+    stem, ext = os.path.splitext(safe_name)
+    if ext and ext.lower() not in _PROMPT_EXTENSIONS:
+        safe_name = stem
+        stem, ext = os.path.splitext(safe_name)
+
+    if ext.lower() not in _PROMPT_EXTENSIONS:
+        safe_name = f"{safe_name}{default_extension}"
+
+    final_stem = os.path.splitext(safe_name)[0].strip()
+    if not final_stem:
+        return ""
+    return safe_name
 
 
 def create_left_sidebar(self) -> QWidget:
@@ -611,16 +650,22 @@ def create_prompt_page(self) -> QWidget:
     button_row_layout.setContentsMargins(0, 0, 0, 0)
     button_row_layout.setSpacing(8)
     self.prompt_new_button = QPushButton(self._t("New"))
+    self.prompt_copy_button = QPushButton(self._t("Copy"))
+    self.prompt_rename_button = QPushButton(self._t("Rename"))
     self.prompt_delete_button = QPushButton(self._t("Delete"))
     self.prompt_refresh_button = QPushButton(self._t("Refresh"))
     self.prompt_open_dir_button = QPushButton(self._t("Open Directory"))
     self.prompt_apply_button = QPushButton(self._t("Apply Selected Prompt"))
     self.prompt_new_button.setProperty("chipButton", True)
+    self.prompt_copy_button.setProperty("chipButton", True)
+    self.prompt_rename_button.setProperty("chipButton", True)
     self.prompt_delete_button.setProperty("chipButton", True)
     self.prompt_refresh_button.setProperty("chipButton", True)
     self.prompt_open_dir_button.setProperty("chipButton", True)
     self.prompt_apply_button.setProperty("chipButton", True)
     button_row_layout.addWidget(self.prompt_new_button)
+    button_row_layout.addWidget(self.prompt_copy_button)
+    button_row_layout.addWidget(self.prompt_rename_button)
     button_row_layout.addWidget(self.prompt_delete_button)
     button_row_layout.addWidget(self.prompt_refresh_button)
     button_row_layout.addWidget(self.prompt_open_dir_button)
@@ -654,6 +699,8 @@ def create_prompt_page(self) -> QWidget:
 
     # --- 信号连接 ---
     self.prompt_new_button.clicked.connect(self._create_new_prompt)
+    self.prompt_copy_button.clicked.connect(self._copy_selected_prompt)
+    self.prompt_rename_button.clicked.connect(self._rename_selected_prompt)
     self.prompt_delete_button.clicked.connect(self._delete_selected_prompt)
     self.prompt_refresh_button.clicked.connect(self._refresh_prompt_manager)
     self.prompt_open_dir_button.clicked.connect(self.controller.open_dict_directory)
@@ -700,12 +747,18 @@ def create_font_page(self) -> QWidget:
     button_row_layout = QHBoxLayout(button_row)
     button_row_layout.setContentsMargins(0, 0, 0, 0)
     button_row_layout.setSpacing(8)
+    self.font_import_button = QPushButton(self._t("Import"))
+    self.font_delete_button = QPushButton(self._t("Delete"))
     self.font_refresh_button = QPushButton(self._t("Refresh"))
     self.font_open_dir_button = QPushButton(self._t("Open Directory"))
     self.font_apply_button = QPushButton(self._t("Apply Selected Font"))
+    self.font_import_button.setProperty("chipButton", True)
+    self.font_delete_button.setProperty("chipButton", True)
     self.font_refresh_button.setProperty("chipButton", True)
     self.font_open_dir_button.setProperty("chipButton", True)
     self.font_apply_button.setProperty("chipButton", True)
+    button_row_layout.addWidget(self.font_import_button)
+    button_row_layout.addWidget(self.font_delete_button)
     button_row_layout.addWidget(self.font_refresh_button)
     button_row_layout.addWidget(self.font_open_dir_button)
     button_row_layout.addWidget(self.font_apply_button)
@@ -762,6 +815,8 @@ def create_font_page(self) -> QWidget:
     page_layout.addWidget(self.font_preview_card)
 
     # --- Signals ---
+    self.font_import_button.clicked.connect(self._import_fonts)
+    self.font_delete_button.clicked.connect(self._delete_selected_font)
     self.font_refresh_button.clicked.connect(self._refresh_font_manager)
     self.font_open_dir_button.clicked.connect(self.controller.open_font_directory)
     self.font_apply_button.clicked.connect(self._apply_selected_font)
@@ -908,6 +963,9 @@ def refresh_prompt_manager(self):
     prompt_files = self.controller.get_hq_prompt_options()
     selected_prompt_path = self.config_service.get_config().translator.high_quality_prompt_path
     selected_filename = os.path.basename(selected_prompt_path) if selected_prompt_path else ""
+    current_item = self.prompt_list_widget.currentItem()
+    current_filename = current_item.text().strip() if current_item else ""
+    preferred_filename = current_filename or selected_filename
 
     self.prompt_list_widget.blockSignals(True)
     self.prompt_list_widget.clear()
@@ -915,11 +973,16 @@ def refresh_prompt_manager(self):
         self.prompt_list_widget.addItem(QListWidgetItem(prompt))
     self.prompt_list_widget.blockSignals(False)
 
-    if selected_filename:
-        matching_items = self.prompt_list_widget.findItems(selected_filename, Qt.MatchFlag.MatchExactly)
+    if preferred_filename:
+        matching_items = self.prompt_list_widget.findItems(preferred_filename, Qt.MatchFlag.MatchExactly)
         if matching_items:
             self.prompt_list_widget.setCurrentItem(matching_items[0])
-    self.prompt_status_label.setText(f"Found {len(prompt_files)} prompt files.")
+    else:
+        self.prompt_list_widget.clearSelection()
+
+    if not self.prompt_list_widget.currentItem() and hasattr(self, "prompt_preview_panel"):
+        self.prompt_preview_panel.clear()
+    _set_prompt_status(self, "Found {count} prompt files.", count=len(prompt_files))
 
 
 def apply_selected_prompt(self):
@@ -931,7 +994,7 @@ def apply_selected_prompt(self):
         return
     selected_path = os.path.join("dict", filename).replace("\\", "/")
     self.setting_changed.emit("translator.high_quality_prompt_path", selected_path)
-    self.prompt_status_label.setText(f"Current prompt: {filename}")
+    _set_prompt_status(self, "Current prompt: {filename}", filename=filename)
 
 
 def on_prompt_selection_changed(self, current, previous):
@@ -969,6 +1032,26 @@ def open_prompt_editor(self, file_path: str):
         self.prompt_preview_panel.load_file(file_path)
 
 
+def _get_selected_prompt_filename(self) -> str | None:
+    current = self.prompt_list_widget.currentItem() if hasattr(self, "prompt_list_widget") else None
+    if not current:
+        return None
+    filename = current.text().strip()
+    return filename or None
+
+
+def _select_prompt_item(self, filename: str):
+    if not filename or not hasattr(self, "prompt_list_widget"):
+        return
+    items = self.prompt_list_widget.findItems(filename, Qt.MatchFlag.MatchExactly)
+    if items:
+        self.prompt_list_widget.setCurrentItem(items[0])
+
+
+def _prompt_file_path(filename: str) -> str:
+    return os.path.join(resource_path("dict"), filename)
+
+
 def create_new_prompt(self):
     """弹出输入框，创建新的 YAML 提示词文件。"""
     from widgets.themed_text_input_dialog import themed_get_text
@@ -981,20 +1064,16 @@ def create_new_prompt(self):
     )
     if not ok or not name.strip():
         return
-    name = name.strip()
-    # 确保文件名安全
-    safe_name = "".join(c for c in name if c.isalnum() or c in ("_", "-", ".", " ")).strip()
-    if not safe_name:
+    filename = _normalize_prompt_filename(name.strip(), ".yaml")
+    if not filename:
+        QMessageBox.warning(self, self._t("Warning"), self._t("Invalid file name."))
         return
-    filename = safe_name + ".yaml"
     dict_dir = resource_path("dict")
     os.makedirs(dict_dir, exist_ok=True)
     file_path = os.path.join(dict_dir, filename)
 
     if os.path.exists(file_path):
-        from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.warning(self, self._t("Warning"),
-                            self._t("File already exists") + f": {filename}")
+        QMessageBox.warning(self, self._t("Warning"), self._t("File already exists") + f": {filename}")
         return
 
     # 默认 YAML 模板
@@ -1028,31 +1107,128 @@ def create_new_prompt(self):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(default_content)
     except Exception as e:
-        from PyQt6.QtWidgets import QMessageBox
         QMessageBox.critical(self, self._t("Error"), str(e))
         return
 
     self._refresh_prompt_manager()
-    # 自动选中新建的文件
-    if hasattr(self, "prompt_list_widget"):
-        items = self.prompt_list_widget.findItems(filename, Qt.MatchFlag.MatchExactly)
-        if items:
-            self.prompt_list_widget.setCurrentItem(items[0])
-    self.prompt_status_label.setText(self._t("Created") + f": {filename}")
+    _select_prompt_item(self, filename)
+    _set_prompt_status(self, "Created: {filename}", filename=filename)
+
+
+def copy_selected_prompt(self):
+    """复制选中的提示词文件。"""
+    from widgets.themed_text_input_dialog import themed_get_text
+
+    filename = _get_selected_prompt_filename(self)
+    if not filename:
+        QMessageBox.warning(self, self._t("Warning"), self._t("Please select a prompt file first."))
+        return
+
+    source_path = _prompt_file_path(filename)
+    if not os.path.isfile(source_path):
+        QMessageBox.warning(self, self._t("Warning"), self._t("Selected prompt file does not exist."))
+        return
+
+    stem, ext = os.path.splitext(filename)
+    default_name = f"{stem}_copy"
+    new_name, ok = themed_get_text(
+        self,
+        title=self._t("Copy Prompt"),
+        label=self._t("Enter new prompt file name (without extension):"),
+        text=default_name,
+        ok_text=self._t("OK"),
+        cancel_text=self._t("Cancel"),
+    )
+    if not ok or not new_name.strip():
+        return
+
+    target_filename = _normalize_prompt_filename(new_name.strip(), ext or ".yaml")
+    if not target_filename:
+        QMessageBox.warning(self, self._t("Warning"), self._t("Invalid file name."))
+        return
+
+    target_path = _prompt_file_path(target_filename)
+    if os.path.exists(target_path):
+        QMessageBox.warning(self, self._t("Warning"), self._t("File already exists") + f": {target_filename}")
+        return
+
+    try:
+        shutil.copy2(source_path, target_path)
+    except Exception as e:
+        QMessageBox.critical(self, self._t("Error"), str(e))
+        return
+
+    self._refresh_prompt_manager()
+    _select_prompt_item(self, target_filename)
+    _set_prompt_status(self, "Copied: {filename}", filename=target_filename)
+
+
+def rename_selected_prompt(self):
+    """重命名选中的提示词文件。"""
+    from widgets.themed_text_input_dialog import themed_get_text
+
+    filename = _get_selected_prompt_filename(self)
+    if not filename:
+        QMessageBox.warning(self, self._t("Warning"), self._t("Please select a prompt file first."))
+        return
+
+    source_path = _prompt_file_path(filename)
+    if not os.path.isfile(source_path):
+        QMessageBox.warning(self, self._t("Warning"), self._t("Selected prompt file does not exist."))
+        return
+
+    stem, ext = os.path.splitext(filename)
+    new_name, ok = themed_get_text(
+        self,
+        title=self._t("Rename Prompt"),
+        label=self._t("Enter new prompt file name (without extension):"),
+        text=stem,
+        ok_text=self._t("OK"),
+        cancel_text=self._t("Cancel"),
+    )
+    if not ok or not new_name.strip():
+        return
+
+    target_filename = _normalize_prompt_filename(new_name.strip(), ext or ".yaml")
+    if not target_filename:
+        QMessageBox.warning(self, self._t("Warning"), self._t("Invalid file name."))
+        return
+    if target_filename == filename:
+        return
+
+    target_path = _prompt_file_path(target_filename)
+    if os.path.exists(target_path):
+        QMessageBox.warning(self, self._t("Warning"), self._t("File already exists") + f": {target_filename}")
+        return
+
+    try:
+        os.replace(source_path, target_path)
+    except Exception as e:
+        QMessageBox.critical(self, self._t("Error"), str(e))
+        return
+
+    current_prompt_path = self.config_service.get_config().translator.high_quality_prompt_path or ""
+    if os.path.basename(current_prompt_path) == filename:
+        self.setting_changed.emit(
+            "translator.high_quality_prompt_path",
+            os.path.join("dict", target_filename).replace("\\", "/"),
+        )
+
+    self._refresh_prompt_manager()
+    _select_prompt_item(self, target_filename)
+    _set_prompt_status(self, "Renamed to: {filename}", filename=target_filename)
 
 
 def delete_selected_prompt(self):
     """删除选中的提示词文件。"""
-    if not hasattr(self, "prompt_list_widget"):
-        return
-    current = self.prompt_list_widget.currentItem()
-    if not current:
-        return
-    filename = current.text().strip()
+    filename = _get_selected_prompt_filename(self)
     if not filename:
+        QMessageBox.warning(self, self._t("Warning"), self._t("Please select a prompt file first."))
         return
 
-    from PyQt6.QtWidgets import QMessageBox
+    current_prompt_path = self.config_service.get_config().translator.high_quality_prompt_path or ""
+    was_active_prompt = os.path.basename(current_prompt_path) == filename
+
     reply = QMessageBox.question(
         self, self._t("Confirm Delete"),
         self._t("Are you sure you want to delete this prompt file?") + f"\n\n{filename}",
@@ -1065,16 +1241,128 @@ def delete_selected_prompt(self):
     dict_dir = resource_path("dict")
     file_path = os.path.join(dict_dir, filename)
     try:
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, self._t("Warning"), self._t("Selected prompt file does not exist."))
+            return
+        os.remove(file_path)
     except Exception as e:
         QMessageBox.critical(self, self._t("Error"), str(e))
         return
 
+    if was_active_prompt:
+        self.setting_changed.emit("translator.high_quality_prompt_path", None)
+
     if hasattr(self, "prompt_preview_panel"):
         self.prompt_preview_panel.clear()
     self._refresh_prompt_manager()
-    self.prompt_status_label.setText(self._t("Deleted") + f": {filename}")
+    _set_prompt_status(self, "Deleted: {filename}", filename=filename)
+
+
+def _get_selected_font_filename(self) -> str | None:
+    current = self.font_list_widget.currentItem() if hasattr(self, "font_list_widget") else None
+    if not current:
+        return None
+    filename = current.text().strip()
+    return filename or None
+
+
+def _select_font_item(self, filename: str):
+    if not filename or not hasattr(self, "font_list_widget"):
+        return
+    items = self.font_list_widget.findItems(filename, Qt.MatchFlag.MatchExactly)
+    if items:
+        self.font_list_widget.setCurrentItem(items[0])
+
+
+def import_fonts(self):
+    """导入字体文件到 fonts 目录。"""
+    fonts_dir = resource_path("fonts")
+    os.makedirs(fonts_dir, exist_ok=True)
+
+    file_filter = f"{self._t('Font Files')} (*.ttf *.otf *.ttc);;{self._t('All Files')} (*)"
+    file_paths, _ = QFileDialog.getOpenFileNames(
+        self,
+        self._t("Select Font Files"),
+        fonts_dir,
+        file_filter,
+    )
+    if not file_paths:
+        return
+
+    imported: list[str] = []
+    for source_path in file_paths:
+        if not source_path:
+            continue
+        filename = os.path.basename(source_path)
+        if not filename.lower().endswith(_FONT_EXTENSIONS):
+            continue
+
+        target_path = os.path.join(fonts_dir, filename)
+        same_file = os.path.abspath(source_path) == os.path.abspath(target_path)
+        if same_file:
+            continue
+
+        if os.path.exists(target_path):
+            reply = QMessageBox.question(
+                self,
+                self._t("Confirm Overwrite"),
+                self._t("File already exists. Overwrite?") + f"\n\n{filename}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                break
+            if reply != QMessageBox.StandardButton.Yes:
+                continue
+
+        try:
+            shutil.copy2(source_path, target_path)
+        except Exception as e:
+            QMessageBox.critical(self, self._t("Error"), str(e))
+            return
+        imported.append(filename)
+
+    self._refresh_font_manager()
+    if imported:
+        _select_font_item(self, imported[-1])
+        _set_font_status(self, "Imported {count} font files.", count=len(imported))
+    else:
+        _set_font_status(self, "No font files were imported.")
+
+
+def delete_selected_font(self):
+    """删除选中的字体文件。"""
+    filename = _get_selected_font_filename(self)
+    if not filename:
+        QMessageBox.warning(self, self._t("Warning"), self._t("Please select a font file first."))
+        return
+
+    reply = QMessageBox.question(
+        self,
+        self._t("Confirm Delete"),
+        self._t("Are you sure you want to delete this font file?") + f"\n\n{filename}",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    if reply != QMessageBox.StandardButton.Yes:
+        return
+
+    font_path = os.path.join(resource_path("fonts"), filename)
+    try:
+        if not os.path.exists(font_path):
+            QMessageBox.warning(self, self._t("Warning"), self._t("Selected font file does not exist."))
+            return
+        os.remove(font_path)
+    except Exception as e:
+        QMessageBox.critical(self, self._t("Error"), str(e))
+        return
+
+    current_font = self.config_service.get_config().render.font_path or ""
+    if current_font == filename:
+        self.setting_changed.emit("render.font_path", None)
+
+    self._refresh_font_manager()
+    _set_font_status(self, "Deleted: {filename}", filename=filename)
 
 
 def refresh_font_manager(self):
@@ -1092,17 +1380,25 @@ def refresh_font_manager(self):
         print(f"Error scanning fonts directory: {e}")
 
     selected_font = self.config_service.get_config().render.font_path or ""
+    current_item = self.font_list_widget.currentItem()
+    current_font = current_item.text().strip() if current_item else ""
+    preferred_font = current_font or selected_font
     self.font_list_widget.blockSignals(True)
     self.font_list_widget.clear()
     for font_name in font_files:
         self.font_list_widget.addItem(QListWidgetItem(font_name))
     self.font_list_widget.blockSignals(False)
 
-    if selected_font:
-        matching_items = self.font_list_widget.findItems(selected_font, Qt.MatchFlag.MatchExactly)
+    if preferred_font:
+        matching_items = self.font_list_widget.findItems(preferred_font, Qt.MatchFlag.MatchExactly)
         if matching_items:
             self.font_list_widget.setCurrentItem(matching_items[0])
-    self.font_status_label.setText(f"Found {len(font_files)} fonts.")
+    else:
+        self.font_list_widget.clearSelection()
+
+    if not self.font_list_widget.currentItem():
+        _on_font_selection_changed(self, None, None)
+    _set_font_status(self, "Found {count} fonts.", count=len(font_files))
 
 
 def apply_selected_font(self):
@@ -1113,7 +1409,7 @@ def apply_selected_font(self):
     if not font_name:
         return
     self.setting_changed.emit("render.font_path", font_name)
-    self.font_status_label.setText(f"Current font: {font_name}")
+    _set_font_status(self, "Current font: {filename}", filename=font_name)
 
 
 def _on_font_selection_changed(self, current, previous):

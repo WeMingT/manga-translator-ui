@@ -58,8 +58,12 @@ class MainView(QWidget):
     _on_prompt_selection_changed = layout_parts.on_prompt_selection_changed
     _open_prompt_editor = layout_parts.open_prompt_editor
     _create_new_prompt = layout_parts.create_new_prompt
+    _copy_selected_prompt = layout_parts.copy_selected_prompt
+    _rename_selected_prompt = layout_parts.rename_selected_prompt
     _delete_selected_prompt = layout_parts.delete_selected_prompt
     _refresh_font_manager = layout_parts.refresh_font_manager
+    _import_fonts = layout_parts.import_fonts
+    _delete_selected_font = layout_parts.delete_selected_font
     _apply_selected_font = layout_parts.apply_selected_font
     _on_font_selection_changed = layout_parts._on_font_selection_changed
     _refresh_font_preview_styles = layout_parts.refresh_font_preview_styles
@@ -288,8 +292,12 @@ class MainView(QWidget):
 
         if hasattr(self, "prompt_page_title_label"):
             self.prompt_page_title_label.setText(self._t("Prompt Management"))
+        if hasattr(self, "prompt_page_subtitle_label"):
+            self.prompt_page_subtitle_label.setText(
+                self._t("Manage and apply prompt files for translation")
+            )
         if hasattr(self, "prompt_card"):
-            self.prompt_card.setTitle(self._t("Prompt Management"))
+            self.prompt_card.setTitle(self._t("Prompt List"))
         if hasattr(self, "prompt_refresh_button"):
             self.prompt_refresh_button.setText(self._t("Refresh"))
         if hasattr(self, "prompt_open_dir_button"):
@@ -298,22 +306,42 @@ class MainView(QWidget):
             self.prompt_apply_button.setText(self._t("Apply Selected Prompt"))
         if hasattr(self, "prompt_new_button"):
             self.prompt_new_button.setText(self._t("New"))
+        if hasattr(self, "prompt_copy_button"):
+            self.prompt_copy_button.setText(self._t("Copy"))
+        if hasattr(self, "prompt_rename_button"):
+            self.prompt_rename_button.setText(self._t("Rename"))
         if hasattr(self, "prompt_delete_button"):
             self.prompt_delete_button.setText(self._t("Delete"))
+        if hasattr(self, "prompt_preview_panel") and hasattr(self.prompt_preview_panel, "refresh_ui_texts"):
+            self.prompt_preview_panel.refresh_ui_texts()
 
         if hasattr(self, "font_page_title_label"):
             self.font_page_title_label.setText(self._t("Font Management"))
+        if hasattr(self, "font_page_subtitle_label"):
+            self.font_page_subtitle_label.setText(
+                self._t("Manage and preview fonts for text rendering")
+            )
         if hasattr(self, "font_card"):
-            self.font_card.setTitle(self._t("Font Management"))
+            self.font_card.setTitle(self._t("Font List"))
+        if hasattr(self, "font_import_button"):
+            self.font_import_button.setText(self._t("Import"))
+        if hasattr(self, "font_delete_button"):
+            self.font_delete_button.setText(self._t("Delete"))
         if hasattr(self, "font_refresh_button"):
             self.font_refresh_button.setText(self._t("Refresh"))
         if hasattr(self, "font_open_dir_button"):
             self.font_open_dir_button.setText(self._t("Open Directory"))
         if hasattr(self, "font_apply_button"):
             self.font_apply_button.setText(self._t("Apply Selected Font"))
+        if hasattr(self, "font_preview_card"):
+            self.font_preview_card.setTitle(self._t("Font Preview"))
 
         self._clear_dynamic_settings()
         self._create_dynamic_settings()
+        if hasattr(self, "prompt_list_widget"):
+            self._refresh_prompt_manager()
+        if hasattr(self, "font_list_widget"):
+            self._refresh_font_manager()
 
     def _clear_dynamic_settings(self):
         """清理所有动态创建的设置控件。"""
