@@ -356,5 +356,5 @@ Google Gemini 是 Google 最新的多模态 AI 模型，性能强劲。
 
 ---
 
-返回 [主页](../README.md) | 返回 [使用教程](USAGE.md)
+返回 [README.md](../README.md) | 返回 [使用教程](USAGE.md)
 

@@ -30,10 +30,10 @@
 |------|------|
 | [安装指南](doc/INSTALLATION.md) | 详细安装步骤、系统要求、分卷下载说明 |
 | [使用教程](doc/USAGE.md) | 基础操作、翻译器选择、常用设置 |
-| [命令行模式](doc/CLI_USAGE.md) | 命令行使用指南、参数说明、批量处理 |
-| [API 配置](doc/API_CONFIG.md) | API Key 申请、配置教程 |
+| [命令行模式使用指南](doc/CLI_USAGE.md) | 命令行使用指南、参数说明、批量处理 |
+| [API 配置教程](doc/API_CONFIG.md) | API Key 申请、配置教程 |
 | [功能特性](doc/FEATURES.md) | 完整功能列表、可视化编辑器详解 |
-| [工作流程](doc/WORKFLOWS.md) | 7 种工作流程、AI 断句、自定义模版 |
+| [工作流程说明](doc/WORKFLOWS.md) | 7 种工作流程、AI 断句、自定义模版 |
 | [设置说明](doc/SETTINGS.md) | 翻译器配置、OCR 模型、参数详解 |
 | [调试指南](doc/DEBUGGING.md) | 调试流程、可调节参数、问题排查 |
 | [开发者指南](doc/DEVELOPMENT.md) | 项目结构、环境配置、构建打包、模型下载源配置、可选 uv 工作流 |
@@ -161,8 +161,8 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 - 🌐 用户界面：`http://localhost:8000`
 - 🔧 管理界面：`http://localhost:8000/admin.html`
 
-> 📖 **详细安装教程**：[安装指南（Docker 部署）](doc/INSTALLATION.md#安装方式四docker部署)
-> 📖 **使用教程**：[命令行模式](doc/CLI_USAGE.md)
+> 📖 **详细安装教程**：[安装指南](doc/INSTALLATION.md#安装方式四docker部署)
+> 📖 **使用教程**：[命令行模式使用指南](doc/CLI_USAGE.md)
 
 #### 方式四：从源码运行（开发者）
 
@@ -197,7 +197,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
    ```
 
 > 📖 **详细安装教程**：[安装指南](doc/INSTALLATION.md)
-> 📖 **使用教程**：[命令行模式](doc/CLI_USAGE.md)
+> 📖 **使用教程**：[命令行模式使用指南](doc/CLI_USAGE.md)
 
 #### 方式五：macOS 原生运行 (Apple Silicon)
 
@@ -283,7 +283,7 @@ chmod +x macOS_*.sh
 
 适合批量处理和自动化脚本：
 
-**命令行指南** → [命令行模式](doc/CLI_USAGE.md)
+**命令行指南** → [命令行模式使用指南](doc/CLI_USAGE.md)
 
 > ⚠️ **重要提示**：使用命令行前，请先在项目目录激活虚拟环境：
 > ```bash

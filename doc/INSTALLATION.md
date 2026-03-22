@@ -495,7 +495,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 **部署完成后**：
 - 🌐 **用户界面**：`http://服务器IP:8000` - 上传图片进行翻译
 - 🔧 **管理界面**：`http://服务器IP:8000/admin.html` - 配置翻译器和参数（需要管理员密码）
-- 📖 **使用教程**：[命令行模式](CLI_USAGE.md) - 了解更多功能和命令行模式
+- 📖 **使用教程**：[命令行模式使用指南](CLI_USAGE.md) - 了解更多功能和命令行模式
 
 ---
 
@@ -630,7 +630,7 @@ A: 运行 `./macOS_4_更新维护.sh`，选择"完整更新"即可。
 1. 在"基础设置"中找到"翻译器"下拉菜单
 2. 首次使用推荐选择：
    - **高质量翻译 OpenAI** 或 **高质量翻译 Gemini**（多模态，看图翻译，效果最好）⭐ 强烈推荐
-   - 需要配置 API Key → [API 配置](API_CONFIG.md)
+   - 需要配置 API Key → [API 配置教程](API_CONFIG.md)
 
 ### 5. 添加图片
 
@@ -697,7 +697,7 @@ A: 运行 `./macOS_4_更新维护.sh`，选择"完整更新"即可。
   - `RENDER_OPENAI_API_BASE`
 
 更完整的变量说明请查看：
-- [API 配置](API_CONFIG.md)
+- [API 配置教程](API_CONFIG.md)
 - [设置说明](SETTINGS.md)
 
 ### MODEL_SOURCES_PATH
@@ -800,10 +800,10 @@ MODEL_SOURCES_PATH=/abs/path/to/model_sources.toml
 安装完成后，建议阅读以下文档：
 
 - [功能特性](FEATURES.md) - 了解程序的所有功能
-- [工作流程](WORKFLOWS.md) - 学习不同的翻译工作流程
+- [工作流程说明](WORKFLOWS.md) - 学习不同的翻译工作流程
 - [设置说明](SETTINGS.md) - 配置翻译器和参数
 
 ---
 
-返回 [主页](../README.md)
+返回 [README.md](../README.md)
 

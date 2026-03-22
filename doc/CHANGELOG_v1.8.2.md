@@ -46,12 +46,12 @@
 
 ## 📝 文档更新
 
-- 📖 **README.md**
+- 📖 **[README.md](../README.md)**
   - 添加 AMD GPU 支持说明
   - 更新安装方式说明
   - 警告 AMD 不支持打包版本
 
-- 📖 **doc/INSTALLATION.md**
+- 📖 **[安装指南](INSTALLATION.md)**
   - 详细的 AMD GPU 配置要求
   - AMD 显卡支持列表
   - 安装流程中的 GPU 检测说明

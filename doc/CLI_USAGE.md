@@ -222,7 +222,7 @@ python -m manga_translator -i manga.jpg --config my_config.json
 
 **配置说明**：
 - 完整的配置结构请参考 `examples/config-example.json`
-- 所有参数的详细说明请参考 [设置说明文档](SETTINGS.md)
+- 所有参数的详细说明请参考 [设置说明](SETTINGS.md)
 - `translator.keep_lang` 用于在“文本框合并后、翻译前”按源语言过滤待翻译区域；设为 `ENG` 可用于英文漫画只保留英文文本，设为 `none` 则关闭该功能
 - `translator.enable_streaming` 用于控制 OpenAI / Gemini（含 HQ）是否优先使用流式传输；设为 `false` 时将始终走普通非流式请求
 - 可以只配置需要修改的部分，其他使用默认值
@@ -1578,7 +1578,7 @@ python -m manga_translator --help
 
 - [安装指南](INSTALLATION.md)
 - [使用教程](USAGE.md)
-- [API 配置](API_CONFIG.md)
+- [API 配置教程](API_CONFIG.md)
 - [设置说明](SETTINGS.md)
 
 ---

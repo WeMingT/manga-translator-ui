@@ -403,7 +403,7 @@ ruff check desktop_qt_ui manga_translator --config desktop_qt_ui/ruff.toml
 
 ### 调试文档
 
-- 详细排障流程请看 [DEBUGGING.md](DEBUGGING.md)
+- 详细排障流程请看 [调试指南](DEBUGGING.md)
 
 ## 8. 打包与发布
 
@@ -457,7 +457,7 @@ python packaging/build_packages.py <version> --build both
 
 - [安装指南](INSTALLATION.md)
 - [使用教程](USAGE.md)
-- [命令行模式](CLI_USAGE.md)
+- [命令行模式使用指南](CLI_USAGE.md)
 - [调试指南](DEBUGGING.md)
 - [设置说明](SETTINGS.md)
 

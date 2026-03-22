@@ -72,7 +72,7 @@
 
 ### 文档更新
 - 更新 `requirements_amd.txt` 中的显卡支持说明
-- 更新 README.md 中的 AMD GPU 支持信息
+- 更新 [README.md](../README.md) 中的 AMD GPU 支持信息
 - 添加了不支持显卡的明确提示
 
 ## 📝 技术细节
@@ -89,8 +89,8 @@
 - `desktop_qt_ui/widgets/folder_dialog.py`: 修复深色主题下 hover 状态显示问题
 - `packaging/launch.py`: 添加 `--trusted-host` 参数，注释掉 gfx101X-dgpu 和 gfx103X-dgpu 的自动检测
 - `requirements_amd.txt`: 更新显卡支持说明和示例命令
-- `README.md`: 更新 AMD GPU 支持范围说明
-- `doc/INSTALLATION.md`: 更新系统要求和推荐翻译器说明
+- [README.md](../README.md)：更新 AMD GPU 支持范围说明
+- [安装指南](INSTALLATION.md)：更新系统要求和推荐翻译器说明
 
 ### 影响范围
 - 使用 AMD RX 5000/6000 系列显卡的用户将自动使用 CPU 版本
