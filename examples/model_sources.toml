@@ -1,0 +1,85 @@
+version = 1
+
+# 下载策略：
+# - official_first: 内置标准源 -> 内置镜像源
+# - mirror_first: 内置镜像源 -> 内置标准源
+# - custom: custom.urls -> 内置标准源 -> 内置镜像源
+strategy = "official_first"
+
+# 可选：如果不想使用默认 examples/model_sources.toml，可在 .env 中指定外部文件：
+# MODEL_SOURCES_PATH=/abs/path/to/model_sources.toml
+
+# -----------------------------------------------------------------------------
+# builtin.official / builtin.mirror 仅用于“查看当前仓库内置下载源”，属于只读参考。
+# 程序不会从这些表读取 URL；真正的内置 official / mirror 仍然来自各模型类的 _MODEL_MAPPING。
+# 如果你要自定义下载源，请只修改 [custom.urls]。
+# -----------------------------------------------------------------------------
+
+[builtin.official]
+"DefaultDetector:model" = [
+  "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/detect-20241225.ckpt",
+]
+"ModelPaddleOCRVL:color_model" = [
+  "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/ocr_ar_48px.ckpt",
+]
+"ModelPaddleOCRVL:color_dict" = [
+  "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/alphabet-all-v7.txt",
+]
+"StableDiffusionInpainter:model_grapefruit" = [
+  "https://civitai.com/api/download/models/8364",
+]
+"StableDiffusionInpainter:model_wd_swinv2" = [
+  "https://huggingface.co/SmilingWolf/wd-v1-4-swinv2-tagger-v2/resolve/main/model.onnx",
+]
+"StableDiffusionInpainter:model_wd_swinv2_csv" = [
+  "https://huggingface.co/SmilingWolf/wd-v1-4-swinv2-tagger-v2/resolve/main/selected_tags.csv",
+]
+
+[builtin.mirror]
+"DefaultDetector:model" = [
+  "https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/detect-20241225.ckpt",
+]
+"YOLOOBBDetector:model" = [
+  "https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/ysgyolo_yolo26_2.0.pt",
+]
+"MangaLensBubbleDetector:model" = [
+  "https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/mangalens.pt",
+]
+"ModelPaddleOCRVL:model" = [
+  "https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/PaddleOCR-VL-1.5.7z",
+]
+"ModelPaddleOCRVL:color_model" = [
+  "https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/ocr_ar_48px.ckpt",
+]
+"ModelPaddleOCRVL:color_dict" = [
+  "https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/alphabet-all-v7.txt",
+]
+"StableDiffusionInpainter:model_wd_swinv2" = [
+  "https://hf-mirror.com/SmilingWolf/wd-v1-4-swinv2-tagger-v2/resolve/main/model.onnx",
+]
+"StableDiffusionInpainter:model_wd_swinv2_csv" = [
+  "https://hf-mirror.com/SmilingWolf/wd-v1-4-swinv2-tagger-v2/raw/main/selected_tags.csv",
+]
+
+[custom.urls]
+# key 形式：<wrapper_key>:<map_key>
+# wrapper_key 来自 ModelWrapper 的 _key / 类名
+# map_key 来自 _MODEL_MAPPING 的键
+#
+# 只有 strategy = "custom" 时才会优先使用。
+# custom 的固定顺序为：
+#   custom.urls[key] -> builtin official -> builtin mirror
+#
+# 如果某个 key 没写在这里，或自定义 URL 全部失败，
+# 程序会自动回退到该 key 的内置 official_first 顺序。
+#
+# 可以按需取消注释并改成你自己的地址：
+# "DefaultDetector:model" = [
+#   "https://your-storage.example.com/detect-20241225.ckpt",
+# ]
+# "ModelPaddleOCRVL:model" = [
+#   "https://your-storage.example.com/PaddleOCR-VL-1.5.7z",
+# ]
+# "StableDiffusionInpainter:model_wd_swinv2" = [
+#   "https://your-storage.example.com/model.onnx",
+# ]
