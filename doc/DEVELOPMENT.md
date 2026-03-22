@@ -42,6 +42,9 @@ pip install pyinstaller
 
 仓库现已新增 `pyproject.toml` / `uv.lock`，供开发者测试 uv 依赖管理流程。
 
+> ℹ️ 说明：这条路线主要用于手动开发和测试，不替代现有安装脚本、CI 和 Docker。
+> ℹ️ 约定：`cpu` / `gpu` / `amd` / `metal` 只选择一套依赖进行同步；日常开发最常见的是 `uv sync --extra cpu`。
+
 安装 uv：
 
 **Windows PowerShell**：
@@ -100,6 +103,25 @@ uv sync --extra metal
 ```bash
 uv sync --extra build
 ```
+
+常见日常命令：
+
+```bash
+# 启动 Qt 桌面端
+python -m desktop_qt_ui.main
+
+# 更新代码后补齐 CPU 依赖
+git pull
+uv sync --extra cpu
+
+# 重建虚拟环境（先退出激活状态）
+# Windows PowerShell: Remove-Item -Recurse -Force .venv
+# Windows CMD:        rmdir /s /q .venv
+# Linux / macOS:      rm -rf .venv
+uv venv --python 3.12
+uv sync --extra cpu
+```
+
 
 ## 2. 仓库结构
 

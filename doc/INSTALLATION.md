@@ -276,6 +276,9 @@ pip install pyinstaller
 
 仓库根目录已经补充 `pyproject.toml` / `uv.lock`，供开发者测试 uv 依赖管理流程。
 
+> ℹ️ 说明：这条路线目前主要面向手动运行源码的用户。现有安装脚本、CI 和 Docker 仍以 Conda / `requirements_*.txt` 为主。
+> ℹ️ 约定：`cpu` / `gpu` / `amd` / `metal` 只选择一套依赖进行同步；下面以 **CPU 版** 为例说明日常使用流程。
+
 #### 安装 uv
 
 **Windows PowerShell**：
@@ -317,7 +320,7 @@ uv venv --python 3.12
 source .venv/bin/activate
 ```
 
-#### 同步依赖
+#### 首次同步依赖
 
 ```bash
 # CPU 版本
@@ -339,6 +342,86 @@ uv sync --extra metal
 
 ```bash
 uv sync --extra build
+```
+
+#### 日常使用（CPU 版示例）
+
+**1. 正常启动（相当于“步骤2-启动Qt界面.bat”）**
+
+先激活 `.venv`，然后运行：
+
+```bash
+python -m desktop_qt_ui.main
+```
+
+**2. 检查更新后启动（相当于“步骤3-检查更新并启动.bat”）**
+
+```bash
+git pull
+uv sync --extra cpu
+python -m desktop_qt_ui.main
+```
+
+**3. 更新依赖 / 补齐依赖（相当于“步骤4-更新维护.bat”里的“更新/安装依赖”）**
+
+```bash
+uv sync --extra cpu
+```
+
+**4. 完整更新（代码 + 依赖）**
+
+```bash
+git pull
+uv sync --extra cpu
+```
+
+**5. 删除并重建环境**
+
+如果当前终端已经激活了 `.venv`，可以先执行：
+
+```bash
+deactivate
+```
+
+然后删除 `.venv` 目录并重新创建：
+
+**Windows PowerShell**：
+```powershell
+Remove-Item -Recurse -Force .venv
+uv venv --python 3.12
+.\.venv\Scripts\Activate.ps1
+uv sync --extra cpu
+```
+
+**Windows CMD**：
+```cmd
+rmdir /s /q .venv
+uv venv --python 3.12
+.\.venv\Scripts\activate.bat
+uv sync --extra cpu
+```
+
+**Linux / macOS**：
+```bash
+rm -rf .venv
+uv venv --python 3.12
+source .venv/bin/activate
+uv sync --extra cpu
+```
+
+> 💡 删除 `.venv` 只会清理当前项目的虚拟环境，不会卸载系统里的 `uv` 命令本身。
+
+#### 常见命令速查
+
+```bash
+# CPU 环境首次安装 / 补齐依赖
+uv sync --extra cpu
+
+# CPU 环境 + PyInstaller 打包依赖
+uv sync --extra cpu --extra build
+
+# 查看 uv 版本
+uv --version
 ```
 
 ### 5. 运行程序
