@@ -150,6 +150,8 @@ python -m manga_translator local -i path/to/image.png -o path/to/output
 ### 开发环境常用的已跟踪资源
 
 - 默认配置模板：`examples/config-example.json`
+- 模型下载源策略：`examples/model_sources.toml`
+- 环境变量示例：`.env.example`
 - 翻译器注册表：`examples/config/translators.json`
 - 资源目录：`fonts/`、`dict/`、`doc/`、`desktop_qt_ui/locales/`
 
@@ -166,9 +168,71 @@ python -m manga_translator local -i path/to/image.png -o path/to/output
 1. 开发态是否按项目根目录能加载到。
 2. PyInstaller spec 和 GitHub workflow 是否把它一起打进发布包。
 
-## 5. 本地开发流程
+## 5. 配置文件约定
 
-### 5.1 推荐启动顺序
+开发态与打包态都遵循“主配置 / 环境变量 / 独立资源文件分离”的原则：
+
+- `examples/config-example.json`
+  - 主配置模板
+  - 用于翻译流程主配置与 UI 默认配置
+- `.env.example`
+  - 环境变量示例
+  - 只放路径、API 地址、密钥等入口型变量
+- `examples/model_sources.toml`
+  - 模型下载源策略配置
+  - 不并入 `config.json` / `AppSettings`
+  - 不把策略内容写进 `.env`
+
+### 模型下载源配置
+
+模型下载统一由 `manga_translator/utils/inference.py` 中的 `ModelWrapper` 驱动。
+下载源策略通过独立文件 `examples/model_sources.toml` 控制。
+
+支持三种策略：
+
+- `official_first`
+  - 内置标准源 -> 内置镜像源
+- `mirror_first`
+  - 内置镜像源 -> 内置标准源
+- `custom`
+  - `custom.urls[key] -> builtin official -> builtin mirror`
+
+其中：
+- `builtin.official` / `builtin.mirror` 在示例文件中仅作只读参考
+- 运行时真正使用的 builtin URL 仍来自各模型类的 `_MODEL_MAPPING`
+- 可修改区只有 `[custom.urls]`
+
+### .env 与 MODEL_SOURCES_PATH
+
+如果不设置环境变量，程序默认读取：
+
+- 开发环境：`examples/model_sources.toml`
+- 打包环境：`_MEIPASS/examples/model_sources.toml`
+
+如需切换到外部配置文件，可在 `.env` 中设置：
+
+```env
+MODEL_SOURCES_PATH=/abs/path/to/model_sources.toml
+```
+
+推荐做法：
+- `.env` 只负责指向哪份 TOML
+- 具体下载源策略写在 `model_sources.toml`
+
+### 相关校验建议
+
+修改模型下载源相关逻辑后，至少检查：
+
+1. `tests/model_sources/test_model_sources.py`
+   - 路径优先级
+   - fallback
+   - 稳定文件名
+   - archive / hash 失败回退
+2. 开发环境默认路径是否正确读取 `examples/model_sources.toml`
+3. `.env` 中 `MODEL_SOURCES_PATH` 是否能覆盖默认路径
+4. 打包环境是否仍能从 `_MEIPASS/examples/` 读取默认 TOML
+
+## 6. 推荐启动顺序
 
 ```bash
 # 1. 创建并激活环境
@@ -190,7 +254,7 @@ python -m desktop_qt_ui.main
 python -m manga_translator web --host 127.0.0.1 --port 8000 -v
 ```
 
-### 5.2 常见改动落点
+### 6.1 常见改动落点
 
 #### 新增一个设置项
 
@@ -248,7 +312,7 @@ python -m manga_translator web --host 127.0.0.1 --port 8000 -v
 - `commands.py`
 - `selection_manager.py`
 
-## 6. 校验与调试
+## 7. 校验与调试
 
 ### 代码风格
 
@@ -272,7 +336,7 @@ ruff check desktop_qt_ui manga_translator --config desktop_qt_ui/ruff.toml
 
 - 详细排障流程请看 [DEBUGGING.md](DEBUGGING.md)
 
-## 7. 打包与发布
+## 8. 打包与发布
 
 ### 本地 PyInstaller 构建
 
@@ -314,13 +378,13 @@ python packaging/build_packages.py <version> --build both
 
 如果你新增了打包必须资源，请同步更新 workflow 中复制 `_internal` 的步骤。
 
-## 8. 开发建议
+## 9. 开发建议
 
 - 涉及配置、模板、字体、词典时，始终同时验证开发态和打包态路径。
 - 修改桌面端设置项时，至少检查默认配置、UI 文案、多语言文件和序列化兼容。
 - 修改发布流程时，别只看本地 `packaging/`，还要一起检查 GitHub Actions。
 
-## 9. 相关文档
+## 10. 相关文档
 
 - [安装指南](INSTALLATION.md)
 - [使用教程](USAGE.md)

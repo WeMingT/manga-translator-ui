@@ -12,6 +12,7 @@
 - [安装方式三：从源码运行](#安装方式三从源码运行)
 - [安装方式四：Docker部署](#安装方式四docker部署)
 - [安装方式五：macOS 原生运行（Apple Silicon）](#安装方式五macos原生运行apple-silicon)
+- [配置文件与环境变量](#配置文件与环境变量)
 - [故障排除](#故障排除)
 
 ---
@@ -574,6 +575,96 @@ A: 运行 `./macOS_4_更新维护.sh`，选择"完整更新"即可。
 2. 点击"开始翻译"按钮
 3. 等待翻译完成
 4. 结果会自动保存到输出文件夹
+
+---
+
+## 配置文件与环境变量
+
+### 推荐的配置分工
+
+项目中的配置建议按职责拆分：
+
+- `examples/config-example.json`
+  - 主配置模板
+  - 负责翻译流程主配置、UI 默认配置等
+- `.env.example`
+  - 环境变量示例
+  - 负责 API 地址、密钥、模型名、路径入口等
+- `examples/model_sources.toml`
+  - 模型下载源策略配置
+  - 负责控制模型下载时 custom / official / mirror 的优先级
+
+### .env 的用途
+
+建议把 `.env` 视为“入口层配置”：
+
+- LLM / OCR / 渲染等在线能力的 API Key
+- API Base URL
+- 默认模型名
+- 外部配置文件路径（如 `MODEL_SOURCES_PATH`）
+
+例如常见变量包括：
+
+- 翻译器
+  - `OPENAI_API_KEY`
+  - `OPENAI_API_BASE`
+  - `OPENAI_MODEL`
+  - `GEMINI_API_KEY`
+  - `GEMINI_API_BASE`
+  - `GEMINI_MODEL`
+- OCR
+  - `OCR_OPENAI_API_KEY`
+  - `OCR_OPENAI_API_BASE`
+  - `OCR_GEMINI_API_KEY`
+  - `OCR_GEMINI_API_BASE`
+- 上色 / 渲染
+  - `COLOR_OPENAI_API_KEY`
+  - `COLOR_OPENAI_API_BASE`
+  - `RENDER_OPENAI_API_KEY`
+  - `RENDER_OPENAI_API_BASE`
+
+更完整的变量说明请查看：
+- [API 配置](API_CONFIG.md)
+- [设置说明](SETTINGS.md)
+
+### MODEL_SOURCES_PATH
+
+如果你要让程序读取外部的 `model_sources.toml`，请在 `.env` 中设置：
+
+```env
+MODEL_SOURCES_PATH=/abs/path/to/model_sources.toml
+```
+
+未设置时，程序默认读取：
+
+- 开发环境：`examples/model_sources.toml`
+- 打包环境：`_MEIPASS/examples/model_sources.toml`
+
+### model_sources.toml 使用原则
+
+`examples/model_sources.toml` 中支持三种策略：
+
+- `official_first`
+- `mirror_first`
+- `custom`
+
+其中：
+
+- `[builtin.official]` / `[builtin.mirror]`
+  - 仅作只读参考，帮助你查看仓库当前内置下载源
+  - 运行时不会直接从这两个 section 读取 URL
+- `[custom.urls]`
+  - 是真正给用户修改的区域
+  - 当 `strategy = "custom"` 时，顺序固定为：
+    `custom.urls -> builtin official -> builtin mirror`
+
+### 快速上手
+
+1. 复制 `.env.example` 为 `.env`
+2. 按需填写 API Key / API Base / 模型名
+3. 如有需要，在 `.env` 中设置 `MODEL_SOURCES_PATH`
+4. 修改对应的 `model_sources.toml`
+5. 正常启动程序即可
 
 ---
 

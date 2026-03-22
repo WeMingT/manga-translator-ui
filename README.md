@@ -36,7 +36,7 @@
 | [工作流程](doc/WORKFLOWS.md) | 7 种工作流程、AI 断句、自定义模版 |
 | [设置说明](doc/SETTINGS.md) | 翻译器配置、OCR 模型、参数详解 |
 | [调试指南](doc/DEBUGGING.md) | 调试流程、可调节参数、问题排查 |
-| [开发者指南](doc/DEVELOPMENT.md) | 项目结构、环境配置、构建打包 |
+| [开发者指南](doc/DEVELOPMENT.md) | 项目结构、环境配置、构建打包、模型下载源配置 |
 
 ---
 
@@ -82,7 +82,7 @@
 - ⌨️ **快捷键支持** - 支持 A/D 切换图片，Q/W/E 切换工具，Ctrl+Q/W/E 进行文件操作
 - 🖱️ **鼠标滚轮快捷键** - Ctrl+滚轮缩放文本框，Shift+滚轮调整画笔大小
 
-**完整功能特性** → [doc/FEATURES.md](doc/FEATURES.md)
+**完整功能特性** → [功能特性](doc/FEATURES.md)
 
 ---
 
@@ -161,7 +161,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 - 🌐 用户界面：`http://localhost:8000`
 - 🔧 管理界面：`http://localhost:8000/admin.html`
 
-> 📖 **详细安装教程**：[Docker 部署文档](doc/INSTALLATION.md#安装方式四docker部署)  
+> 📖 **详细安装教程**：[安装指南（Docker 部署）](doc/INSTALLATION.md#安装方式四docker部署)
 > 📖 **使用教程**：[命令行使用指南](doc/CLI_USAGE.md)
 
 #### 方式四：从源码运行（开发者）
@@ -194,7 +194,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
    python -m manga_translator web
    ```
 
-> 📖 **详细安装教程**：[安装指南](doc/INSTALLATION.md)  
+> 📖 **详细安装教程**：[安装指南](doc/INSTALLATION.md)
 > 📖 **使用教程**：[命令行使用指南](doc/CLI_USAGE.md)
 
 #### 方式五：macOS 原生运行 (Apple Silicon)
@@ -245,13 +245,27 @@ chmod +x macOS_*.sh
 
 ---
 
+## ⚙️ 配置文件说明
+
+常用配置入口：
+- 主配置模板：`examples/config-example.json`
+- 模型下载源策略：`examples/model_sources.toml`
+- 环境变量示例：`.env.example`
+
+如果你需要自定义模型下载源顺序、使用外部 `model_sources.toml`、或查看完整开发态配置说明，请直接看：
+- [开发者指南](doc/DEVELOPMENT.md)
+- [安装指南](doc/INSTALLATION.md)
+- [API 配置教程](doc/API_CONFIG.md)
+
+---
+
 ## 📖 使用教程
 
 ### 🖥️ Qt 界面模式
 
 安装完成后，请查看使用教程了解如何翻译图片：
 
-**使用教程** → [doc/USAGE.md](doc/USAGE.md)
+**使用教程** → [使用教程](doc/USAGE.md)
 
 基本步骤：
 1. 填写 API（如使用在线翻译器）→ [API 配置教程](doc/API_CONFIG.md)
@@ -267,7 +281,7 @@ chmod +x macOS_*.sh
 
 适合批量处理和自动化脚本：
 
-**命令行指南** → [doc/CLI_USAGE.md](doc/CLI_USAGE.md)
+**命令行指南** → [命令行使用指南](doc/CLI_USAGE.md)
 
 > ⚠️ **重要提示**：使用命令行前，请先在项目目录激活虚拟环境：
 > ```bash
@@ -307,7 +321,7 @@ python -m manga_translator --help
 3. **导出原文** - 仅检测识别，导出原文用于手动翻译
 4. **导入翻译并渲染** - 从 TXT/JSON 导入翻译内容重新渲染
 
-**工作流程详解** → [doc/WORKFLOWS.md](doc/WORKFLOWS.md)
+**工作流程详解** → [工作流程说明](doc/WORKFLOWS.md)
 
 ---
 
@@ -323,7 +337,7 @@ python -m manga_translator --help
 - **高质量翻译 Gemini** - 使用 Gemini 多模态模型
 - 📸 结合图片上下文，翻译更准确
 
-**完整设置说明** → [doc/SETTINGS.md](doc/SETTINGS.md)
+**完整设置说明** → [设置说明](doc/SETTINGS.md)
 
 ---
 
@@ -336,7 +350,7 @@ python -m manga_translator --help
 3. 调整检测器和 OCR 参数
 4. 排查完成后按文档清理旧日志（避免 `result/` 目录过大）
 
-**调试流程指南** → [doc/DEBUGGING.md](doc/DEBUGGING.md)
+**调试流程指南** → [调试指南](doc/DEBUGGING.md)
 
 ---
 

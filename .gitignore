@@ -12,6 +12,7 @@ Miniconda3/
 # Environment files (contain sensitive information)
 .env
 .env.*
+!.env.example
 
 # Presets directory (contains API keys and sensitive configuration)
 presets/
