@@ -232,6 +232,8 @@ D:\manga-translator-ui\          # 你选择的安装目录
 
 适合开发者或想自定义的用户。
 
+> ℹ️ 说明：当前项目默认仍以 **Conda / Miniforge + `requirements_*.txt`** 路线为主。仓库根目录中的 `pyproject.toml` / `uv.lock` 目前只作为**可选**的 uv 开发工作流入口，现有安装脚本、CI 和 Docker 暂未切换到 uv。
+
 ### 1. 克隆仓库
 
 ```bash
@@ -239,7 +241,7 @@ git clone https://github.com/hgmzhn/manga-translator-ui.git
 cd manga-translator-ui
 ```
 
-### 2. 安装依赖
+### 2. 默认方式：安装 requirements 依赖
 
 ```bash
 # CPU 版本
@@ -249,7 +251,78 @@ pip install -r requirements_cpu.txt
 pip install -r requirements_gpu.txt
 ```
 
-### 3. 运行程序
+如需其他平台：
+
+```bash
+# AMD GPU（实验性）
+pip install -r requirements_amd.txt
+
+# Apple Silicon / Metal
+pip install -r requirements_metal.txt
+```
+
+### 3. 可选方式：使用 uv（测试中）
+
+如果你想测试 uv 依赖管理流程，可以使用仓库根目录中的 `pyproject.toml` / `uv.lock`。
+
+安装 uv：
+
+**Windows PowerShell**：
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**Linux / macOS**：
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+创建并激活虚拟环境：
+
+```bash
+uv venv --python 3.12
+```
+
+**Windows PowerShell**：
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+**Windows CMD**：
+```cmd
+.\.venv\Scripts\activate.bat
+```
+
+**Linux / macOS**：
+```bash
+source .venv/bin/activate
+```
+
+同步依赖：
+
+```bash
+# CPU
+uv sync --extra cpu
+
+# NVIDIA GPU（CUDA 12.x）
+uv sync --extra gpu
+
+# AMD GPU（实验性，仅同步非 torch / 非 ROCm 特殊安装部分）
+uv sync --extra amd
+
+# Apple Silicon / Metal
+uv sync --extra metal
+```
+
+如需打包相关依赖：
+
+```bash
+uv sync --extra build
+```
+
+> ⚠️ 注意：AMD 的 ROCm PyTorch 目前仍依赖现有安装脚本 / `packaging/launch.py` 的特殊处理，`uv sync --extra amd` 现在主要覆盖非 torch 依赖。
+
+### 4. 运行程序
 
 ```bash
 # 运行 PyQt6 界面
@@ -422,7 +495,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 **部署完成后**：
 - 🌐 **用户界面**：`http://服务器IP:8000` - 上传图片进行翻译
 - 🔧 **管理界面**：`http://服务器IP:8000/admin.html` - 配置翻译器和参数（需要管理员密码）
-- 📖 **使用教程**：[命令行使用指南](CLI_USAGE.md) - 了解更多功能和命令行模式
+- 📖 **使用教程**：[命令行模式](CLI_USAGE.md) - 了解更多功能和命令行模式
 
 ---
 
@@ -557,7 +630,7 @@ A: 运行 `./macOS_4_更新维护.sh`，选择"完整更新"即可。
 1. 在"基础设置"中找到"翻译器"下拉菜单
 2. 首次使用推荐选择：
    - **高质量翻译 OpenAI** 或 **高质量翻译 Gemini**（多模态，看图翻译，效果最好）⭐ 强烈推荐
-   - 需要配置 API Key → [查看 API 配置教程](API_CONFIG.md)
+   - 需要配置 API Key → [API 配置](API_CONFIG.md)
 
 ### 5. 添加图片
 

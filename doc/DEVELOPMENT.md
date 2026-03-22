@@ -8,9 +8,15 @@
 
 - 当前仓库以 **Python 3.12** 为基线。
 - `packaging/launch.py` 和 GitHub Actions 也都按 Python 3.12 运行。
-- 可以使用 `venv`、Conda 或项目安装脚本创建环境，不强制要求环境名必须叫 `manga-env`。
+- 当前默认安装路径仍是 Conda / Miniforge + `requirements_*.txt`。
+- 手动开发时也可以使用 `venv`、Conda 或项目安装脚本创建环境，不强制要求环境名必须叫 `manga-env`。
+- 如果你想测试 uv，仓库根目录也提供了 `pyproject.toml` / `uv.lock`。
 
 ### 依赖安装
+
+当前仓库的**默认依赖安装方式**仍然是 `requirements_*.txt`。`uv` 目前只是一个**可选的开发工作流**，用于测试标准化依赖定义，不替代现有安装脚本、CI 和 Docker。
+
+#### 默认方式：沿用 requirements
 
 按你的运行目标只安装一套依赖即可：
 
@@ -33,6 +39,69 @@ pip install -r requirements_metal.txt
 ```bash
 pip install pyinstaller
 ```
+
+#### 可选方式：使用 uv
+
+仓库根目录已提供 `pyproject.toml` / `uv.lock`，供开发者测试 uv 依赖管理流程。
+
+安装 uv：
+
+**Windows PowerShell**：
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**Linux / macOS**：
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+创建虚拟环境：
+
+```bash
+uv venv --python 3.12
+```
+
+激活环境：
+
+**Windows PowerShell**：
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+**Windows CMD**：
+```cmd
+.\.venv\Scripts\activate.bat
+```
+
+**Linux / macOS**：
+```bash
+source .venv/bin/activate
+```
+
+同步依赖：
+
+```bash
+# CPU
+uv sync --extra cpu
+
+# NVIDIA GPU（CUDA 12.x）
+uv sync --extra gpu
+
+# AMD GPU（实验性，仅同步非 torch / 非 ROCm 特殊安装部分）
+uv sync --extra amd
+
+# Apple Silicon / Metal
+uv sync --extra metal
+```
+
+如果你要做打包相关工作，还可以：
+
+```bash
+uv sync --extra build
+```
+
+> 注意：AMD 的 ROCm PyTorch 当前仍依赖现有安装脚本 / `packaging/launch.py` 的特殊处理，`uv sync --extra amd` 目前主要覆盖非 torch 依赖。
 
 ## 2. 仓库结构
 

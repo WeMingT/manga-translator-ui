@@ -36,7 +36,7 @@
 | [工作流程](doc/WORKFLOWS.md) | 7 种工作流程、AI 断句、自定义模版 |
 | [设置说明](doc/SETTINGS.md) | 翻译器配置、OCR 模型、参数详解 |
 | [调试指南](doc/DEBUGGING.md) | 调试流程、可调节参数、问题排查 |
-| [开发者指南](doc/DEVELOPMENT.md) | 项目结构、环境配置、构建打包、模型下载源配置 |
+| [开发者指南](doc/DEVELOPMENT.md) | 项目结构、环境配置、构建打包、模型下载源配置、可选 uv 工作流 |
 
 ---
 
@@ -162,7 +162,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 - 🔧 管理界面：`http://localhost:8000/admin.html`
 
 > 📖 **详细安装教程**：[安装指南（Docker 部署）](doc/INSTALLATION.md#安装方式四docker部署)
-> 📖 **使用教程**：[命令行使用指南](doc/CLI_USAGE.md)
+> 📖 **使用教程**：[命令行模式](doc/CLI_USAGE.md)
 
 #### 方式四：从源码运行（开发者）
 
@@ -178,24 +178,26 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
    ```bash
    # NVIDIA GPU
    pip install -r requirements_gpu.txt
-   
+
    # AMD GPU（仅 RX 7000/9000 系列）
    pip install -r requirements_amd.txt
-   
+
    # CPU 版本
    pip install -r requirements_cpu.txt
    ```
+
+   > ℹ️ 当前默认安装方式仍然是 `requirements_*.txt`。仓库根目录中的 `pyproject.toml` / `uv.lock` 仅作为**可选**的 uv 开发工作流入口，现有安装脚本、CI 和 Docker 还没有切换到 uv。
 4. **运行程序**：
    ```bash
    # 桌面 UI
    python -m desktop_qt_ui.main
-   
+
    # Web UI（可选）
    python -m manga_translator web
    ```
 
 > 📖 **详细安装教程**：[安装指南](doc/INSTALLATION.md)
-> 📖 **使用教程**：[命令行使用指南](doc/CLI_USAGE.md)
+> 📖 **使用教程**：[命令行模式](doc/CLI_USAGE.md)
 
 #### 方式五：macOS 原生运行 (Apple Silicon)
 
@@ -252,10 +254,10 @@ chmod +x macOS_*.sh
 - 模型下载源策略：`examples/model_sources.toml`
 - 环境变量示例：`.env.example`
 
-如果你需要自定义模型下载源顺序、使用外部 `model_sources.toml`、或查看完整开发态配置说明，请直接看：
+如果你需要自定义模型下载源顺序、使用外部 `model_sources.toml`、查看可选 uv 工作流，或查看完整开发态配置说明，请直接看：
 - [开发者指南](doc/DEVELOPMENT.md)
 - [安装指南](doc/INSTALLATION.md)
-- [API 配置教程](doc/API_CONFIG.md)
+- [API 配置](doc/API_CONFIG.md)
 
 ---
 
@@ -268,20 +270,20 @@ chmod +x macOS_*.sh
 **使用教程** → [使用教程](doc/USAGE.md)
 
 基本步骤：
-1. 填写 API（如使用在线翻译器）→ [API 配置教程](doc/API_CONFIG.md)
+1. 填写 API（如使用在线翻译器）→ [API 配置](doc/API_CONFIG.md)
 2. 关闭 GPU（仅 CPU 版本）
 3. 设置输出目录
 4. 添加图片
 5. 选择翻译器
    - 首次使用推荐：**高质量翻译 OpenAI** 或 **高质量翻译 Gemini**
-   - 需要配置 API Key，参考 [API 配置教程](doc/API_CONFIG.md)
+   - 需要配置 API Key，参考 [API 配置](doc/API_CONFIG.md)
 6. 开始翻译
 
 ### ⌨️ 命令行模式
 
 适合批量处理和自动化脚本：
 
-**命令行指南** → [命令行使用指南](doc/CLI_USAGE.md)
+**命令行指南** → [命令行模式](doc/CLI_USAGE.md)
 
 > ⚠️ **重要提示**：使用命令行前，请先在项目目录激活虚拟环境：
 > ```bash
@@ -321,7 +323,7 @@ python -m manga_translator --help
 3. **导出原文** - 仅检测识别，导出原文用于手动翻译
 4. **导入翻译并渲染** - 从 TXT/JSON 导入翻译内容重新渲染
 
-**工作流程详解** → [工作流程说明](doc/WORKFLOWS.md)
+**工作流程详解** → [工作流程](doc/WORKFLOWS.md)
 
 ---
 
