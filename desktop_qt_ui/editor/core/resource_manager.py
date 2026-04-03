@@ -352,9 +352,12 @@ class ResourceManager:
         }
 
     def log_memory_snapshot(self, stage: str, logger=None) -> Dict[str, Any]:
-        snapshot = self.get_memory_snapshot()
         target_logger = logger or self.logger
-        target_logger.info(
+        if not target_logger.isEnabledFor(logging.DEBUG):
+            return {}
+
+        snapshot = self.get_memory_snapshot()
+        target_logger.debug(
             "Memory snapshot [%s]: process=%.2fMB managed_images=%s managed=%.2fMB masks=%.2fMB temp_cache=%.2fMB weak_cache=%s/%s keys=%s",
             stage,
             snapshot["process_bytes"] / (1024 * 1024),
