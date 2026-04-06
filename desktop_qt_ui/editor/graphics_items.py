@@ -640,13 +640,74 @@ class RegionTextItem(QGraphicsItemGroup):
             snap_dx = best_dx
             if guide_x_info:
                 x, y1, y2 = guide_x_info
-                guides.append(((x, y1), (x, y2))) # 垂直线标识
+                guides.append({"kind": "vertical", "x": x})
         if best_dy is not None and best_dy_dist <= threshold:
             snap_dy = best_dy
             if guide_y_info:
                 y, x1, x2 = guide_y_info
-                guides.append(((x1, y), (x2, y))) # 水平线标识
+                guides.append({"kind": "horizontal", "y": y})
         return snap_dx, snap_dy, guides
+
+    def _visible_scene_rect(self, scene: QGraphicsScene) -> QRectF:
+        """返回当前视图联合后的可见场景区域。"""
+        visible_rect = QRectF()
+        has_visible_rect = False
+        for view in scene.views():
+            view_rect = view.mapToScene(view.viewport().rect()).boundingRect()
+            if not has_visible_rect:
+                visible_rect = view_rect
+                has_visible_rect = True
+            else:
+                visible_rect = visible_rect.united(view_rect)
+        if not has_visible_rect or visible_rect.isNull():
+            visible_rect = scene.sceneRect()
+        return visible_rect
+
+    def _build_guide_line(self, scene: QGraphicsScene, visible_rect: QRectF, extent: float, pen: QPen, guide_spec):
+        """根据辅助线描述创建场景线条，兼容显式方向和端点线段两种格式。"""
+        if isinstance(guide_spec, dict):
+            kind = guide_spec.get("kind")
+            if kind == "vertical":
+                x = guide_spec.get("x")
+                if x is None:
+                    return None
+                return scene.addLine(x, visible_rect.top(), x, visible_rect.bottom(), pen)
+            if kind == "horizontal":
+                y = guide_spec.get("y")
+                if y is None:
+                    return None
+                return scene.addLine(visible_rect.left(), y, visible_rect.right(), y, pen)
+            if kind == "segment":
+                start = guide_spec.get("start")
+                end = guide_spec.get("end")
+                if start is None or end is None:
+                    return None
+                x1, y1 = start
+                x2, y2 = end
+            else:
+                return None
+        else:
+            try:
+                (x1, y1), (x2, y2) = guide_spec
+            except (TypeError, ValueError):
+                return None
+
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 0.001:
+            return None
+        if abs(dx) < 0.001:
+            return scene.addLine(x1, visible_rect.top(), x1, visible_rect.bottom(), pen)
+        if abs(dy) < 0.001:
+            return scene.addLine(visible_rect.left(), y1, visible_rect.right(), y1, pen)
+
+        ux, uy = dx / length, dy / length
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        return scene.addLine(
+            cx - extent * ux, cy - extent * uy,
+            cx + extent * ux, cy + extent * uy,
+            pen
+        )
 
     def _show_guide_lines(self, guide_specs: list, is_rotation: bool = False):
         """在场景中绘制全屏的对齐/旋转辅助虚线。"""
@@ -654,23 +715,12 @@ class RegionTextItem(QGraphicsItemGroup):
         scene = self.scene()
         if scene is None or not guide_specs:
             return
-            
-        # 计算所有视图的可视区域并取并集
-        visible_rect = None
-        views = scene.views()
-        if views:
-            for view in views:
-                view_rect = view.mapToScene(view.viewport().rect()).boundingRect()
-                if visible_rect is None:
-                    visible_rect = view_rect
-                else:
-                    visible_rect = visible_rect.united(view_rect)
-        if visible_rect is None:
-            visible_rect = scene.sceneRect()
-            
+
+        visible_rect = self._visible_scene_rect(scene)
+
         # 根据可视区域对角线计算一个足够长的延伸距离
         extent = 2.0 * math.hypot(visible_rect.width(), visible_rect.height())
-        
+
         # 旋转时用橙黄色，平移吸附用青色
         if is_rotation:
             pen = QPen(QColor(255, 165, 0, 255), 1.5)
@@ -678,25 +728,11 @@ class RegionTextItem(QGraphicsItemGroup):
             pen = QPen(QColor(0, 255, 255, 255), 2.0)
         pen.setCosmetic(True)
         pen.setStyle(Qt.PenStyle.DashLine)
-        
-        for (x1, y1), (x2, y2) in guide_specs:
-            dx, dy = x2 - x1, y2 - y1
-            length = math.hypot(dx, dy)
-            if abs(dx) < 0.001:
-                # 垂直线：贯穿可视区域上下边界
-                line = scene.addLine(x1, visible_rect.top(), x1, visible_rect.bottom(), pen)
-            elif abs(dy) < 0.001:
-                # 水平线：贯穿可视区域左右边界
-                line = scene.addLine(visible_rect.left(), y1, visible_rect.right(), y1, pen)
-            else:
-                # 斜线：向两侧各延伸 extent
-                ux, uy = dx / length, dy / length
-                cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-                line = scene.addLine(
-                    cx - extent * ux, cy - extent * uy,
-                    cx + extent * ux, cy + extent * uy,
-                    pen
-                )
+
+        for guide_spec in guide_specs:
+            line = self._build_guide_line(scene, visible_rect, extent, pen, guide_spec)
+            if line is None:
+                continue
             line.setZValue(9999) # 确保层级最高
             self._guide_lines.append(line)
 
@@ -930,11 +966,10 @@ class RegionTextItem(QGraphicsItemGroup):
                     handle, _ = self._get_handle_at(local_pos)
                     if handle == "rotate":
                         self._show_angle_input_dialog()
-                    event.accept()
-                    return
-                else:
-                    super().mousePressEvent(event)
-                    return
+                        event.accept()
+                        return
+                super().mousePressEvent(event)
+                return
             else:
                 super().mousePressEvent(event)
         except Exception as e:
