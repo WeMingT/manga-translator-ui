@@ -188,10 +188,17 @@ def CJK_Compatibility_Forms_translate(cdpt: str, direction: int):
     return cdpt, 0
 
 
+def _compact_period_run(match: re.Match[str]) -> str:
+    dots = match.group(0)
+    ellipsis_count, remainder = divmod(len(dots), 3)
+    return ('…' * ellipsis_count) + ('.' * remainder)
+
+
 def compact_special_symbols(text: str) -> str:
-    text = (text or '').replace('...', '…').replace('..', '…')
-    text = re.sub(r'…{3,}', '……', text).replace('…', '⋯')
-    return re.sub(r'([。，、！？；：…—～「」『』【】（）《》〈〉.,!?;:\-])[ 　]+', r'\1', text)
+    text = text or ''
+    # Preserve author-entered spaces. Only normalize runs of ASCII periods so
+    # baseline rendering can use the ellipsis glyph without collapsing groups.
+    return re.sub(r'\.{3,}', _compact_period_run, text)
 
 
 def auto_add_horizontal_tags(text: str) -> str:

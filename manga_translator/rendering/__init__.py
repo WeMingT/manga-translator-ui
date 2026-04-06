@@ -199,18 +199,17 @@ def calc_text_block_dimensions(text: str, is_horizontal: bool, line_spacing: flo
     )
 
     if is_horizontal:
-        lines, widths = text_render.calc_horizontal(
-            base_font, text_for_calc,
-            max_width=99999, max_height=99999,
-            language=target_lang or 'en_US',
-            letter_spacing=letter_spacing
-        )
-        if widths:
+        normalized_lines = re.sub(r'\r\n?|\n', '\n', text_for_calc).split('\n')
+        if any(line for line in normalized_lines):
+            widths = [
+                text_render.get_string_width(base_font, line_text, letter_spacing=letter_spacing)
+                for line_text in normalized_lines
+            ]
             spacing_y = text_render.calc_horizontal_line_spacing_px(base_font, line_spacing)
-            # 和后端渲染一致：最大行宽 + 行间距
-            base_width = max(widths)
-            base_height = base_font * len(lines) + spacing_y * max(0, len(lines) - 1)
-            return base_width, base_height, len(lines)
+            # 测量链路直接按原始行文本量宽，避免英文断行器折叠连续空格。
+            base_width = max(widths, default=0)
+            base_height = base_font * len(normalized_lines) + spacing_y * max(0, len(normalized_lines) - 1)
+            return base_width, base_height, len(normalized_lines)
     else:
         lines, heights = text_render.calc_vertical(
             base_font, text_for_calc,
