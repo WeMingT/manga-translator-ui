@@ -1296,8 +1296,6 @@ class MainAppLogic(QObject):
             },
             "renderer": {
                 "default": "Default",
-                "manga2eng": "Manga2Eng",
-                "manga2eng_pillow": "Manga2Eng Pillow",
                 "openai_renderer": "OpenAI Renderer",
                 "gemini_renderer": "Gemini Renderer",
                 "none": self._t("translator_none"),

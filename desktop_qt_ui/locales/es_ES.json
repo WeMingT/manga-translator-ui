@@ -891,7 +891,7 @@
   "desc_inpainter_inpainting_precision": "Precisión de restauración. fp32 es más preciso pero más lento; fp16 es equilibrado; bf16 recomendado.",
   "desc_kernel_size": "Tamaño del kernel de borrado de texto (predeterminado 3). Controla la precisión del borrado de texto.",
   "desc_inpainter_force_use_torch_inpainting": "Forzar motor PyTorch para restauración (CPU predeterminado usa ONNX). Usar cuando ONNX tiene problemas.",
-  "desc_render_renderer": "Motor de renderizado. default es el renderizador estándar; manga2eng_pillow para estilo Manga2Eng. openai_renderer y gemini_renderer requieren la API Key correspondiente en API Keys (.env). Las API Keys de Google Cloud o relacionadas con Vertex también pueden ponerse directamente en Gemini; deja Base URL en la dirección oficial predeterminada, sin cambios.",
+  "desc_render_renderer": "Motor de renderizado. default es el renderizador estándar; openai_renderer y gemini_renderer requieren la API Key correspondiente en API Keys (.env). Las API Keys de Google Cloud o relacionadas con Vertex también pueden ponerse directamente en Gemini; deja Base URL en la dirección oficial predeterminada, sin cambios.",
   "desc_render_alignment": "Alineación de texto. auto detecta automáticamente; left/center/right para alineación específica.",
   "desc_render_disable_font_border": "Deshabilitar efecto de trazo de fuente (eliminar bordes de texto).",
   "desc_render_font_size_offset": "Desplazamiento del tamaño de fuente. Positivo aumenta la fuente, negativo la disminuye.",

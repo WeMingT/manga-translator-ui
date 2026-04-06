@@ -58,11 +58,15 @@ def hex2rgb(h):
 
 class Renderer(str, Enum):
     default = "default"  # Qt 离屏渲染器
-    manga2Eng = "manga2eng"
-    manga2EngPillow = "manga2eng_pillow"
     openai_renderer = "openai_renderer"
     gemini_renderer = "gemini_renderer"
     none = "none"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str) and value.lower() in {"manga2eng", "manga2eng_pillow"}:
+            return cls.default
+        raise ValueError(f"{value} is not a valid {cls.__name__}")
 
 class Alignment(str, Enum):
     auto = "auto"
@@ -147,7 +151,7 @@ class Upscaler(str, Enum):
 
 class RenderConfig(BaseModel):
     renderer: Renderer = Renderer.default
-    """Render english text translated from manga with some additional typesetting. Ignores some other argument options"""
+    """Rendering engine selection."""
     force_strict_layout: bool = False
     """Force renderer to strictly adhere to the bounding box, like in --load-text mode."""
     alignment: Alignment = Alignment.auto

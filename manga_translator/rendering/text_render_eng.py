@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import cv2
 import numpy as np
@@ -6,13 +6,87 @@ from PIL import Image
 
 from ..utils import TextBlock, get_logger, rect_distance
 from .ballon_extractor import extract_ballon_region
-from .text_render import add_color, get_char_offset_x, put_char_horizontal
+from .text_render import add_color, get_char_offset_x, get_string_width, put_char_horizontal
 
 logger = get_logger('text_render_eng')
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 PUNSET_RIGHT_ENG = {'.', '?', '!', ':', ';', ')', '}', "\""}
+
+
+def _write_region_br_from_lines(region: TextBlock, lines: List[str]) -> None:
+    normalized_lines = [str(line).strip() for line in lines if str(line).strip()]
+    if not normalized_lines:
+        return
+    region.translation = '[BR]'.join(normalized_lines)
+
+
+def _apply_english_case_preferences(text: str, config: Any = None) -> str:
+    render_cfg = getattr(config, 'render', None) if config is not None else None
+    uppercase = bool(getattr(render_cfg, 'uppercase', False)) if render_cfg is not None else False
+    lowercase = bool(getattr(render_cfg, 'lowercase', False)) if render_cfg is not None else False
+
+    if uppercase:
+        return text.upper()
+    if lowercase:
+        return text.lower()
+    return text
+
+
+def _english_hyphenate_enabled(config: Any = None) -> bool:
+    return not (config and hasattr(config, 'render') and getattr(config.render, 'no_hyphenation', False))
+
+
+def _resolve_english_layout_language(target_lang: str) -> str:
+    normalized = str(target_lang or '').strip().upper()
+    if normalized in {'ENG', 'EN', 'EN_US', 'EN-EN', 'ENGLISH'}:
+        return 'en_US'
+    return target_lang or 'en_US'
+
+
+def _hyphenate_overflowing_single_word_lines(
+    lines: List[str],
+    font_size: int,
+    max_width: int,
+    target_lang: str,
+    letter_spacing: float = 1.0,
+    *,
+    enabled: bool,
+) -> List[str]:
+    if not enabled or max_width <= 0:
+        return lines
+    normalized_lines: List[str] = []
+    from .auto_linebreak import _layout_horizontal_eng
+
+    for raw_line in lines:
+        line = str(raw_line).strip()
+        if not line:
+            continue
+        if ' ' in line or get_string_width(font_size, line, letter_spacing=letter_spacing) <= max_width:
+            normalized_lines.append(line)
+            continue
+
+        split_lines, _ = _layout_horizontal_eng(
+            font_size,
+            line,
+            max_width,
+            language=_resolve_english_layout_language(target_lang),
+            hyphenate=True,
+            letter_spacing=letter_spacing,
+        )
+        split_lines = [str(part).strip() for part in split_lines if str(part).strip()]
+        if len(split_lines) <= 1:
+            normalized_lines.append(line)
+            continue
+
+        for idx, part in enumerate(split_lines):
+            if idx < len(split_lines) - 1 and not part.endswith('-'):
+                normalized_lines.append(f'{part}-')
+            else:
+                normalized_lines.append(part)
+
+    return normalized_lines
 
 
 class Textline:
@@ -96,13 +170,16 @@ def render_lines(
     #     d.text((line.pos_x, line.pos_y), line.text, font=font, fill=font_color, stroke_width=font_size, stroke_fill=stroke_color)
     # return c
 
-def seg_eng(text: str) -> List[str]:
+def seg_eng(text: str, uppercase: bool = True) -> List[str]:
     """
     Extracts every word from text parameter
     """
     # TODO: replace with regexes
 
-    text = text.strip().upper().replace('  ', ' ').replace(' .', '.').replace('\n', ' ')
+    text = text.strip()
+    if uppercase:
+        text = text.upper()
+    text = text.replace('  ', ' ').replace(' .', '.').replace('\n', ' ')
     processed_text = ''
 
     # dumb way to ensure spaces between words
@@ -157,6 +234,109 @@ def seg_eng(text: str) -> List[str]:
             continue
         words.append(word)
     return words
+
+
+def apply_manga2eng_line_breaks(
+    region: TextBlock,
+    original_img: np.ndarray = None,
+    seed_font_size: int = None,
+    delimiter: str = ' ',
+    config: Any = None,
+    letter_spacing: float = 1.0,
+) -> bool:
+    original_translation = str(getattr(region, 'translation', '') or '')
+    text = _apply_english_case_preferences(original_translation, config)
+    if text != original_translation:
+        region.translation = text
+    if not text.strip():
+        return text != original_translation
+
+    words = seg_eng(text, uppercase=False)
+    font_size = max(int(seed_font_size or getattr(region, 'font_size', 0) or 1), 1)
+    line_height = int(font_size * 0.8)
+    delimiter_len = get_char_offset_x(font_size, delimiter)
+    word_lengths = []
+    for word in words:
+        word_length = 0
+        for cdpt in word:
+            word_length += get_char_offset_x(font_size, cdpt)
+        word_lengths.append(word_length)
+
+    base_lines: List[str] = []
+    if not word_lengths or max(word_lengths) <= 0:
+        region.translation = text
+        return region.translation != original_translation
+
+    if len(words) > 1:
+        balloon_mask = None
+        enlarge_ratio = getattr(region, 'enlarge_ratio', None)
+        if not isinstance(enlarge_ratio, (int, float)) or not np.isfinite(enlarge_ratio) or enlarge_ratio <= 0:
+            try:
+                box_w = float(max(region.xywh[2], 1))
+                box_h = float(max(region.xywh[3], 1))
+                enlarge_ratio = min(max(box_w / box_h, box_h / box_w) * 1.5, 3)
+            except Exception:
+                enlarge_ratio = 1.0
+
+        if original_img is not None:
+            try:
+                balloon_mask, _ = extract_ballon_region(original_img, region.xywh, enlarge_ratio=enlarge_ratio)
+            except Exception as exc:
+                logger.debug(f"Manga2Eng line break mask extraction failed: {exc}")
+                balloon_mask = None
+
+        if not isinstance(balloon_mask, np.ndarray) or balloon_mask.size == 0 or np.count_nonzero(balloon_mask) == 0:
+            try:
+                box_w = max(int(round(float(region.xywh[2]))), 1)
+                max_width = max(int(box_w * 1.2), max(word_lengths))
+            except Exception:
+                max_width = max(word_lengths)
+
+            current_words = []
+            current_width = 0
+            for word, word_length in zip(words, word_lengths):
+                next_width = word_length if not current_words else current_width + delimiter_len + word_length
+                if current_words and next_width > max_width:
+                    base_lines.append(delimiter.join(current_words))
+                    current_words = [word]
+                    current_width = word_length
+                else:
+                    current_words.append(word)
+                    current_width = next_width
+            if current_words:
+                base_lines.append(delimiter.join(current_words))
+        else:
+            balloon_mask = np.asarray(balloon_mask, dtype=np.uint8)
+
+            try:
+                textlines = layout_lines_aligncenter(
+                    balloon_mask,
+                    words,
+                    word_lengths,
+                    delimiter_len,
+                    line_height,
+                    delimiter=delimiter,
+                )
+                base_lines = [line.text for line in textlines if getattr(line, 'text', '').strip()]
+            except Exception as exc:
+                logger.debug(f"Manga2Eng line break layout failed: {exc}")
+                base_lines = []
+
+    final_lines = _hyphenate_overflowing_single_word_lines(
+        base_lines if base_lines else [text],
+        font_size=font_size,
+        max_width=max(int(round(float(region.xywh[2]))), 1),
+        target_lang=getattr(region, 'target_lang', ''),
+        letter_spacing=letter_spacing,
+        enabled=_english_hyphenate_enabled(config),
+    )
+
+    lines = [line for line in final_lines if str(line).strip()]
+    if len(lines) > 1:
+        _write_region_br_from_lines(region, lines)
+    else:
+        region.translation = lines[0] if lines else text
+    return region.translation != original_translation
 
 def layout_lines_aligncenter(
     mask: np.ndarray, 
@@ -481,6 +661,7 @@ def render_textblock_list_eng(
             font_size, sw, line_height, delimiter_len, base_length, word_lengths = calculate_font_values(font_size, words)
 
         textlines = layout_lines_aligncenter(ballon_mask, words, word_lengths, delimiter_len, line_height, delimiter=delimiter)
+        _write_region_br_from_lines(region, [line.text for line in textlines])
 
         line_cy = np.array([line.pos_y for line in textlines]).mean() + line_height / 2
         region_cy = region_y + region_h / 2

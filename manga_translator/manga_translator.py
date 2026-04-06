@@ -22,7 +22,6 @@ from .config import Colorizer, Config, Inpainter, Renderer, Translator
 from .server_paths import normalize_server_resource_path
 from .utils import (
     BASE_PATH,
-    LANGUAGE_ORIENTATION_PRESETS,
     Context,
     ModelWrapper,
     TextBlock,
@@ -60,7 +59,6 @@ from .ocr import dispatch as dispatch_ocr
 from .ocr import prepare as prepare_ocr
 from .ocr import unload as unload_ocr
 from .rendering import dispatch as dispatch_rendering
-from .rendering import dispatch_eng_render, dispatch_eng_render_pillow
 from .textline_merge import dispatch as dispatch_textline_merge
 from .translators import (
     dispatch as dispatch_translation,
@@ -3370,12 +3368,6 @@ class MangaTranslator:
 
         if config.render.renderer == Renderer.none:
             output = render_base_img
-        # manga2eng currently only supports horizontal left to right rendering
-        elif (config.render.renderer == Renderer.manga2Eng or config.render.renderer == Renderer.manga2EngPillow) and ctx.text_regions and LANGUAGE_ORIENTATION_PRESETS.get(ctx.text_regions[0].target_lang) == 'h':
-            if config.render.renderer == Renderer.manga2EngPillow:
-                output = await dispatch_eng_render_pillow(render_base_img, ctx.img_rgb, ctx.text_regions, fallback_font_path)
-            else:
-                output = await dispatch_eng_render(render_base_img, ctx.img_rgb, ctx.text_regions, fallback_font_path, config.render.line_spacing)
         else:
             # Request debug image for balloon_fill mode when verbose
             need_debug_img = self.verbose and config.render.layout_mode == 'balloon_fill'

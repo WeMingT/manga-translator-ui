@@ -8,6 +8,9 @@ from bisect import bisect_left
 from dataclasses import dataclass
 from typing import Any, List, Tuple
 
+import numpy as np
+from shapely.geometry import Polygon
+
 from . import text_render
 from .text_render import (
     CJK_Compatibility_Forms_translate,
@@ -19,6 +22,7 @@ from .text_render import (
     get_string_width,
     select_hyphenator,
 )
+from ..utils.textblock import LANGUAGE_ORIENTATION_PRESETS
 
 _PYTHAINLP_DATA_DIR = os.path.join(tempfile.gettempdir(), "manga-translator-ui", "pythainlp-data")
 os.environ.setdefault("PYTHAINLP_DATA", _PYTHAINLP_DATA_DIR)
@@ -61,6 +65,67 @@ def _calculate_uniformity(values: List[float]) -> float:
 
 def _hyphenate_enabled(config: Any) -> bool:
     return not (config and hasattr(config, "render") and getattr(config.render, "no_hyphenation", False))
+
+
+def _resolve_current_region_render_horizontal(region: Any) -> bool:
+    forced_direction = getattr(region, "_direction", None)
+    if forced_direction != "auto":
+        if forced_direction in ("horizontal", "h"):
+            return True
+        if forced_direction in ("vertical", "v"):
+            return False
+    return bool(getattr(region, "horizontal", False))
+
+
+def _resolve_current_region_auto_direction(region: Any) -> str:
+    target_lang = getattr(region, "target_lang", None)
+    preset_direction = LANGUAGE_ORIENTATION_PRESETS.get(target_lang)
+    if preset_direction in ("h", "v", "hr", "vr"):
+        return preset_direction
+
+    lines = getattr(region, "lines", None)
+    if lines is not None and len(lines) > 0:
+        max_area = -1.0
+        largest_box_aspect_ratio = 1.0
+
+        for line in lines:
+            line_points = np.asarray(line, dtype=np.float64)
+            if line_points.ndim != 2 or line_points.shape[1] != 2:
+                continue
+
+            try:
+                area = float(Polygon(line_points).area)
+            except Exception:
+                area = 0.0
+
+            if area < max_area:
+                continue
+
+            max_area = area
+            x_coords = line_points[:, 0]
+            y_coords = line_points[:, 1]
+            width = float(np.max(x_coords) - np.min(x_coords))
+            height = float(np.max(y_coords) - np.min(y_coords))
+            largest_box_aspect_ratio = width / height if height > 0 else 1.0
+
+        return "v" if largest_box_aspect_ratio < 1.0 else "h"
+
+    return "v" if float(getattr(region, "aspect_ratio", 1.0)) < 1.0 else "h"
+
+
+def _current_region_direction_mismatch(region: Any) -> bool:
+    auto_direction = _resolve_current_region_auto_direction(region)
+    return auto_direction.startswith("h") != _resolve_current_region_render_horizontal(region)
+
+
+def should_force_no_wrap_single_region(region: Any) -> bool:
+    return bool(
+        region is not None
+        and hasattr(region, "lines")
+        and len(region.lines) == 1
+        and not _current_region_direction_mismatch(region)
+    )
+
 # ---------------------------------------------------------------------------
 # 竖排换行引擎（完全内嵌，不依赖 text_render.calc_vertical）
 # ---------------------------------------------------------------------------
@@ -835,6 +900,31 @@ def _measure_unwrapped_required_size(
     return 1, float(required_width), float(required_height)
 
 
+def _resolve_initial_segments(
+    text_len: int,
+    horizontal: bool,
+    bubble_width: float,
+    bubble_height: float,
+    seed_segments: int,
+) -> int:
+    if text_len <= 0:
+        return 1
+
+    try:
+        explicit_seed = int(seed_segments)
+    except (TypeError, ValueError):
+        explicit_seed = 0
+
+    if explicit_seed > 0:
+        return max(1, min(explicit_seed, text_len))
+
+    safe_width = bubble_width if isinstance(bubble_width, (int, float)) and bubble_width > 0 else 1.0
+    safe_height = bubble_height if isinstance(bubble_height, (int, float)) and bubble_height > 0 else 1.0
+    aspect_segments = safe_height / safe_width if horizontal else safe_width / safe_height
+    estimated_segments = int(round(aspect_segments))
+    return max(1, min(estimated_segments, text_len))
+
+
 # ---------------------------------------------------------------------------
 # 公开入口
 # ---------------------------------------------------------------------------
@@ -853,30 +943,35 @@ def solve_no_br_layout(
     config: Any = None,
     iterations: int = 3,
     letter_spacing_multiplier: float = 1.0,
+    adjust_font_size: bool = True,
 ) -> NoBrLayoutResult:
     clean_text = _normalize_no_br_text(text)
     if not clean_text:
         return NoBrLayoutResult("", max(1, min_font_size), 1, 0.0, 0.0)
     current_region = getattr(config, "_current_region", None) if config is not None else None
-    force_no_wrap_single_region = bool(
-        current_region is not None
-        and hasattr(current_region, "lines")
-        and len(current_region.lines) == 1
-    )
+    force_no_wrap_single_region = should_force_no_wrap_single_region(current_region)
 
     text_len = len(clean_text)
+    bw = bubble_width if isinstance(bubble_width, (int, float)) and bubble_width > 0 else 1.0
+    bh = bubble_height if isinstance(bubble_height, (int, float)) and bubble_height > 0 else 1.0
     safe_min_font = max(1, int(min_font_size))
     safe_max_font = max(safe_min_font, int(max_font_size))
     current_font = max(safe_min_font, min(int(seed_font_size), safe_max_font))
-    current_segments = max(1, min(int(seed_segments), text_len))
+    current_segments = _resolve_initial_segments(text_len, horizontal, bw, bh, seed_segments)
     line_spacing_multiplier = line_spacing_multiplier or 1.0
     letter_spacing_multiplier = letter_spacing_multiplier or 1.0
 
-    bw = bubble_width if isinstance(bubble_width, (int, float)) and bubble_width > 0 else 1.0
-    bh = bubble_height if isinstance(bubble_height, (int, float)) and bubble_height > 0 else 1.0
-
     if force_no_wrap_single_region:
         current_font = max(safe_min_font, min(int(seed_font_size), safe_max_font))
+        if not adjust_font_size:
+            _, required_width, required_height = _measure_unwrapped_required_size(
+                clean_text,
+                current_font,
+                horizontal,
+                config=config,
+                letter_spacing_multiplier=letter_spacing_multiplier,
+            )
+            return NoBrLayoutResult(clean_text, current_font, 1, required_width, required_height)
         for _ in range(max(1, int(iterations))):
             _, required_width, required_height = _measure_unwrapped_required_size(
                 clean_text,
@@ -940,11 +1035,17 @@ def solve_no_br_layout(
         if required_width <= 0 or required_height <= 0:
             break
 
+        next_segments = max(1, min(n_actual, text_len))
+        if not adjust_font_size:
+            if next_segments == current_segments:
+                return NoBrLayoutResult(text_with_br, current_font, n_actual, required_width, required_height)
+            current_segments = next_segments
+            continue
+
         fit_scale = min(bw / required_width, bh / required_height)
         if not math.isfinite(fit_scale) or fit_scale <= 0:
             fit_scale = 1.0
         next_font = max(safe_min_font, min(int(current_font * fit_scale), safe_max_font))
-        next_segments = max(1, min(n_actual, text_len))
 
         if next_font == current_font and next_segments == current_segments:
             return NoBrLayoutResult(text_with_br, current_font, n_actual, required_width, required_height)

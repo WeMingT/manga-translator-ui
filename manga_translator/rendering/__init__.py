@@ -26,11 +26,8 @@ from ..utils import (
     rotate_polygons,
 )
 from . import text_render, text_render_hq
-from .auto_linebreak import solve_no_br_layout
-from .text_render_eng import render_textblock_list_eng
-from .text_render_pillow_eng import (
-    render_textblock_list_eng as render_textblock_list_eng_pillow,
-)
+from .auto_linebreak import solve_no_br_layout, should_force_no_wrap_single_region
+from .text_render_eng import apply_manga2eng_line_breaks
 
 logger = get_logger('render')
 
@@ -102,6 +99,70 @@ def _apply_vertical_horizontal_markup(text: str, *, render_horizontally: bool, c
         return value
 
     return text_render.auto_add_horizontal_tags(value)
+
+
+def _has_explicit_line_breaks(text: str) -> bool:
+    return bool(re.search(r'(\[BR\]|【BR】|<br\s*/?>|\r\n|\r|\n)', str(text or ''), flags=re.IGNORECASE))
+
+
+def _should_apply_default_english_line_break_method(region: TextBlock) -> bool:
+    return (
+        str(getattr(region, 'target_lang', '') or '').upper() == 'ENG'
+        and _resolve_region_render_horizontal(region)
+        and not _has_explicit_line_breaks(getattr(region, 'translation', ''))
+    )
+
+
+def _apply_default_english_case_preferences(region: TextBlock, config: Config = None) -> bool:
+    if str(getattr(region, 'target_lang', '') or '').upper() != 'ENG':
+        return False
+    if not _resolve_region_render_horizontal(region):
+        return False
+
+    render_cfg = getattr(config, 'render', None) if config is not None else None
+    uppercase = bool(getattr(render_cfg, 'uppercase', False)) if render_cfg is not None else False
+    lowercase = bool(getattr(render_cfg, 'lowercase', False)) if render_cfg is not None else False
+
+    original_translation = str(getattr(region, 'translation', '') or '')
+    updated_translation = original_translation
+    if uppercase:
+        updated_translation = original_translation.upper()
+    elif lowercase:
+        updated_translation = original_translation.lower()
+
+    if updated_translation == original_translation:
+        return False
+
+    region.translation = updated_translation
+    return True
+
+
+def _apply_default_english_line_break_method(
+    region: TextBlock,
+    target_font_size: int,
+    original_img: np.ndarray = None,
+    config: Config = None,
+) -> bool:
+    if not _should_apply_default_english_line_break_method(region):
+        return False
+
+    region_font_path = getattr(region, 'font_path', '') or ''
+    resolved_font_path = _resolve_font_path(region_font_path)
+    if resolved_font_path:
+        text_render.set_font(resolved_font_path)
+    else:
+        text_render.set_font(text_render.DEFAULT_FONT)
+
+    applied = apply_manga2eng_line_breaks(
+        region,
+        original_img=original_img,
+        seed_font_size=target_font_size,
+        config=config,
+        letter_spacing=_resolve_letter_spacing_multiplier(region, config),
+    )
+    if applied:
+        logger.debug("[ENGLISH LINE BREAK] Applied Manga2Eng-style line breaking to default renderer")
+    return applied
 
 
 def calc_text_block_dimensions(text: str, is_horizontal: bool, line_spacing: float = 1.0,
@@ -241,6 +302,36 @@ def calc_font_from_box(width: float, height: float, text: str, is_horizontal: bo
             hi = mid - 1
 
     return max(1, int(lo))
+
+
+def _select_preserved_line_layout_font(
+    base_font_size: int,
+    width: float,
+    height: float,
+    text: str,
+    is_horizontal: bool,
+    line_spacing: float = 1.0,
+    config: Config = None,
+    target_lang: str = None,
+    letter_spacing: float = 1.0,
+) -> Tuple[int, int]:
+    base_font = max(int(base_font_size), 1)
+    line_font = max(
+        int(
+            calc_font_from_box(
+                width=width,
+                height=height,
+                text=text,
+                is_horizontal=is_horizontal,
+                line_spacing=line_spacing,
+                config=config,
+                target_lang=target_lang,
+                letter_spacing=letter_spacing,
+            )
+        ),
+        1,
+    )
+    return max(base_font, line_font), line_font
 
 
 def calc_box_from_font(font_size: int, text: str, is_horizontal: bool,
@@ -1120,6 +1211,8 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 dst_points_list.append(region.min_rect)
                 continue
 
+            _apply_default_english_case_preferences(region, config)
+
             # 判断是否需要气泡内居中：开启设置 且 区域确实在检测到的气泡内
             apply_bubble_centering = config.render.center_text_in_bubble
             if apply_bubble_centering and center_check_mask is not None and np.count_nonzero(center_check_mask) > 0:
@@ -1183,6 +1276,39 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 # region.font_size > 图像估算值
                 # render.font_size 作为固定字号，在统一出口覆盖布局结果。
                 region.layout_base_font_size = int(target_font_size)
+
+                english_auto_line_break_applied = _apply_default_english_line_break_method(
+                    region=region,
+                    target_font_size=target_font_size,
+                    original_img=original_img,
+                    config=config,
+                )
+                if english_auto_line_break_applied:
+                    render_horizontally = _resolve_region_render_horizontal(region)
+                    line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
+                    letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
+                    final_font_size = _apply_final_font_constraints(target_font_size, config)
+
+                    if resolved_region_font_path:
+                        text_render.set_font(resolved_region_font_path)
+                    else:
+                        text_render.set_font(text_render.DEFAULT_FONT)
+
+                    dst_points = _calc_region_dst_points_for_font(
+                        region=region,
+                        font_size=final_font_size,
+                        render_horizontally=render_horizontally,
+                        line_spacing_multiplier=line_spacing_multiplier,
+                        letter_spacing_multiplier=letter_spacing_multiplier,
+                        config=config,
+                        anchor_mode=skip_anchor_mode,
+                    )
+                    if dst_points is None:
+                        dst_points = region.min_rect
+
+                    region.font_size = final_font_size
+                    dst_points_list.append(dst_points)
+                    continue
 
             # --- Mode 5: balloon_fill (MUST BE FIRST to override other modes) ---
             if mode == 'balloon_fill':
@@ -1285,12 +1411,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                                 line_layout_max_font_size = int(max(configured_fixed_font_size, layout_min_font_size))
                                 layout_target_font_size = int(max(configured_fixed_font_size, layout_min_font_size))
 
-                            seed_segments = max(1, len(region.lines))
                             seed_font_size = int(max(min(layout_target_font_size, line_layout_max_font_size), layout_min_font_size))
                             no_br_result = solve_no_br_layout(
                                 text=region.translation,
                                 horizontal=render_horizontally,
-                                seed_segments=seed_segments,
+                                seed_segments=0,
                                 seed_font_size=seed_font_size,
                                 bubble_width=float(line_box_width),
                                 bubble_height=float(line_box_height),
@@ -1300,11 +1425,27 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                                 letter_spacing_multiplier=letter_spacing_multiplier,
                                 target_lang=region.target_lang,
                                 config=config,
+                                adjust_font_size=False,
                             )
                             region.translation = no_br_result.text_with_br
-                            layout_target_font_size = int(no_br_result.font_size)
+                            line_driven_font_size = max(
+                                int(
+                                    calc_font_from_box(
+                                        width=float(line_box_width),
+                                        height=float(line_box_height),
+                                        text=region.translation,
+                                        is_horizontal=render_horizontally,
+                                        line_spacing=line_spacing_multiplier,
+                                        config=config,
+                                        target_lang=region.target_lang,
+                                        letter_spacing=letter_spacing_multiplier,
+                                    )
+                                ),
+                                layout_min_font_size,
+                            )
+                            layout_target_font_size = max(int(layout_target_font_size), int(line_driven_font_size))
                             logger.debug(
-                                f"balloon_fill region {region_idx}: line-driven no_br layout, seed_segments={seed_segments}, "
+                                f"balloon_fill region {region_idx}: line-driven no_br layout, "
                                 f"result_segments={no_br_result.n_segments}, font={layout_target_font_size}, "
                                 f"required={no_br_result.required_width:.1f}x{no_br_result.required_height:.1f}"
                             )
@@ -1315,6 +1456,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             min_font_size = max(min_font_size, preferred_font_size)
 
                         # 调试用途：记录“超出范围候选框”（较大字号候选但不满足蒙版约束）
+                        preferred_fits = False
                         preferred_dst_points = _calc_region_dst_points_for_font(
                             region=region,
                             font_size=preferred_font_size,
@@ -1445,20 +1587,18 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 # 检测是否为替换翻译模式
                 is_replace_mode = config.cli.replace_translation if (config and hasattr(config, 'cli')) else False
                 
-                # 增强逻辑：如果是替换翻译模式 + 严格模式，且OCR检测为单行（len(region.lines) == 1）
-                # 强制使用无限宽度（不换行），以复刻原图的单行结构
-                is_single_line = len(region.lines) == 1
-                force_single_line_no_wrap = is_replace_mode and is_single_line
+                force_single_line_no_wrap = is_replace_mode and should_force_no_wrap_single_region(region)
+                if is_replace_mode and len(region.lines) == 1 and not force_single_line_no_wrap:
+                    logger.debug("[STRICT MODE] 替换模式单行区域检测到方向改写，允许自动换行")
 
                 use_ai_break = (config.render.disable_auto_wrap and has_br) or force_single_line_no_wrap
 
                 if not has_br:
                     bubble_width, bubble_height = region.unrotated_size
-                    seed_segments = max(1, len(region.texts))
                     no_br_result = solve_no_br_layout(
                         text=region.translation,
                         horizontal=render_horizontally,
-                        seed_segments=seed_segments,
+                        seed_segments=0,
                         seed_font_size=target_font_size,
                         bubble_width=bubble_width,
                         bubble_height=bubble_height,
@@ -1468,10 +1608,22 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         target_lang=region.target_lang,
                         config=config,
                         letter_spacing_multiplier=letter_spacing_multiplier,
+                        adjust_font_size=False,
                     )
                     region.translation = no_br_result.text_with_br
 
-                    layout_font_size = max(no_br_result.font_size, min_shrink_font_size)
+                    layout_font_size, line_driven_font_size = _select_preserved_line_layout_font(
+                        base_font_size=target_font_size,
+                        width=float(bubble_width),
+                        height=float(bubble_height),
+                        text=region.translation,
+                        is_horizontal=render_horizontally,
+                        line_spacing=line_spacing_multiplier,
+                        config=config,
+                        target_lang=region.target_lang,
+                        letter_spacing=letter_spacing_multiplier,
+                    )
+                    layout_font_size = max(layout_font_size, min_shrink_font_size)
                     final_font_size = _apply_final_font_constraints(layout_font_size, config)
                     dst_points = _calc_region_dst_points_for_font(
                         region=region,
@@ -1732,12 +1884,31 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                                 letter_spacing_multiplier=letter_spacing_multiplier,
                                 target_lang=region.target_lang,
                                 config=config,
+                                adjust_font_size=False,
                             )
                             region.translation = no_br_result.text_with_br
-                            target_font_size = no_br_result.font_size
-                            n = no_br_result.n_segments
-                            required_width = no_br_result.required_width
-                            required_height = no_br_result.required_height
+                            target_font_size, line_driven_font_size = _select_preserved_line_layout_font(
+                                base_font_size=target_font_size,
+                                width=float(bubble_width),
+                                height=float(bubble_height),
+                                text=region.translation,
+                                is_horizontal=True,
+                                line_spacing=line_spacing_multiplier,
+                                config=config,
+                                target_lang=region.target_lang,
+                                letter_spacing=letter_spacing_multiplier,
+                            )
+                            required_width, required_height, n = calc_box_from_font(
+                                target_font_size,
+                                region.translation,
+                                True,
+                                line_spacing_multiplier,
+                                config,
+                                region.target_lang,
+                                center=None,
+                                angle=0,
+                                letter_spacing=letter_spacing_multiplier,
+                            )
                             logger.debug(
                                 f"[SMART_SCALING] Region {region_idx}: 横排融合断句后 n={n}, "
                                 f"font={target_font_size}, required={required_width:.1f}x{required_height:.1f}"
@@ -1812,12 +1983,31 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                                 letter_spacing_multiplier=letter_spacing_multiplier,
                                 target_lang=region.target_lang,
                                 config=config,
+                                adjust_font_size=False,
                             )
                             region.translation = no_br_result.text_with_br
-                            target_font_size = no_br_result.font_size
-                            n = no_br_result.n_segments
-                            required_width = no_br_result.required_width
-                            required_height = no_br_result.required_height
+                            target_font_size, line_driven_font_size = _select_preserved_line_layout_font(
+                                base_font_size=target_font_size,
+                                width=float(bubble_width),
+                                height=float(bubble_height),
+                                text=region.translation,
+                                is_horizontal=False,
+                                line_spacing=line_spacing_multiplier,
+                                config=config,
+                                target_lang=region.target_lang,
+                                letter_spacing=letter_spacing_multiplier,
+                            )
+                            required_width, required_height, n = calc_box_from_font(
+                                target_font_size,
+                                region.translation,
+                                False,
+                                line_spacing_multiplier,
+                                config,
+                                region.target_lang,
+                                center=None,
+                                angle=0,
+                                letter_spacing=letter_spacing_multiplier,
+                            )
                             logger.debug(
                                 f"[SMART_SCALING] Region {region_idx}: 竖排融合断句后 n={n}, "
                                 f"font={target_font_size}, required={required_width:.1f}x{required_height:.1f}"
@@ -2377,21 +2567,3 @@ def render(
     
     return img
 
-async def dispatch_eng_render(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '', line_spacing: int = 0, disable_font_border: bool = False) -> np.ndarray:
-    if len(text_regions) == 0:
-        return img_canvas
-
-    if not font_path:
-        font_path = os.path.join(BASE_PATH, 'fonts/comic shanns 2.ttf')
-    text_render.set_font(font_path)
-
-    return render_textblock_list_eng(img_canvas, text_regions, line_spacing=line_spacing, size_tol=1.2, original_img=original_img, downscale_constraint=0.8,disable_font_border=disable_font_border)
-
-async def dispatch_eng_render_pillow(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '') -> np.ndarray:
-    if len(text_regions) == 0:
-        return img_canvas
-
-    if not font_path:
-        font_path = os.path.join(BASE_PATH, 'fonts/NotoSansMonoCJK-VF.ttf.ttc')
-
-    return render_textblock_list_eng_pillow(font_path, img_canvas, text_regions, original_img=original_img, downscale_constraint=0.95)

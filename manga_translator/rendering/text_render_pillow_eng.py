@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..utils import TextBlock
 from .ballon_extractor import extract_ballon_region
-from .text_render_eng import seg_eng
+from .text_render_eng import _write_region_br_from_lines, seg_eng
 
 
 def merge_seg_eng(text: str, font, bbox_width, size_ratio=1.2) -> List[str]:
@@ -203,6 +203,7 @@ def render_textblock_list_eng(
 
         # Create text layer
         bbox_center_x, bbox_center_y = (xyxy[0] + xyxy[2]) / 2, (xyxy[1] + xyxy[3]) / 2
+        _write_region_br_from_lines(region, words)
         words_text = '\n'.join(words)
         line_spacing_px = int(font.size * 0.01)
         padding = (font.size + sw) * 4
