@@ -117,12 +117,14 @@ class RegionTextItem(QGraphicsItemGroup):
         self._drag_start_pos = QPointF()
         self._drag_start_polygons: List[QPolygonF] = []
         self._drag_start_rotation = 0.0
+        self._drag_raw_rotation = 0.0
         self._drag_start_visual_center = QPointF()
         self._drag_start_white_frame_local = None
         self._drag_start_scene_pos = QPointF()
         self._drag_start_pivot_scene = QPointF()
         self._drag_start_text_item_pos = QPointF()
         self._drag_start_white_handle_world = None
+        self._drag_last_angle_rad = 0.0
 
         # 显示
         self._polygons_visible = True
@@ -496,6 +498,8 @@ class RegionTextItem(QGraphicsItemGroup):
         self._drag_start_white_handle_world = None
         self._drag_start_text_item_pos = QPointF()
         self._drag_start_pivot_scene = QPointF()
+        self._drag_raw_rotation = 0.0
+        self._drag_last_angle_rad = 0.0
 
     def _reset_interaction_state(self):
         self._interaction_mode = "none"
@@ -1002,6 +1006,8 @@ class RegionTextItem(QGraphicsItemGroup):
                 self._drag_start_pivot_scene = self.mapToScene(self._drag_start_center)
                 vec = event.scenePos() - self._drag_start_pivot_scene
                 self._drag_start_angle_rad = np.arctan2(vec.y(), vec.x())
+                self._drag_last_angle_rad = self._drag_start_angle_rad
+                self._drag_raw_rotation = self.rotation()
             else:
                 self._reset_interaction_state()
         else:
@@ -1055,11 +1061,13 @@ class RegionTextItem(QGraphicsItemGroup):
         vec = event.scenePos() - center_scene
         new_angle_rad = np.arctan2(vec.y(), vec.x())
         delta_rad = np.arctan2(
-            np.sin(new_angle_rad - self._drag_start_angle_rad),
-            np.cos(new_angle_rad - self._drag_start_angle_rad)
+            np.sin(new_angle_rad - self._drag_last_angle_rad),
+            np.cos(new_angle_rad - self._drag_last_angle_rad)
         )
         delta_deg = np.degrees(delta_rad)
-        new_rot = self._drag_start_rotation + delta_deg
+        self._drag_last_angle_rad = new_angle_rad
+        self._drag_raw_rotation += delta_deg
+        new_rot = self._drag_raw_rotation
 
         # --- 角度吸附逻辑 ---
         snap_targets = [0.0, 90.0, 180.0, 270.0, 360.0, -90.0, -180.0, -270.0, -360.0]
